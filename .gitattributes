@@ -1,5 +1,6 @@
-# Set default behavior to automatically normalize line endings
-* text=auto
+# Set default behavior to automatically normalize line endings.
+# Keep text files as CRLF by default to match .editorconfig and Windows-only tooling.
+* text=auto eol=crlf
 
 # C# source files
 *.cs text diff=csharp

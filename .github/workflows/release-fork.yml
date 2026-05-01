@@ -127,18 +127,17 @@ jobs:
           -p:Version=${{ env.VERSION }} `
           -p:AssemblyVersion=${{ env.VERSION }}.0 `
           -p:FileVersion=${{ env.VERSION }}.0 `
-          -p:AssemblyName=mcp-excel `
           -p:NuGetAudit=false `
           --output ./mcp-server-publish
       shell: pwsh
       env:
         APPINSIGHTS_CONNECTION_STRING: ""
 
-    - name: Verify exe exists
+    - name: Rename exe to mcp-excel.exe
       run: |
-        $expectedExe = "mcp-server-publish/mcp-excel.exe"
+        $expectedExe = "mcp-server-publish/Sbroenne.ExcelMcp.McpServer.exe"
         if (Test-Path $expectedExe) {
-          Write-Host "Executable found at: $expectedExe"
+          Rename-Item $expectedExe "mcp-excel.exe"
         } else {
           Write-Error "Expected executable not found at: $expectedExe"
           Write-Host "Contents of mcp-server-publish/:"
@@ -204,9 +203,21 @@ jobs:
           -p:Version=${{ env.VERSION }} `
           -p:AssemblyVersion=${{ env.VERSION }}.0 `
           -p:FileVersion=${{ env.VERSION }}.0 `
-          -p:AssemblyName=excelcli `
           -p:NuGetAudit=false `
           --output ./cli-publish
+      shell: pwsh
+
+    - name: Rename CLI exe to excelcli.exe
+      run: |
+        $expectedExe = "cli-publish/ExcelMcp.CLI.exe"
+        if (Test-Path $expectedExe) {
+          Rename-Item $expectedExe "excelcli.exe"
+        } else {
+          Write-Error "Expected executable not found at: $expectedExe"
+          Write-Host "Contents of cli-publish/:"
+          Get-ChildItem "cli-publish/" | Select-Object Name
+          exit 1
+        }
       shell: pwsh
 
     - name: Create CLI ZIP

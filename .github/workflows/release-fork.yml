@@ -207,19 +207,6 @@ jobs:
           --output ./cli-publish
       shell: pwsh
 
-    - name: Rename CLI exe to excelcli.exe
-      run: |
-        $expectedExe = "cli-publish/ExcelMcp.CLI.exe"
-        if (Test-Path $expectedExe) {
-          Rename-Item $expectedExe "excelcli.exe"
-        } else {
-          Write-Error "Expected executable not found at: $expectedExe"
-          Write-Host "Contents of cli-publish/:"
-          Get-ChildItem "cli-publish/" | Select-Object Name
-          exit 1
-        }
-      shell: pwsh
-
     - name: Create CLI ZIP
       run: |
         $version = $env:VERSION

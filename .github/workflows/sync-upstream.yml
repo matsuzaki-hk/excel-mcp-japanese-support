@@ -1,0 +1,165 @@
+name: Sync with Upstream
+
+# 定期的に本家リポジトリの変更を追跡してマージする
+# 競合が発生した場合はIssueを作成して通知する
+
+on:
+  schedule:
+    # 毎週月曜日午前9時（日本時間）に実行
+    - cron: '0 0 * * 1'
+  workflow_dispatch:  # 手動実行も可能
+
+jobs:
+  sync:
+    name: Sync with Upstream
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/sbroenne/mcp-server-excel.git
+          git fetch upstream
+
+      - name: Check for upstream changes
+        id: check_changes
+        run: |
+          echo "Checking for upstream changes..."
+          UPSTREAM_COMMIT=$(git rev-parse upstream/main)
+          LOCAL_COMMIT=$(git rev-parse origin/main)
+          
+          if [ "$UPSTREAM_COMMIT" = "$LOCAL_COMMIT" ]; then
+            echo "No upstream changes detected"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream changes detected"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "upstream_commit=$UPSTREAM_COMMIT" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Attempt merge
+        id: merge
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          echo "Attempting to merge upstream/main into main..."
+          git checkout main
+          
+          # マージを試みる
+          if git merge upstream/main --no-edit; then
+            echo "Merge successful"
+            echo "merge_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "Merge failed - conflicts detected"
+            echo "merge_success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if Japanese support changes conflict
+        id: check_conflict
+        if: steps.merge.outputs.merge_success == 'false'
+        run: |
+          echo "Checking for conflicts in Japanese support changes..."
+          
+          # TableCommands.csに競合があるか確認
+          if git diff --name-only | grep -q "TableCommands.cs"; then
+            echo "Conflict detected in TableCommands.cs"
+            echo "has_table_conflict=true" >> $GITHUB_OUTPUT
+          else
+            echo "No conflict in TableCommands.cs"
+            echo "has_table_conflict=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Resolve TableCommands.cs conflict (keep Japanese support)
+        id: resolve_conflict
+        if: steps.check_conflict.outputs.has_table_conflict == 'true'
+        run: |
+          echo "Resolving TableCommands.cs conflict by keeping Japanese support..."
+          
+          # 競合を解決するスクリプト
+          git checkout --ours src/ExcelMcp.Core/Commands/Table/TableCommands.cs
+          git add src/ExcelMcp.Core/Commands/Table/TableCommands.cs
+          
+          if git commit -m "Merge upstream/main (resolving TableCommands.cs conflict - keeping Japanese support)"; then
+            echo "Conflict resolved successfully"
+            echo "resolution_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "Failed to resolve conflict"
+            echo "resolution_success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push merge
+        if: steps.merge.outputs.merge_success == 'true' || steps.resolve_conflict.outputs.resolution_success == 'true'
+        run: |
+          echo "Pushing merge to origin/main..."
+          git push origin main
+
+      - name: Create issue for unresolved conflicts
+        if: steps.merge.outputs.merge_success == 'false' && steps.resolve_conflict.outputs.resolution_success != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueTitle = '⚠️ Upstream sync failed - manual intervention required';
+            const issueBody = `
+            ## Upstream Sync Failed
+            
+            The automated sync with upstream (sbroenne/mcp-server-excel) failed due to merge conflicts.
+            
+            ### Details
+            - Upstream commit: ${{ steps.check_changes.outputs.upstream_commit }}
+            - Conflict detected in: TableCommands.cs (Japanese support changes)
+            
+            ### Action Required
+            Please manually resolve the conflicts and ensure the Japanese support changes are preserved:
+            - TableCommands.cs line 15: Keep the regex \`^[\p{L}_][\p{L}\p{N}_]*$\` (not \`^[a-zA-Z_][a-zA-Z0-9_]*$\`)
+            - TableCommands.cs line 45: Keep the error message mentioning Unicode support
+            
+            ### Manual Resolution Steps
+            \`\`\`bash
+            cd mcp-server-excel
+            git checkout main
+            git fetch upstream
+            git merge upstream/main
+            # Resolve conflicts manually
+            git push origin main
+            \`\`\`
+            
+            ---
+            *This issue was automatically created by the sync-upstream workflow*
+            `;
+            
+            // Check if similar issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: ['sync-failure']
+            });
+            
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: issueBody,
+                labels: ['sync-failure', 'bug']
+              });
+            }
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create success comment if no changes
+        if: steps.check_changes.outputs.has_changes == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('No upstream changes to sync');

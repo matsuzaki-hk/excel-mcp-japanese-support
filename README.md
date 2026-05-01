@@ -12,36 +12,53 @@
 
 **Automate Excel with AI (Japanese Support)** — A Model Context Protocol (MCP) server for comprehensive Excel automation through conversational AI, with full support for Japanese characters in table names, sheet names, and other Excel identifiers.
 
-## 🇯🇵 Japanese Support Features
+## 🇯🇵 Japanese Support Features / 日本語サポート機能
 
 This fork adds Japanese language support to the original Excel MCP Server:
 
-- ✅ **Japanese Table Names** - Create Excel tables with Japanese names (e.g., "売上データ", "生産計画")
-- ✅ **Unicode Character Support** - Full Unicode support for table names using regex pattern `^[\p{L}_][\p{L}\p{N}_]*$`
-- ✅ **Automatic Upstream Sync** - Weekly automatic sync with upstream repository
-- ✅ **Conflict Resolution** - Automatic resolution of merge conflicts to preserve Japanese support
+このフォークは元のExcel MCP Serverに日本語サポートを追加します：
 
-### Changes from Original
+- ✅ **Japanese Table Names** - Create Excel tables with Japanese names (e.g., "売上データ", "生産計画")
+  - **日本語テーブル名** - 日本語の名前でExcelテーブルを作成できます（例：「売上データ」「生産計画」）
+- ✅ **Unicode Character Support** - Full Unicode support for table names using regex pattern `^[\p{L}_][\p{L}\p{N}_]*$`
+  - **Unicode文字サポート** - 正規表現 `^[\p{L}_][\p{L}\p{N}_]*$` を使用してテーブル名に完全なUnicodeサポートを提供
+- ✅ **Automatic Upstream Sync** - Weekly automatic sync with upstream repository
+  - **自動アップストリーム同期** - 毎週自動的に本家リポジトリと同期
+- ✅ **Conflict Resolution** - Automatic resolution of merge conflicts to preserve Japanese support
+  - **競合解決** - 日本語サポートを保持するためのマージ競合の自動解決
+
+### Changes from Original / 元のリポジトリからの変更点
 
 - Modified `src/ExcelMcp.Core/Commands/Table/TableCommands.cs`:
   - Changed table name validation regex from `^[a-zA-Z_][a-zA-Z0-9_]*$` to `^[\p{L}_][\p{L}\p{N}_]*$`
   - Updated error messages to indicate Unicode character support
   - Added automatic sync workflow with conflict resolution
+  - `src/ExcelMcp.Core/Commands/Table/TableCommands.cs` を修正：
+    - テーブル名検証正規表現を `^[a-zA-Z_][a-zA-Z0-9_]*$` から `^[\p{L}_][\p{L}\p{N}_]*$` に変更
+    - Unicode文字サポートを示すエラーメッセージを更新
+    - 競合解決付きの自動同期ワークフローを追加
 
-### About This Fork
+### About This Fork / このフォークについて
 
 This is a **fork** of the original [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) repository maintained by [sbroenne](https://github.com/sbroenne).
 
-**Purpose:**
+これは [sbroenne](https://github.com/sbroenne) が管理する元の [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) リポジトリの**フォーク**です。
+
+**Purpose / 目的:**
 The original Excel MCP Server only supports ASCII characters in table names, which prevents Japanese users from using natural Japanese table names. This fork adds full Unicode support to enable Japanese table names and other identifiers.
+元のExcel MCP Serverはテーブル名にASCII文字のみをサポートしており、日本語ユーザーが自然な日本語テーブル名を使用できませんでした。このフォークは完全なUnicodeサポートを追加して、日本語テーブル名やその他の識別子を有効にします。
 
-**Fork Maintenance:**
+**Fork Maintenance / フォークの保守:**
 - Automatic weekly sync with upstream repository (every Monday 9:00 AM JST)
+  - 毎週月曜日午前9時（日本時間）に本家リポジトリと自動同期
 - Automatic conflict resolution to preserve Japanese support changes
+  - 日本語サポートの変更を保持するための自動競合解決
 - Manual sync also available via GitHub Actions
+  - GitHub Actionsを介した手動同期も可能
 
-**Original Author:**
+**Original Author / 原作者:**
 [sbroenne](https://github.com/sbroenne) - Original Excel MCP Server creator
+[sbroenne](https://github.com/sbroenne) - 元のExcel MCP Server作成者
 
 **MCP Server for Excel** enables AI assistants (GitHub Copilot, Claude, ChatGPT) to automate Excel through natural language commands. Automate Power Query, DAX measures, VBA macros, PivotTables, Charts, formatting, and data transformations (25 tools with 230 operations).
 

@@ -28,9 +28,20 @@ This fork adds Japanese language support to the original Excel MCP Server:
   - Updated error messages to indicate Unicode character support
   - Added automatic sync workflow with conflict resolution
 
-### Upstream Repository
+### About This Fork
 
-Original project: [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel)
+This is a **fork** of the original [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) repository maintained by [sbroenne](https://github.com/sbroenne).
+
+**Purpose:**
+The original Excel MCP Server only supports ASCII characters in table names, which prevents Japanese users from using natural Japanese table names. This fork adds full Unicode support to enable Japanese table names and other identifiers.
+
+**Fork Maintenance:**
+- Automatic weekly sync with upstream repository (every Monday 9:00 AM JST)
+- Automatic conflict resolution to preserve Japanese support changes
+- Manual sync also available via GitHub Actions
+
+**Original Author:**
+[sbroenne](https://github.com/sbroenne) - Original Excel MCP Server creator
 
 **MCP Server for Excel** enables AI assistants (GitHub Copilot, Claude, ChatGPT) to automate Excel through natural language commands. Automate Power Query, DAX measures, VBA macros, PivotTables, Charts, formatting, and data transformations (25 tools with 230 operations).
 

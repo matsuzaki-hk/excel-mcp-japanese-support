@@ -1,18 +1,36 @@
-# ExcelMcp - MCP Server for Microsoft Excel
+# ExcelMcp (Japanese Support Fork) - MCP Server for Microsoft Excel
 
-[![VS Code Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/sbroenne.excel-mcp?label=VS%20Code%20Installs)](https://marketplace.visualstudio.com/items?itemName=sbroenne.excel-mcp)
-[![Downloads](https://img.shields.io/github/downloads/sbroenne/mcp-server-excel/total?label=GitHub%20Downloads)](https://github.com/sbroenne/mcp-server-excel/releases)
+> **🇯🇵 Japanese Support Fork** - This is a fork of [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) with Japanese language support for Excel table names and other identifiers.
 
-[![Build MCP Server](https://github.com/sbroenne/mcp-server-excel/actions/workflows/build-mcp-server.yml/badge.svg)](https://github.com/sbroenne/mcp-server-excel/actions/workflows/build-mcp-server.yml)
-[![Build CLI](https://github.com/sbroenne/mcp-server-excel/actions/workflows/build-cli.yml/badge.svg)](https://github.com/sbroenne/mcp-server-excel/actions/workflows/build-cli.yml)
-[![Release](https://img.shields.io/github/v/release/sbroenne/mcp-server-excel)](https://github.com/sbroenne/mcp-server-excel/releases/latest)
+[![VS Code Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/sbroenne.excel-mcp?label=VS%20Code%20Installs)](https://marketplace.visualstudio.com/items?itemName=sbroenne.excel-mpc)
+[![Downloads](https://img.shields.io/github/downloads/sbroenne/mcp-server-excel/total?label=GitHub%20Downloads)](https://github.com/sbroenne/mcp-server-excel/releases/latest)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-10-blue.svg)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/sbroenne/mcp-server-excel)
-[![Built with Copilot](https://img.shields.io/badge/Built%20with-GitHub%20Copilot-0366d6.svg)](https://copilot.github.com/)
+[![Fork Status](https://img.shields.io/badge/Fork-Japanese%20Support-green.svg)](https://github.com/matsuzaki-hk/mcp-server-excel)
 
-**Automate Excel with AI** — A Model Context Protocol (MCP) server for comprehensive Excel automation through conversational AI.
+**Automate Excel with AI (Japanese Support)** — A Model Context Protocol (MCP) server for comprehensive Excel automation through conversational AI, with full support for Japanese characters in table names, sheet names, and other Excel identifiers.
+
+## 🇯🇵 Japanese Support Features
+
+This fork adds Japanese language support to the original Excel MCP Server:
+
+- ✅ **Japanese Table Names** - Create Excel tables with Japanese names (e.g., "売上データ", "生産計画")
+- ✅ **Unicode Character Support** - Full Unicode support for table names using regex pattern `^[\p{L}_][\p{L}\p{N}_]*$`
+- ✅ **Automatic Upstream Sync** - Weekly automatic sync with upstream repository
+- ✅ **Conflict Resolution** - Automatic resolution of merge conflicts to preserve Japanese support
+
+### Changes from Original
+
+- Modified `src/ExcelMcp.Core/Commands/Table/TableCommands.cs`:
+  - Changed table name validation regex from `^[a-zA-Z_][a-zA-Z0-9_]*$` to `^[\p{L}_][\p{L}\p{N}_]*$`
+  - Updated error messages to indicate Unicode character support
+  - Added automatic sync workflow with conflict resolution
+
+### Upstream Repository
+
+Original project: [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel)
 
 **MCP Server for Excel** enables AI assistants (GitHub Copilot, Claude, ChatGPT) to automate Excel through natural language commands. Automate Power Query, DAX measures, VBA macros, PivotTables, Charts, formatting, and data transformations (25 tools with 230 operations).
 

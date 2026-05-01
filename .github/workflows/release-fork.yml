@@ -127,17 +127,18 @@ jobs:
           -p:Version=${{ env.VERSION }} `
           -p:AssemblyVersion=${{ env.VERSION }}.0 `
           -p:FileVersion=${{ env.VERSION }}.0 `
+          -p:AssemblyName=mcp-excel `
           -p:NuGetAudit=false `
           --output ./mcp-server-publish
       shell: pwsh
       env:
         APPINSIGHTS_CONNECTION_STRING: ""
 
-    - name: Rename exe to mcp-excel.exe
+    - name: Verify exe exists
       run: |
-        $expectedExe = "mcp-server-publish/Sbroenne.ExcelMcp.McpServer.exe"
+        $expectedExe = "mcp-server-publish/mcp-excel.exe"
         if (Test-Path $expectedExe) {
-          Rename-Item $expectedExe "mcp-excel.exe"
+          Write-Host "Executable found at: $expectedExe"
         } else {
           Write-Error "Expected executable not found at: $expectedExe"
           Write-Host "Contents of mcp-server-publish/:"
@@ -203,6 +204,7 @@ jobs:
           -p:Version=${{ env.VERSION }} `
           -p:AssemblyVersion=${{ env.VERSION }}.0 `
           -p:FileVersion=${{ env.VERSION }}.0 `
+          -p:AssemblyName=excelcli `
           -p:NuGetAudit=false `
           --output ./cli-publish
       shell: pwsh

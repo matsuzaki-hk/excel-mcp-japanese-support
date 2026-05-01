@@ -1,0 +1,308 @@
+name: Release Fork (GitHub Only)
+
+# Fork-specific release workflow - creates GitHub release only
+# Skips NuGet, VS Code Marketplace, and MCP Registry publishing
+# This is for the Japanese support fork
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        default: 'patch'
+        options:
+          - major
+          - minor
+          - patch
+      custom_version:
+        description: 'Custom version (e.g., 1.0.0-ja.1, overrides version_bump)'
+        required: false
+        type: string
+
+env:
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+  # Calculate Version
+  version:
+    name: Calculate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.calculate_version.outputs.version }}
+      tag: ${{ steps.calculate_version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version
+        id: calculate_version
+        run: |
+          if [ -n "${{ inputs.custom_version }}" ]; then
+            VERSION="${{ inputs.custom_version }}"
+            echo "Using custom version: ${VERSION}"
+          else
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+            echo "Latest tag: ${LATEST_TAG}"
+            CURRENT_VERSION="${LATEST_TAG#v}"
+            echo "Current version: ${CURRENT_VERSION}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+            case "${{ inputs.version_bump }}" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            echo "New version: ${VERSION}"
+          fi
+          TAG="v${VERSION}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  # Build MCP Server
+  build-mcp-server:
+    name: MCP Server
+    needs: [version]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Set Version
+      run: |
+        $version = "${{ needs.version.outputs.version }}"
+        echo "VERSION=$version" >> $env:GITHUB_ENV
+      shell: pwsh
+
+    - name: Update Project Versions
+      run: |
+        $version = $env:VERSION
+        $serverJsonPath = "src/ExcelMcp.McpServer/.mcp/server.json"
+        $serverContent = Get-Content $serverJsonPath -Raw
+        $serverContent = $serverContent -replace '("version":\s*)"[\d\.]+"(\s*,\s*\n\s*"packages")' , "`$1`"$version`"`$2"
+        $serverContent = $serverContent -replace '("identifier":\s*"Sbroenne\.ExcelMcp\.McpServer",\s*\n\s*"version":\s*)"[\d\.]+"', "`$1`"$version`"" 
+        Set-Content $serverJsonPath $serverContent
+      shell: pwsh
+
+    - name: Restore
+      run: dotnet restore src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj
+
+    - name: Build
+      run: dotnet build src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release --no-restore -p:Version=${{ env.VERSION }} -p:AssemblyVersion=${{ env.VERSION }}.0 -p:FileVersion=${{ env.VERSION }}.0
+      env:
+        APPINSIGHTS_CONNECTION_STRING: ""
+
+    - name: Publish MCP Server
+      run: |
+        dotnet publish src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj `
+          --configuration Release `
+          --runtime win-x64 `
+          --self-contained true `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:PublishTrimmed=false `
+          -p:PublishReadyToRun=false `
+          -p:Version=${{ env.VERSION }} `
+          -p:AssemblyVersion=${{ env.VERSION }}.0 `
+          -p:FileVersion=${{ env.VERSION }}.0 `
+          -p:NuGetAudit=false `
+          --output ./mcp-server-publish
+      shell: pwsh
+      env:
+        APPINSIGHTS_CONNECTION_STRING: ""
+
+    - name: Rename exe to mcp-excel.exe
+      run: |
+        $expectedExe = "mcp-server-publish/Sbroenne.ExcelMcp.McpServer.exe"
+        if (Test-Path $expectedExe) {
+          Rename-Item $expectedExe "mcp-excel.exe"
+        } else {
+          Write-Error "Expected executable not found at: $expectedExe"
+          Write-Host "Contents of mcp-server-publish/:"
+          Get-ChildItem "mcp-server-publish/" | Select-Object Name
+          exit 1
+        }
+      shell: pwsh
+
+    - name: Create Release Package
+      run: |
+        $version = $env:VERSION
+        New-Item -ItemType Directory -Path "mcp-server-release" -Force
+        Copy-Item "mcp-server-publish/mcp-excel.exe" "mcp-server-release/"
+        Copy-Item "README.md" "mcp-server-release/"
+        Copy-Item "LICENSE" "mcp-server-release/"
+        Compress-Archive -Path "mcp-server-release/*" -DestinationPath "ExcelMcp-MCP-Server-$version-windows.zip"
+      shell: pwsh
+
+    - name: Upload ZIP Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: mcp-server-zip
+        path: ExcelMcp-MCP-Server-*-windows.zip
+
+  # Build CLI
+  build-cli:
+    name: CLI
+    needs: [version]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Set Version
+      run: |
+        $version = "${{ needs.version.outputs.version }}"
+        echo "VERSION=$version" >> $env:GITHUB_ENV
+      shell: pwsh
+
+    - name: Restore
+      run: dotnet restore src/ExcelMcp.CLI/ExcelMcp.CLI.csproj
+
+    - name: Build CLI
+      run: dotnet build src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --configuration Release --no-restore -p:Version=${{ env.VERSION }} -p:AssemblyVersion=${{ env.VERSION }}.0 -p:FileVersion=${{ env.VERSION }}.0
+
+    - name: Publish CLI
+      run: |
+        dotnet publish src/ExcelMcp.CLI/ExcelMcp.CLI.csproj `
+          --configuration Release `
+          --runtime win-x64 `
+          --self-contained true `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:PublishTrimmed=false `
+          -p:PublishReadyToRun=false `
+          -p:Version=${{ env.VERSION }} `
+          -p:AssemblyVersion=${{ env.VERSION }}.0 `
+          -p:FileVersion=${{ env.VERSION }}.0 `
+          -p:NuGetAudit=false `
+          --output ./cli-publish
+      shell: pwsh
+
+    - name: Create CLI ZIP
+      run: |
+        $version = $env:VERSION
+        New-Item -ItemType Directory -Path "cli-release" -Force
+        Copy-Item "cli-publish/excelcli.exe" "cli-release/"
+        Copy-Item "README.md" "cli-release/"
+        Copy-Item "LICENSE" "cli-release/"
+        Compress-Archive -Path "cli-release/*" -DestinationPath "ExcelMcp-CLI-$version-windows.zip"
+      shell: pwsh
+
+    - name: Upload CLI ZIP Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cli-zip
+        path: ExcelMcp-CLI-*-windows.zip
+
+  # Create Git Tag
+  create-tag:
+    name: Create Git Tag
+    needs: [version, build-mcp-server, build-cli]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        run: |
+          TAG="${{ needs.version.outputs.tag }}"
+          echo "Creating tag: $TAG"
+          git tag -a "$TAG" -m "Release $TAG (Japanese Support Fork)"
+          git push origin "$TAG"
+
+  # Create GitHub Release
+  create-release:
+    name: Create GitHub Release
+    needs: [version, create-tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set Version
+      run: |
+        echo "VERSION=${{ needs.version.outputs.version }}" >> $GITHUB_ENV
+
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      run: |
+        VERSION=${{ env.VERSION }}
+        TAG=${{ needs.version.outputs.tag }}
+
+        cat > release_notes.md << 'NOTES'
+        ## ExcelMcp ${{ env.VERSION }} (Japanese Support Fork)
+
+        🇯🇵 This is the Japanese support fork of [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel).
+
+        ### What's New
+        - Full Unicode support for Japanese table names
+        - Automatic upstream sync with conflict resolution
+        - See README.md for details
+
+        ### Installation
+        **MCP Server:** Download \`ExcelMcp-MCP-Server-${{ env.VERSION }}-windows.zip\`, extract \`mcp-excel.exe\`
+        **CLI:** Download \`ExcelMcp-CLI-${{ env.VERSION }}-windows.zip\`, extract \`excelcli.exe\`
+
+        ### Requirements
+        - Windows OS
+        - Microsoft Excel 2016+
+        - No .NET runtime required (standalone executables)
+
+        ### Original Project
+        [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel)
+        NOTES
+
+        ARTIFACTS=""
+        for f in artifacts/mcp-server-zip/*.zip; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done
+        for f in artifacts/cli-zip/*.zip; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done
+
+        echo "Creating release with artifacts:$ARTIFACTS"
+
+        gh release create "$TAG" $ARTIFACTS \
+          --title "ExcelMcp $VERSION (Japanese Support Fork)" \
+          --notes-file release_notes.md
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

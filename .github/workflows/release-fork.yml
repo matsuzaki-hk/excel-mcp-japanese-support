@@ -110,10 +110,13 @@ jobs:
       shell: pwsh
 
     - name: Restore
-      run: dotnet restore src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj
+      run: dotnet restore src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --no-cache
+
+    - name: Clean
+      run: dotnet clean src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release
 
     - name: Build
-      run: dotnet build src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release --no-restore -p:Version=${{ env.VERSION }} -p:AssemblyVersion=${{ env.VERSION }}.0 -p:FileVersion=${{ env.VERSION }}.0
+      run: dotnet build src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release --no-restore --no-incremental -p:Version=${{ env.VERSION }} -p:AssemblyVersion=${{ env.VERSION }}.0 -p:FileVersion=${{ env.VERSION }}.0
       env:
         APPINSIGHTS_CONNECTION_STRING: ""
 
@@ -190,10 +193,13 @@ jobs:
       shell: pwsh
 
     - name: Restore
-      run: dotnet restore src/ExcelMcp.CLI/ExcelMcp.CLI.csproj
+      run: dotnet restore src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --no-cache
+
+    - name: Clean CLI
+      run: dotnet clean src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --configuration Release
 
     - name: Build CLI
-      run: dotnet build src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --configuration Release --no-restore -p:Version=${{ env.VERSION }} -p:AssemblyVersion=${{ env.VERSION }}.0 -p:FileVersion=${{ env.VERSION }}.0
+      run: dotnet build src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --configuration Release --no-restore --no-incremental -p:Version=${{ env.VERSION }} -p:AssemblyVersion=${{ env.VERSION }}.0 -p:FileVersion=${{ env.VERSION }}.0
 
     - name: Publish CLI
       run: |

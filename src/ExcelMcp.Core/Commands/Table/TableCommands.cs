@@ -10,9 +10,9 @@ public partial class TableCommands : ITableCommands, ITableColumnCommands
     #region Constants and Validation
 
     /// <summary>
-    /// Regex pattern for valid table names
+    /// Regex pattern for valid table names (supports Unicode characters including Japanese)
     /// </summary>
-    private static readonly Regex TableNameRegex = new(@"^[a-zA-Z_][a-zA-Z0-9_]*$", RegexOptions.Compiled);
+    private static readonly Regex TableNameRegex = new(@"^[\p{L}_][\p{L}\p{N}_]*$", RegexOptions.Compiled);
 
     /// <summary>
     /// Maximum allowed table name length
@@ -42,7 +42,7 @@ public partial class TableCommands : ITableCommands, ITableColumnCommands
         {
             throw new ArgumentException(
                 $"Invalid table name '{tableName}'. Table names must start with a letter or underscore, " +
-                "and can only contain letters, numbers, and underscores (no spaces or special characters).",
+                "and can only contain letters, numbers, and underscores (Unicode characters including Japanese are supported).",
                 nameof(tableName));
         }
 

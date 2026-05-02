@@ -99,6 +99,16 @@ jobs:
         echo "VERSION=$version" >> $env:GITHUB_ENV
       shell: pwsh
 
+    - name: Debug - Show Git Info
+      run: |
+        Write-Host "Current branch:"
+        git branch --show-current
+        Write-Host "Latest commit:"
+        git log -1 --oneline
+        Write-Host "TableCommands.cs content:"
+        Get-Content src/ExcelMcp.Core/Commands/Table/TableCommands.cs | Select-String "TableNameRegex"
+      shell: pwsh
+
     - name: Update Project Versions
       run: |
         $version = $env:VERSION

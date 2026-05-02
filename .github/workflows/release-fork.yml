@@ -119,6 +119,12 @@ jobs:
         Set-Content $serverJsonPath $serverContent
       shell: pwsh
 
+    - name: Clean All Objects
+      run: |
+        Get-ChildItem -Path . -Directory -Filter "obj" -Recurse | Remove-Item -Recurse -Force
+        Get-ChildItem -Path . -Directory -Filter "bin" -Recurse | Remove-Item -Recurse -Force
+      shell: pwsh
+
     - name: Restore
       run: dotnet restore src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --no-cache
 
@@ -200,6 +206,12 @@ jobs:
       run: |
         $version = "${{ needs.version.outputs.version }}"
         echo "VERSION=$version" >> $env:GITHUB_ENV
+      shell: pwsh
+
+    - name: Clean All Objects CLI
+      run: |
+        Get-ChildItem -Path . -Directory -Filter "obj" -Recurse | Remove-Item -Recurse -Force
+        Get-ChildItem -Path . -Directory -Filter "bin" -Recurse | Remove-Item -Recurse -Force
       shell: pwsh
 
     - name: Restore

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using Excel = Microsoft.Office.Interop.Excel;
 
 namespace Sbroenne.ExcelMcp.ComInterop;
@@ -208,8 +209,11 @@ public static class ComUtilities
                 {
                     sheet = (Excel.Worksheet)sheetsCollection[i];
                     string currentName = sheet.Name;
+                    // Apply Unicode normalization to handle full-width characters properly
+                    string normalizedCurrentName = currentName.Normalize(NormalizationForm.FormC);
+                    string normalizedSheetName = sheetName.Normalize(NormalizationForm.FormC);
 
-                    if (currentName == sheetName)
+                    if (normalizedCurrentName == normalizedSheetName)
                     {
                         // Found match - return it (caller owns it now)
                         var result = sheet;

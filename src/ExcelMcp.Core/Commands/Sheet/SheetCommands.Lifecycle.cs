@@ -32,6 +32,8 @@ public partial class SheetCommands
                     {
                         sheet = sheets.Item(i);
                         string sheetName = sheet.Name;
+                        // Decode Unicode escape sequences in sheet names
+                        sheetName = System.Text.RegularExpressions.Regex.Unescape(sheetName);
                         // Apply Unicode normalization to handle full-width characters properly
                         sheetName = sheetName.Normalize(NormalizationForm.FormC);
                         result.Worksheets.Add(new WorksheetInfo

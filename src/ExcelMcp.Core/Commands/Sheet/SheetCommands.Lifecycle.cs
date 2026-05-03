@@ -2,7 +2,6 @@ using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Models;
 using Excel = Microsoft.Office.Interop.Excel;
-using System.Text;
 
 namespace Sbroenne.ExcelMcp.Core.Commands;
 

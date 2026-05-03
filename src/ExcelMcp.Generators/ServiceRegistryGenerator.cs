@@ -1061,7 +1061,8 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine("    {");
         sb.AppendLine("        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,");
         sb.AppendLine("        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,");
-        sb.AppendLine("        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }");
+        sb.AppendLine("        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },");
+        sb.AppendLine("        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping");
         sb.AppendLine("    };");
         sb.AppendLine();
         sb.AppendLine("    /// <summary>");

@@ -96,7 +96,9 @@ jobs:
     - name: Set Version
       run: |
         $version = "${{ needs.version.outputs.version }}"
+        $numericVersion = $version -replace '^v','' -replace '[^0-9.].*$',''
         echo "VERSION=$version" >> $env:GITHUB_ENV
+        echo "NUMERIC_VERSION=$numericVersion" >> $env:GITHUB_ENV
       shell: pwsh
 
     - name: Update Project Versions
@@ -116,24 +118,23 @@ jobs:
       shell: pwsh
 
     - name: Restore
-      run: dotnet restore src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --no-cache
+      run: dotnet restore src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --no-cache -p:Version=$env:NUMERIC_VERSION.0
+      shell: pwsh
 
     - name: Clean
       run: dotnet clean src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release
 
     - name: Build
       run: |
-        $ver = "${{ env.VERSION }}" -replace '^v','' -replace '[^0-9.].*$',''
-        $asmVer = "$ver.0"
-        dotnet build src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release --no-restore --no-incremental -p:Version=${{ env.VERSION }} -p:AssemblyVersion=$asmVer -p:FileVersion=$asmVer
+        $asmVer = "$env:NUMERIC_VERSION.0"
+        dotnet build src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release --no-restore --no-incremental -p:Version=$env:VERSION -p:AssemblyVersion=$asmVer -p:FileVersion=$asmVer
       shell: pwsh
       env:
         APPINSIGHTS_CONNECTION_STRING: ""
 
     - name: Publish MCP Server
       run: |
-        $ver = "${{ env.VERSION }}" -replace '^v','' -replace '[^0-9.].*$',''
-        $asmVer = "$ver.0"
+        $asmVer = "$env:NUMERIC_VERSION.0"
         dotnet publish src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj `
           --configuration Release `
           --runtime win-x64 `
@@ -142,7 +143,7 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true `
           -p:PublishTrimmed=false `
           -p:PublishReadyToRun=false `
-          -p:Version=${{ env.VERSION }} `
+          -p:Version=$env:VERSION `
           -p:AssemblyVersion=$asmVer `
           -p:FileVersion=$asmVer `
           -p:NuGetAudit=false `
@@ -201,7 +202,9 @@ jobs:
     - name: Set Version
       run: |
         $version = "${{ needs.version.outputs.version }}"
+        $numericVersion = $version -replace '^v','' -replace '[^0-9.].*$',''
         echo "VERSION=$version" >> $env:GITHUB_ENV
+        echo "NUMERIC_VERSION=$numericVersion" >> $env:GITHUB_ENV
       shell: pwsh
 
     - name: Clean All Objects CLI
@@ -211,16 +214,21 @@ jobs:
       shell: pwsh
 
     - name: Restore
-      run: dotnet restore src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --no-cache
+      run: dotnet restore src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --no-cache -p:Version=$env:NUMERIC_VERSION.0
+      shell: pwsh
 
     - name: Clean CLI
       run: dotnet clean src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --configuration Release
 
     - name: Build CLI
-      run: dotnet build src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --configuration Release --no-restore --no-incremental -p:Version=${{ env.VERSION }} -p:AssemblyVersion=${{ env.VERSION }}.0 -p:FileVersion=${{ env.VERSION }}.0
+      run: |
+        $asmVer = "$env:NUMERIC_VERSION.0"
+        dotnet build src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --configuration Release --no-restore --no-incremental -p:Version=$env:VERSION -p:AssemblyVersion=$asmVer -p:FileVersion=$asmVer
+      shell: pwsh
 
     - name: Publish CLI
       run: |
+        $asmVer = "$env:NUMERIC_VERSION.0"
         dotnet publish src/ExcelMcp.CLI/ExcelMcp.CLI.csproj `
           --configuration Release `
           --runtime win-x64 `
@@ -229,9 +237,9 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true `
           -p:PublishTrimmed=false `
           -p:PublishReadyToRun=false `
-          -p:Version=${{ env.VERSION }} `
-          -p:AssemblyVersion=${{ env.VERSION }}.0 `
-          -p:FileVersion=${{ env.VERSION }}.0 `
+          -p:Version=$env:VERSION `
+          -p:AssemblyVersion=$asmVer `
+          -p:FileVersion=$asmVer `
           -p:NuGetAudit=false `
           --output ./cli-publish
       shell: pwsh

@@ -209,7 +209,7 @@ public static class ExcelToolsBase
         }
         catch (Exception ex)
         {
-            return SerializeError(ex, toolName, actionName, customHandler);
+            return SerializeToolError(actionName, null, ex);
         }
     }
 

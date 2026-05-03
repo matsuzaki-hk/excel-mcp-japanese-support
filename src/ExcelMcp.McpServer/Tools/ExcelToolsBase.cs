@@ -74,6 +74,19 @@ public static class ExcelToolsBase
     };
 
     /// <summary>
+    /// Debug JSON serializer options for logging raw JSON output.
+    /// Uses indented formatting for human-readable debug output.
+    /// </summary>
+    public static readonly JsonSerializerOptions DebugJsonOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() },
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    /// <summary>
     /// Delegate wrapper for ForwardToService matching the generated code signature.
     /// Used by generated RouteAction methods.
     /// </summary>
@@ -185,8 +198,20 @@ public static class ExcelToolsBase
         string toolName,
         string actionName,
         Func<string> operation,
-        Func<Exception, string?>? customHandler = null) =>
-        ExecuteToolAction(toolName, actionName, null, operation, customHandler);
+        Func<Exception, string?>? customHandler = null)
+    {
+        try
+        {
+            var result = operation();
+            // Log raw JSON output for debugging
+            Console.Error.WriteLine($"[DEBUG] {toolName}/{actionName} Result: {result}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return SerializeError(ex, toolName, actionName, customHandler);
+        }
+    }
 
     /// <summary>
     /// Executes a tool operation and serializes any exception using shared error formatting.

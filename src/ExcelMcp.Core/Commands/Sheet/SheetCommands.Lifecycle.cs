@@ -33,16 +33,20 @@ public partial class SheetCommands
                         sheet = sheets.Item(i);
                         string sheetName = sheet.Name;
                         // Debug log to check what Excel COM returns
-                        Console.Error.WriteLine($"[DEBUG] Excel COM sheet.Name: '{sheetName}'");
+                        string debugLog = $"[DEBUG] Excel COM sheet.Name: '{sheetName}'\n";
+                        System.IO.File.AppendAllText(@"C:\work\excel-debug.log", debugLog);
                         // Decode Unicode escape sequences in sheet names
                         sheetName = System.Text.RegularExpressions.Regex.Unescape(sheetName);
-                        Console.Error.WriteLine($"[DEBUG] After Regex.Unescape: '{sheetName}'");
+                        debugLog = $"[DEBUG] After Regex.Unescape: '{sheetName}'\n";
+                        System.IO.File.AppendAllText(@"C:\work\excel-debug.log", debugLog);
                         // Apply Unicode normalization to handle full-width characters properly
                         sheetName = sheetName.Normalize(NormalizationForm.FormC);
-                        Console.Error.WriteLine($"[DEBUG] After Normalize: '{sheetName}'");
+                        debugLog = $"[DEBUG] After Normalize: '{sheetName}'\n";
+                        System.IO.File.AppendAllText(@"C:\work\excel-debug.log", debugLog);
                         // Replace Unicode escape sequences with actual characters
                         sheetName = System.Text.RegularExpressions.Regex.Replace(sheetName, @"\\u([0-9a-fA-F]{4})", m => ((char)int.Parse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture)).ToString());
-                        Console.Error.WriteLine($"[DEBUG] After Unicode escape replacement: '{sheetName}'");
+                        debugLog = $"[DEBUG] After Unicode escape replacement: '{sheetName}'\n";
+                        System.IO.File.AppendAllText(@"C:\work\excel-debug.log", debugLog);
                         result.Worksheets.Add(new WorksheetInfo
                         {
                             Name = sheetName,

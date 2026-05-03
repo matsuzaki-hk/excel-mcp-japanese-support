@@ -202,14 +202,19 @@ public static class ExcelToolsBase
     {
         try
         {
-            var result = operation();
-            // Log raw JSON output for debugging
-            Console.Error.WriteLine($"[DEBUG] {toolName}/{actionName} Result: {result}");
-            return result;
+            return operation();
         }
         catch (Exception ex)
         {
-            return SerializeToolError(actionName, null, ex);
+            if (customHandler != null)
+            {
+                var custom = customHandler(ex);
+                if (!string.IsNullOrWhiteSpace(custom))
+                {
+                    return custom!;
+                }
+            }
+            return SerializeToolError($"{toolName}/{actionName}", null, ex);
         }
     }
 

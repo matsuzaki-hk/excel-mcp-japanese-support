@@ -2,6 +2,7 @@ using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Models;
 using Excel = Microsoft.Office.Interop.Excel;
+using System.Text;
 
 namespace Sbroenne.ExcelMcp.Core.Commands;
 
@@ -30,9 +31,12 @@ public partial class SheetCommands
                     try
                     {
                         sheet = sheets.Item(i);
+                        string sheetName = sheet.Name;
+                        // Apply Unicode normalization to handle full-width characters properly
+                        sheetName = sheetName.Normalize(NormalizationForm.FormC);
                         result.Worksheets.Add(new WorksheetInfo
                         {
-                            Name = sheet.Name,
+                            Name = sheetName,
                             Index = i,
                             Visible = (int)sheet.Visible == -1  // xlSheetVisible = -1
                         });

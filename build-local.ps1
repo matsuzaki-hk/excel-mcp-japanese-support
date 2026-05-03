@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $ProjectPath = "src\ExcelMcp.McpServer\ExcelMcp.McpServer.csproj"
 $OutputPath = "C:\work\ExcelMcp-MCP-Server"
 $TempOutputPath = "C:\work\ExcelMcp-MCP-Server-temp"
+$Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
 Write-Host "Building ExcelMcp MCP Server with Japanese support..." -ForegroundColor Green
 
@@ -15,6 +16,9 @@ Write-Host "Cleaning previous build..." -ForegroundColor Yellow
 if (Test-Path $TempOutputPath) {
     Remove-Item -Path $TempOutputPath -Recurse -Force
 }
+# Clean solution to release locked files
+Write-Host "Cleaning solution..." -ForegroundColor Yellow
+dotnet clean $ProjectPath --configuration Release
 
 # Build
 Write-Host "Building project..." -ForegroundColor Yellow
@@ -42,8 +46,9 @@ if (Test-Path $TempOutputPath) {
         # Copy all files except the exe
         Get-ChildItem $TempOutputPath -Exclude "*.exe" | Copy-Item -Destination $OutputPath -Force -Recurse
         
-        # Copy exe with new name
-        Copy-Item $originalExe.FullName -Destination "$OutputPath\mcp-excel.exe" -Force
+        # Copy exe with timestamp to avoid file lock issues
+        $newExeName = "mcp-excel-$Timestamp.exe"
+        Copy-Item $originalExe.FullName -Destination "$OutputPath\$newExeName" -Force
         
         # Copy README and LICENSE if they exist
         if (Test-Path "README.md") {
@@ -54,7 +59,7 @@ if (Test-Path $TempOutputPath) {
         }
         
         Write-Host "Build completed successfully!" -ForegroundColor Green
-        Write-Host "Output: $OutputPath\mcp-excel.exe" -ForegroundColor Cyan
+        Write-Host "Output: $OutputPath\$newExeName" -ForegroundColor Cyan
     } else {
         Write-Error "No executable found in $TempOutputPath"
         exit 1

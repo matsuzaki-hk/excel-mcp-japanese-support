@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using System.Text.Json.Serialization;
 using Sbroenne.ExcelMcp.McpServer.Telemetry;
 
@@ -61,13 +62,15 @@ public static class ExcelToolsBase
     /// - DefaultIgnoreCondition = WhenWritingNull: Omits null properties
     /// - PropertyNamingPolicy = CamelCase: Consistent naming (e.g., success, errorMessage, filePath)
     /// - JsonStringEnumConverter: Human-readable enum values
+    /// - JavaScriptEncoder.UnsafeRelaxedJsonEscaping: Allows Unicode characters without escaping
     /// </remarks>
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new JsonStringEnumConverter() },
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     /// <summary>

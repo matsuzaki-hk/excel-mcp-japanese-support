@@ -37,7 +37,7 @@ public partial class SheetCommands
                         // Apply Unicode normalization to handle full-width characters properly
                         sheetName = sheetName.Normalize(NormalizationForm.FormC);
                         // Replace Unicode escape sequences with actual characters
-                        sheetName = System.Text.RegularExpressions.Regex.Replace(sheetName, @"\\u([0-9a-fA-F]{4})", m => ((char)int.Parse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber)).ToString());
+                        sheetName = System.Text.RegularExpressions.Regex.Replace(sheetName, @"\\u([0-9a-fA-F]{4})", m => ((char)int.Parse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture)).ToString());
                         result.Worksheets.Add(new WorksheetInfo
                         {
                             Name = sheetName,

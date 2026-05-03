@@ -122,12 +122,18 @@ jobs:
       run: dotnet clean src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release
 
     - name: Build
-      run: dotnet build src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release --no-restore --no-incremental -p:Version=${{ env.VERSION }} -p:AssemblyVersion=${{ env.VERSION }}.0 -p:FileVersion=${{ env.VERSION }}.0
+      run: |
+        $ver = "${{ env.VERSION }}" -replace '^v','' -replace '[^0-9.].*$',''
+        $asmVer = "$ver.0"
+        dotnet build src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release --no-restore --no-incremental -p:Version=${{ env.VERSION }} -p:AssemblyVersion=$asmVer -p:FileVersion=$asmVer
+      shell: pwsh
       env:
         APPINSIGHTS_CONNECTION_STRING: ""
 
     - name: Publish MCP Server
       run: |
+        $ver = "${{ env.VERSION }}" -replace '^v','' -replace '[^0-9.].*$',''
+        $asmVer = "$ver.0"
         dotnet publish src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj `
           --configuration Release `
           --runtime win-x64 `
@@ -137,8 +143,8 @@ jobs:
           -p:PublishTrimmed=false `
           -p:PublishReadyToRun=false `
           -p:Version=${{ env.VERSION }} `
-          -p:AssemblyVersion=${{ env.VERSION }}.0 `
-          -p:FileVersion=${{ env.VERSION }}.0 `
+          -p:AssemblyVersion=$asmVer `
+          -p:FileVersion=$asmVer `
           -p:NuGetAudit=false `
           --output ./mcp-server-publish
       shell: pwsh

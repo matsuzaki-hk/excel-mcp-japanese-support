@@ -47,6 +47,12 @@ jobs:
             echo "Upstream changes detected"
             echo "has_changes=true" >> $GITHUB_OUTPUT
             echo "upstream_commit=$UPSTREAM_COMMIT" >> $GITHUB_OUTPUT
+            
+            # upstreamのバージョンを取得
+            git checkout upstream/main
+            VERSION=$(grep -oP '<Version>\K[^<]+' src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj || echo "unknown")
+            echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT
+            git checkout main
           fi
 
       - name: Attempt merge
@@ -69,6 +75,7 @@ jobs:
             fi
             
             echo "merge_success=true" >> $GITHUB_OUTPUT
+            echo "upstream_version=${{ steps.check_changes.outputs.upstream_version }}" >> $GITHUB_OUTPUT
           else
             echo "Merge failed - conflicts detected"
             echo "merge_success=false" >> $GITHUB_OUTPUT
@@ -111,6 +118,10 @@ jobs:
         if: steps.merge.outputs.merge_success == 'true' || steps.resolve_conflict.outputs.resolution_success == 'true'
         run: |
           echo "Pushing merge to origin/main..."
+          # upstream_versionを一時ファイルに保存してコミット
+          echo "${{ steps.merge.outputs.upstream_version }}" > .upstream-version
+          git add .upstream-version
+          git commit --amend --no-edit
           git push origin main
 
       - name: Create issue for unresolved conflicts

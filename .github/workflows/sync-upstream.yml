@@ -56,21 +56,23 @@ jobs:
           echo "Attempting to merge upstream/main into main..."
           git checkout main
           
-          # ワークフローファイルを一時的に除外してマージ（GitHub Appの権限問題回避）
-          git config merge.ours.driver true
-          echo ".github/workflows/*.yml merge=ours" >> .gitattributes
-          
           # マージを試みる
           if git merge upstream/main --no-edit; then
             echo "Merge successful"
+            
+            # ワークフローファイルの変更を取り消す（GitHub Appの権限問題回避）
+            if git diff --name-only HEAD~1 HEAD | grep -q ".github/workflows/"; then
+              echo "Reverting workflow file changes to avoid GitHub App permission issue"
+              git checkout HEAD~1 -- .github/workflows/
+              git add .github/workflows/
+              git commit --amend --no-edit
+            fi
+            
             echo "merge_success=true" >> $GITHUB_OUTPUT
           else
             echo "Merge failed - conflicts detected"
             echo "merge_success=false" >> $GITHUB_OUTPUT
           fi
-          
-          # .gitattributesをクリーンアップ
-          git rm .gitattributes 2>/dev/null || true
 
       - name: Check if Japanese support changes conflict
         id: check_conflict

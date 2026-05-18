@@ -96,7 +96,7 @@ jobs:
     - name: Set Version
       run: |
         $version = "${{ needs.version.outputs.version }}"
-        $numericVersion = $version -replace '^v','' -replace '[^0-9.].*$',''
+        $numericVersion = $version -replace '^v','' -replace '-.*$',''
         echo "VERSION=$version" >> $env:GITHUB_ENV
         echo "NUMERIC_VERSION=$numericVersion" >> $env:GITHUB_ENV
       shell: pwsh
@@ -203,7 +203,7 @@ jobs:
     - name: Set Version
       run: |
         $version = "${{ needs.version.outputs.version }}"
-        $numericVersion = $version -replace '^v','' -replace '[^0-9.].*$',''
+        $numericVersion = $version -replace '^v','' -replace '-.*$',''
         echo "VERSION=$version" >> $env:GITHUB_ENV
         echo "NUMERIC_VERSION=$numericVersion" >> $env:GITHUB_ENV
       shell: pwsh

@@ -56,6 +56,10 @@ jobs:
           echo "Attempting to merge upstream/main into main..."
           git checkout main
           
+          # ワークフローファイルを一時的に除外してマージ（GitHub Appの権限問題回避）
+          git config merge.ours.driver true
+          echo ".github/workflows/*.yml merge=ours" >> .gitattributes
+          
           # マージを試みる
           if git merge upstream/main --no-edit; then
             echo "Merge successful"
@@ -64,6 +68,9 @@ jobs:
             echo "Merge failed - conflicts detected"
             echo "merge_success=false" >> $GITHUB_OUTPUT
           fi
+          
+          # .gitattributesをクリーンアップ
+          git rm .gitattributes 2>/dev/null || true
 
       - name: Check if Japanese support changes conflict
         id: check_conflict

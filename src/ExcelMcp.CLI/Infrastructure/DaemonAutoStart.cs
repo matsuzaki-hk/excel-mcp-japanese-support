@@ -16,7 +16,7 @@ internal static class DaemonAutoStart
     internal static readonly TimeSpan StartupReadyConnectTimeout = TimeSpan.FromSeconds(1);
     internal static readonly TimeSpan StartupReadyRetryInterval = TimeSpan.FromMilliseconds(250);
     internal static readonly TimeSpan StartupReadyTimeout = TimeSpan.FromSeconds(10);
-    internal static readonly TimeSpan StartupLockTimeout = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan StartupLockTimeout = StartupReadyTimeout + TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Gets the pipe name for the CLI daemon (supports env var override for testing).
@@ -84,8 +84,12 @@ internal static class DaemonAutoStart
                 $"Daemon startup is already in progress but did not become ready within {FormatDuration(StartupReadyTimeout)}.");
         }
 
-        // Return new client connected to the now-running daemon
-        return new ServiceClient(pipeName);
+        if (await PingAsync(pipeName, StartupReadyConnectTimeout, cancellationToken))
+        {
+            return new ServiceClient(pipeName);
+        }
+
+        throw new TimeoutException($"Daemon started but not responding within {FormatDuration(StartupReadyTimeout)}.");
     }
 
     /// <summary>
@@ -219,6 +223,20 @@ internal static class DaemonAutoStart
                 await Task.Delay(StartupReadyRetryInterval, cancellationToken);
                 if (daemonProcess.HasExited)
                 {
+                    if (daemonProcess.ExitCode == 0)
+                    {
+                        if (await WaitForResponsiveDaemonAsync(pipeName, waitUntil - DateTime.UtcNow, cancellationToken))
+                        {
+                            GC.KeepAlive(daemonProcess);
+                            return;
+                        }
+
+                        throw new InvalidOperationException(
+                            "Daemon process exited cleanly before becoming ready, but no responsive daemon was found. " +
+                            "This usually means a stale startup race or a daemon that shut down immediately. " +
+                            "Run 'excelcli service stop' and retry.");
+                    }
+
                     throw new InvalidOperationException(
                         $"Daemon process exited before becoming ready (exit code {daemonProcess.ExitCode}).");
                 }

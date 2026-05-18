@@ -1,5 +1,6 @@
 using System.IO.Pipelines;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.WorkerService;
 using Microsoft.Extensions.Configuration;
@@ -156,16 +157,7 @@ public class Program
             .AddEnvironmentVariables()
             .AddCommandLine(args);
 
-        // For stdio transport: Clear console logging to avoid polluting stderr with info messages.
-        // The MCP client interprets stderr output as errors/warnings, so we only log Warning+
-        // to stderr for debugging purposes. The MCP SDK handles protocol-level logging.
-        builder.Logging.ClearProviders();
-        builder.Logging.AddConsole(consoleLogOptions =>
-        {
-            // Only log Warning and above to stderr - Info/Debug would appear as errors in MCP clients
-            consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Warning;
-        });
-        builder.Logging.SetMinimumLevel(LogLevel.Warning);
+        ConfigureStdioLogging(builder.Logging);
 
         // Configure Application Insights
         ConfigureTelemetry(builder);
@@ -256,6 +248,10 @@ public class Program
 
         var runToken = testShutdownCts?.Token ?? CancellationToken.None;
 
+        var stdinMonitor = testInputPipe == null
+            ? StdinPipeMonitor.Start(host.Services.GetRequiredService<IHostApplicationLifetime>())
+            : null;
+
         try
         {
             await host.RunAsync(runToken);
@@ -281,6 +277,8 @@ public class Program
 #pragma warning restore CA1031
         finally
         {
+            stdinMonitor?.Dispose();
+
             // CRITICAL: Auto-save all sessions and clean up Excel processes on shutdown.
             // Without this, MCP client disconnect or process exit silently discards all unsaved work.
             if (testTransportGeneration == 0)
@@ -292,6 +290,18 @@ public class Program
                 ServiceBridge.ServiceBridge.DisposeIfOwnedBy(testTransportGeneration);
             }
         }
+    }
+
+    internal static void ConfigureStdioLogging(ILoggingBuilder logging)
+    {
+        // MCP stdio reserves stdout exclusively for JSON-RPC frames. Route every
+        // possible console log level to stderr so config overrides cannot corrupt stdout.
+        logging.ClearProviders();
+        logging.AddConsole(consoleLogOptions =>
+        {
+            consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace;
+        });
+        logging.SetMinimumLevel(LogLevel.Warning);
     }
 
     /// <summary>
@@ -478,6 +488,65 @@ public class Program
             Console.WriteLine($"Update available: {currentVersion} -> {latestVersion}");
             Console.WriteLine("Download: https://github.com/sbroenne/mcp-server-excel/releases/latest");
         }
+    }
+}
+
+/// <summary>
+/// Monitors the stdin pipe to detect when the parent MCP client process exits.
+///
+/// Lifecycle: MCP stdio transport keeps this server alive via stdin/stdout pipes.
+/// When the parent process exits cleanly, the MCP SDK detects the closed pipe and
+/// shuts down the host. However, if the parent crashes or is killed (e.g., Task
+/// Manager, SIGKILL), the SDK may not notice. This monitor polls the stdin handle
+/// to detect the broken pipe and trigger graceful shutdown, ensuring COM handles
+/// are released and the Excel process is not orphaned.
+///
+/// Only activates when stdin is a named pipe (the normal stdio MCP transport case).
+/// Terminal, debugger, test harness, and file-redirection launches are left alone --
+/// they shut down through their own normal mechanisms.
+/// </summary>
+internal static class StdinPipeMonitor
+{
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool PeekNamedPipe(
+        IntPtr hNamedPipe, IntPtr lpBuffer, uint nBufferSize,
+        IntPtr lpBytesRead, out uint lpTotalBytesAvail,
+        out uint lpBytesLeftThisMessage);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetFileType(IntPtr hFile);
+
+    private const int StdInputHandle = -10;
+    private const uint FileTypePipe = 0x0003;
+    private const int ErrorBrokenPipe = 109;   // ERROR_BROKEN_PIPE
+    private const int ErrorNoData = 232;       // ERROR_NO_DATA (write end closed)
+
+    /// <summary>
+    /// Starts the stdin pipe monitor. Returns null if stdin is not a pipe
+    /// (terminal, debugger, file redirection) since those cases don't need
+    /// broken-pipe detection.
+    /// </summary>
+    public static Timer? Start(IHostApplicationLifetime lifetime)
+    {
+        var handle = GetStdHandle(StdInputHandle);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+            return null;
+
+        if (GetFileType(handle) != FileTypePipe)
+            return null;
+
+        return new Timer(_ =>
+        {
+            if (!PeekNamedPipe(handle, IntPtr.Zero, 0, IntPtr.Zero, out _, out _))
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (error is ErrorBrokenPipe or ErrorNoData)
+                    lifetime.StopApplication();
+            }
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
 }
 

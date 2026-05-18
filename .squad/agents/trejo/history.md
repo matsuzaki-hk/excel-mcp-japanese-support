@@ -181,3 +181,83 @@
 - Assessed external workflow tool (skill-review.yml) as low-risk, non-blocking feedback.
 - Verdict: **Improves skills, worth merging.**
 - Key insight: Moving 560-line CLI reference out of SKILL.md (800→202 lines) is safe, improves discovery, preserves content in references/.
+
+---
+
+### 2026-05-13: PR #651 Daemon Lifecycle Hardening CHANGELOG Entry
+
+**By:** Trejo (Docs Lead)
+
+**Task:** Add ONE NEW CHANGELOG entry for approved daemon lifecycle hardening (McCauley + Hanna sign-off).
+
+**Work Completed:**
+
+✅ **Added new entry to `CHANGELOG.md`**
+- Location: `## [Unreleased] ### Fixed` section, **before** existing "Intermittent session loss" entry
+- Title: "CLI daemon and session lifecycle hardening for rapid open/close cycles"
+- Content: One paragraph describing:
+  - Session atomic validate-and-begin tracking with close-begun state rejection
+  - Save/dispose operations moved outside per-session lock
+  - Failed teardown quarantine instead of "already closed"
+  - Workbooks.Open explicit options (suppress link updates, read-only, notify, MRU)
+  - In-flight RPC tracking and drain on shutdown
+  - Service disposal in finally block
+  - Pipe disconnect/shutdown hardening
+  - CLI service fault observation and non-zero exit codes
+  - Daemon startup readiness ping/signal (not just process spawn)
+  - Added regression tests and diagnostics improvements
+- Format: Neutral technical language, NO confidential project/customer names (Rule 26 compliant)
+- NO modification to existing entries (clean separation)
+
+**Files Modified:**
+- `CHANGELOG.md` only (no version numbers, READMEs, FEATURES.md, skills, operation counts touched)
+
+**Risk Assessment:**
+- 🟢 **ZERO RISK** — Pure documentation entry
+- ✅ No code changes, no behavior changes
+- ✅ Aligns with approved hardening diffs (SessionManager, ExcelBatch, ExcelMcpService, ServiceClient, Program, DaemonAutoStart)
+- ✅ Does NOT duplicate existing entry
+
+**Learnings:**
+- CHANGELOG entries should capture structural improvements alongside user-facing fixes
+- Atomic operations, lock refactoring, and cleanup order matter for reliability
+- Daemon startup readiness distinction (process spawn vs actual ping) is product-level clarity
+- One technical paragraph (no lists) is appropriate for architectural hardening
+
+
+
+## Daemon Rescue Session Finalization (2026-05-13T09:13:35Z)
+
+Session: Inbox consolidation, orchestration logging, agent history sync
+Status: ✅ APPROVED — All gates passed
+
+- Decisions.md consolidated (9 inbox entries merged, 1 archived)
+- Team orchestration logs created
+- Session ready for production deployment
+- Residual risk (prompts) accepted and documented
+
+### 2026-05-13T12:25:30.995+02:00: Patch Release Dispatch v1.8.60 Attempt
+
+**By:** Trejo (Docs Lead)  
+**Requested by:** Stefan Broenner  
+**Run:** `release.yml` workflow_dispatch run `25794507981` on `main`  
+**Target:** Patch bump from `v1.8.59` to `v1.8.60`
+
+**Preflight:**
+- `gh auth status` active account verified as `sbroenne`.
+- Local `main` verified at `5cb51cf`, matching `origin/main`.
+- `CHANGELOG.md` `## [Unreleased]` verified with the CLI daemon/session lifecycle hardening entry present.
+
+**Outcome:** FAILED before tag/release creation.
+
+**Failed jobs:**
+- `MCP Server` → `Pack NuGet (secondary distribution)` failed.
+- `CLI` → `Pack CLI NuGet (secondary distribution)` failed.
+
+**Failure summary:**
+- `dotnet pack --no-build` for MCP Server and CLI could not find `net10.0-windows\win-x64` runtime-specific build outputs (`*.dll`, `*.runtimeconfig.json`, `*.xml`).
+- `Create Git Tag`, registry publishing, and GitHub Release jobs were skipped.
+- `gh release view v1.8.60` returned `release not found`.
+- `publish-plugins.yml` follow-on run `25794645356` was triggered by workflow_run but completed as `skipped`.
+
+**Follow-up needed:** Diagnose release workflow/package output mismatch before retrying; no retry was attempted.

@@ -29,6 +29,7 @@ public sealed class ExcelMcpService : IDisposable
 {
     private readonly SessionManager _sessionManager = new();
     private readonly ConcurrentDictionary<string, byte> _knownSessionIds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<Task, byte> _activeConnectionTasks = new();
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly DateTime _startTime = DateTime.UtcNow;
     private string _pipeName = "";
@@ -78,6 +79,15 @@ public sealed class ExcelMcpService : IDisposable
 
     public void RequestShutdown() => _shutdownCts.Cancel();
 
+    private void RequestShutdownAfterResponse()
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(100);
+            RequestShutdown();
+        });
+    }
+
     // Exposed for testing — backoff parameters for pipe server accept loop error recovery
     internal static readonly TimeSpan InitialBackoff = TimeSpan.FromMilliseconds(100);
     internal static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(5);
@@ -119,24 +129,45 @@ public sealed class ExcelMcpService : IDisposable
                 var clientServer = server;
                 server = null; // Prevent disposal in finally - task owns it now
 
-                // Handle client via StreamJsonRpc — replaces hand-rolled JSON protocol
-                // with standard JSON-RPC 2.0 over Content-Length-delimited framing.
-                _ = Task.Run(async () =>
+                var connectionTask = Task.Run(async () =>
                 {
-                    await connectionLimit.WaitAsync(cancellationToken);
+                    await connectionLimit.WaitAsync();
                     try
                     {
                         var rpcTarget = new DaemonRpcTarget(this);
                         using var rpc = JsonRpc.Attach(clientServer, rpcTarget);
                         await rpc.Completion; // Waits until client disconnects
                     }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"RPC connection failed: {ex.Message}");
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"RPC connection cancelled: {ex.Message}");
+                    }
                     finally
                     {
                         connectionLimit.Release();
-                        try { if (clientServer.IsConnected) clientServer.Disconnect(); } catch { }
-                        await clientServer.DisposeAsync();
+                        try { if (clientServer.IsConnected) clientServer.Disconnect(); }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Pipe disconnect cleanup failed: {ex.Message}");
+                        }
+
+                        try { await clientServer.DisposeAsync(); }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Pipe disposal cleanup failed: {ex.Message}");
+                        }
                     }
-                }, cancellationToken);
+                });
+                _activeConnectionTasks.TryAdd(connectionTask, 0);
+                _ = connectionTask.ContinueWith(
+                    completed => _activeConnectionTasks.TryRemove(completed, out _),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
             catch (OperationCanceledException)
             {
@@ -158,6 +189,27 @@ public sealed class ExcelMcpService : IDisposable
                     await server.DisposeAsync();
                 }
             }
+        }
+
+        if (!_activeConnectionTasks.IsEmpty)
+        {
+            await Task.WhenAll(_activeConnectionTasks.Keys.Select(ObserveConnectionTaskAsync));
+        }
+    }
+
+    private static async Task ObserveConnectionTaskAsync(Task connectionTask)
+    {
+        try
+        {
+            await connectionTask;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            System.Diagnostics.Debug.WriteLine($"RPC connection drain failed: {ex.Message}");
+        }
+        catch (OperationCanceledException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"RPC connection drain cancelled: {ex.Message}");
         }
     }
 
@@ -277,7 +329,7 @@ public sealed class ExcelMcpService : IDisposable
 
     private ServiceResponse HandleShutdown()
     {
-        _shutdownCts.Cancel();
+        RequestShutdownAfterResponse();
         return new ServiceResponse { Success = true };
     }
 
@@ -394,7 +446,19 @@ public sealed class ExcelMcpService : IDisposable
         }
 
         var args = ServiceRegistry.DeserializeArgs<SessionCloseArgs>(request.Args);
-        var closed = _sessionManager.CloseSession(request.SessionId, save: args?.Save ?? false);
+        var shouldSave = args?.Save ?? false;
+        bool closed;
+        try
+        {
+            closed = _sessionManager.CloseSession(request.SessionId, save: shouldSave);
+        }
+        catch (Exception ex) when (IsFatalExcelDisconnect(ex))
+        {
+            CleanupDeadSession(request.SessionId);
+            return CreateExcelDisconnectedResponse(request.SessionId, ex, shouldSave
+                ? "Excel disconnected while saving before close. Session has been cleaned up; reopen the workbook and verify whether the save completed."
+                : "Excel disconnected while closing. Session has been cleaned up; reopen the workbook with a new session.");
+        }
 
         if (closed)
         {
@@ -422,14 +486,27 @@ public sealed class ExcelMcpService : IDisposable
             return new ServiceResponse { Success = false, ErrorMessage = "sessionId is required" };
         }
 
-        var sessionError = TryGetUsableSession(request.SessionId, out var batch);
+        var sessionError = TryBeginUsableSession(request.SessionId, out var batch);
         if (sessionError != null)
         {
             return sessionError;
         }
 
-        batch!.Save();
-        return new ServiceResponse { Success = true };
+        try
+        {
+            batch!.Save();
+            return new ServiceResponse { Success = true };
+        }
+        catch (Exception ex) when (IsFatalExcelDisconnect(ex))
+        {
+            CleanupDeadSession(request.SessionId);
+            return CreateExcelDisconnectedResponse(request.SessionId, ex,
+                "Excel disconnected while saving. Session has been cleaned up; reopen the workbook and verify whether the save completed.");
+        }
+        finally
+        {
+            _sessionManager.EndOperation(request.SessionId);
+        }
     }
 
     private ServiceResponse HandleSessionList()
@@ -662,7 +739,7 @@ public sealed class ExcelMcpService : IDisposable
             return Task.FromResult(new ServiceResponse { Success = false, ErrorMessage = "sessionId is required" });
         }
 
-        var sessionError = TryGetUsableSession(sessionId, out var batch);
+        var sessionError = TryBeginUsableSession(sessionId, out var batch);
         if (sessionError != null)
         {
             return Task.FromResult(sessionError);
@@ -722,17 +799,11 @@ public sealed class ExcelMcpService : IDisposable
         }
         catch (COMException ex) when (
             ex.HResult == ResiliencePipelines.RPC_S_SERVER_UNAVAILABLE ||
-            ex.HResult == ResiliencePipelines.RPC_E_CALL_FAILED)
+            ex.HResult == ResiliencePipelines.RPC_E_CALL_FAILED ||
+            ex.HResult == ResiliencePipelines.RPC_E_DISCONNECTED)
         {
             // Excel process died during the operation — clean up the dead session
-            try
-            {
-                _sessionManager.CloseSession(sessionId, save: false, force: true);
-            }
-            catch (Exception cleanupEx)
-            {
-                System.Diagnostics.Debug.WriteLine($"Session cleanup failed for {sessionId}: {cleanupEx.Message}");
-            }
+            CleanupDeadSession(sessionId);
             return Task.FromResult(new ServiceResponse
             {
                 Success = false,
@@ -748,14 +819,7 @@ public sealed class ExcelMcpService : IDisposable
             ex.Message.Contains("process", StringComparison.OrdinalIgnoreCase))
         {
             // Excel process detected as dead before COM call (ExcelBatch pre-check)
-            try
-            {
-                _sessionManager.CloseSession(sessionId, save: false, force: true);
-            }
-            catch (Exception cleanupEx)
-            {
-                System.Diagnostics.Debug.WriteLine($"Session cleanup failed for {sessionId}: {cleanupEx.Message}");
-            }
+            CleanupDeadSession(sessionId);
             return Task.FromResult(new ServiceResponse
             {
                 Success = false,
@@ -767,22 +831,83 @@ public sealed class ExcelMcpService : IDisposable
         }
         catch (Exception ex)
         {
+            if (IsFatalExcelDisconnect(ex))
+            {
+                CleanupDeadSession(sessionId);
+                return Task.FromResult(CreateExcelDisconnectedResponse(sessionId, ex,
+                    $"Excel process for session '{sessionId}' disconnected during the operation. Session has been cleaned up. Please reopen the file with a new session."));
+            }
+
             // Check if Excel died with a non-COM exception — clean up dead session
             if (batch != null && !batch.IsExcelProcessAlive())
             {
-                try
-                {
-                    _sessionManager.CloseSession(sessionId, save: false, force: true);
-                }
-                catch (Exception cleanupEx)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Dead session cleanup failed for {sessionId}: {cleanupEx.Message}");
-                }
+                CleanupDeadSession(sessionId);
             }
 
             return Task.FromResult(CreateErrorResponse(ex));
         }
+        finally
+        {
+            _sessionManager.EndOperation(sessionId);
+        }
     }
+
+    private void CleanupDeadSession(string sessionId)
+    {
+        try
+        {
+            _sessionManager.CloseSession(sessionId, save: false, force: true);
+        }
+        catch (Exception cleanupEx)
+        {
+            System.Diagnostics.Debug.WriteLine($"Session cleanup failed for {sessionId}: {cleanupEx.Message}");
+        }
+    }
+
+    private static ServiceResponse CreateExcelDisconnectedResponse(string sessionId, Exception ex, string message)
+    {
+        return new ServiceResponse
+        {
+            Success = false,
+            SessionId = sessionId,
+            ErrorCategory = "ExcelProcessDied",
+            ErrorMessage = message,
+            ExceptionType = ex.GetType().Name,
+            HResult = TryGetFatalComHResult(ex) is { } hresult ? $"0x{hresult:X8}" : null,
+            InnerError = ex.InnerException?.Message
+        };
+    }
+
+    private static bool IsFatalExcelDisconnect(Exception ex) => TryGetFatalComHResult(ex).HasValue;
+
+    private static int? TryGetFatalComHResult(Exception ex)
+    {
+        for (var current = ex; current != null; current = current.InnerException!)
+        {
+            if (current is COMException comEx &&
+                (IsFatalComHResult(comEx.HResult) || IsFatalComHResult(comEx.ErrorCode)))
+            {
+                return IsFatalComHResult(comEx.HResult) ? comEx.HResult : comEx.ErrorCode;
+            }
+
+            if (current.Message.Contains("disconnected", StringComparison.OrdinalIgnoreCase))
+            {
+                return ResiliencePipelines.RPC_E_DISCONNECTED;
+            }
+
+            if (current.Message.Contains("RPC server is unavailable", StringComparison.OrdinalIgnoreCase))
+            {
+                return ResiliencePipelines.RPC_S_SERVER_UNAVAILABLE;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsFatalComHResult(int hresult) =>
+        hresult == ResiliencePipelines.RPC_S_SERVER_UNAVAILABLE ||
+        hresult == ResiliencePipelines.RPC_E_CALL_FAILED ||
+        hresult == ResiliencePipelines.RPC_E_DISCONNECTED;
 
     private static ServiceResponse AttachRequestContext(ServiceRequest request, ServiceResponse response)
     {
@@ -868,40 +993,11 @@ public sealed class ExcelMcpService : IDisposable
         };
     }
 
-    private ServiceResponse? TryGetUsableSession(string sessionId, out IExcelBatch? batch)
+    private ServiceResponse? TryBeginUsableSession(string sessionId, out IExcelBatch? batch)
     {
-        batch = _sessionManager.GetSession(sessionId);
-        if (batch == null)
+        if (!_sessionManager.TryBeginOperation(sessionId, out batch, out var errorMessage))
         {
-            return new ServiceResponse { Success = false, ErrorMessage = $"Session '{sessionId}' not found" };
-        }
-
-        if (batch.HasTimedOutOperation)
-        {
-            return new ServiceResponse
-            {
-                Success = false,
-                ErrorMessage = $"A previous operation on session '{sessionId}' timed out or was cancelled. " +
-                               "Please close the session and reopen the workbook before retrying."
-            };
-        }
-
-        if (!batch.IsExcelProcessAlive())
-        {
-            try
-            {
-                _sessionManager.CloseSession(sessionId, save: false, force: true);
-            }
-            catch (Exception cleanupEx)
-            {
-                System.Diagnostics.Debug.WriteLine($"Session cleanup failed for {sessionId}: {cleanupEx.Message}");
-            }
-
-            return new ServiceResponse
-            {
-                Success = false,
-                ErrorMessage = $"Excel process for session '{sessionId}' has died. Session has been closed. Please create a new session."
-            };
+            return new ServiceResponse { Success = false, ErrorMessage = errorMessage };
         }
 
         return null;

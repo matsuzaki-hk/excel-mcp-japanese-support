@@ -35,7 +35,7 @@ internal sealed class Program
         if (filteredArgs.Length == 0)
         {
             if (showBanner) RenderHeader();
-            AnsiConsole.MarkupLine("[dim]No command supplied. Use [green]--help[/] for usage examples.[/]");
+            WriteDiagnosticMarkupLine("[dim]No command supplied. Use [green]--help[/] for usage examples.[/]");
             return 0;
         }
 
@@ -78,7 +78,7 @@ internal sealed class Program
                     return;
                 }
 
-                AnsiConsole.MarkupLine($"[red]Unhandled error:[/] {ex.Message.EscapeMarkup()}");
+                WriteDiagnosticMarkupLine($"[red]Unhandled error:[/] {ex.Message.EscapeMarkup()}");
             });
 
             // Service lifecycle commands
@@ -132,7 +132,7 @@ internal sealed class Program
                 return CliErrorOutput.WriteException(ex);
             }
 
-            AnsiConsole.MarkupLine($"[red]Command error:[/] {ex.Message.EscapeMarkup()}");
+            WriteDiagnosticMarkupLine($"[red]Command error:[/] {ex.Message.EscapeMarkup()}");
             return 1;
         }
         catch (Exception ex)
@@ -142,10 +142,11 @@ internal sealed class Program
                 return CliErrorOutput.WriteException(ex);
             }
 
-            AnsiConsole.MarkupLine($"[red]Fatal error:[/] {ex.Message.EscapeMarkup()}");
-            if (AnsiConsole.Profile.Capabilities.Ansi)
+            WriteDiagnosticMarkupLine($"[red]Fatal error:[/] {ex.Message.EscapeMarkup()}");
+            var errorConsole = CreateErrorConsole();
+            if (errorConsole.Profile.Capabilities.Ansi)
             {
-                AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
+                errorConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
             }
             return 1;
         }
@@ -217,7 +218,7 @@ internal sealed class Program
         // regardless of whether stdout is piped, redirected, or captured
         // (Console.IsOutputRedirected is false in VS Code integrated terminal
         // even when capturing with $result = excelcli ...).
-        var err = AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(Console.Error) });
+        var err = CreateErrorConsole();
         err.Write(new FigletText("Excel CLI").Color(Spectre.Console.Color.Blue));
         err.MarkupLine("[dim]Excel automation powered by ExcelMcp Core[/]");
         err.MarkupLine("[yellow]Workflow:[/] [green]session open <file>[/] → run commands with [green]--session <id>[/] → [green]session close --save[/].");
@@ -251,6 +252,16 @@ internal sealed class Program
         }
 
         return 0;
+    }
+
+    internal static void WriteDiagnosticMarkupLine(string markup)
+    {
+        CreateErrorConsole().MarkupLine(markup);
+    }
+
+    private static IAnsiConsole CreateErrorConsole()
+    {
+        return AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(Console.Error) });
     }
 
     private static string GetCurrentVersion()
@@ -306,14 +317,26 @@ internal sealed class Program
         }
         DaemonProcessTracker.RegisterCurrentProcess(pipeName);
 
+        Service.ExcelMcpService? service = null;
         try
         {
-            var service = new Service.ExcelMcpService();
+            service = new Service.ExcelMcpService();
 
             // Capture the UI synchronization context after Application starts
             SynchronizationContext? uiContext = null;
 
-            // Start pipe server on background thread with 10-minute idle timeout
+            // Run WinForms message loop with tray icon on main thread
+            using var tray = new CliServiceTray(service.SessionManager, () =>
+            {
+                service.RequestShutdown();
+                Application.ExitThread();
+            });
+
+            uiContext = SynchronizationContext.Current;
+
+            // Start accepting RPC only after daemon host initialization succeeds.
+            // Otherwise auto-start clients can observe a successful ping from a pipe
+            // server whose owning WinForms/tray host is still able to fail and exit.
             var serviceTask = Task.Run(() => service.RunAsync(pipeName, idleTimeout: TimeSpan.FromMinutes(10)));
 
             // When service shuts down (idle timeout or remote shutdown), exit the WinForms loop
@@ -329,24 +352,28 @@ internal sealed class Program
                 }
             }, TaskScheduler.Default);
 
-            // Run WinForms message loop with tray icon on main thread
-            using var tray = new CliServiceTray(service.SessionManager, () =>
-            {
-                service.RequestShutdown();
-                Application.ExitThread();
-            });
-
-            uiContext = SynchronizationContext.Current;
             Application.Run();
 
-            // Wait for service to finish
-            serviceTask.Wait(TimeSpan.FromSeconds(5));
-            service.Dispose();
-
-            return 0;
+            try
+            {
+                // Wait for service to finish
+                serviceTask.GetAwaiter().GetResult();
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                WriteDiagnosticMarkupLine($"[red]Service error:[/] {ex.Message.EscapeMarkup()}");
+                return 1;
+            }
+            finally
+            {
+                service.Dispose();
+                service = null;
+            }
         }
         finally
         {
+            service?.Dispose();
             DaemonProcessTracker.Clear(pipeName);
 
             // Release the daemon mutex so a new daemon can start if needed.

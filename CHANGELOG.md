@@ -10,6 +10,14 @@ This changelog covers all components:
 
 ## [Unreleased]
 
+### Added
+
+- **日本語化対応**: SKILLファイルを日本語化
+  - skills/shared/配下の21ファイルを日本語化（behavioral-rules.md、gotchas.md、anti-patterns.md等）
+  - skills/templates/SKILL.mcp.sbnおよびSKILL.cli.sbnを日本語化
+  - skills/excel-mcp/SKILL.mdを日本語化
+  - ワークフロー、ベストプラクティス、制約事項を日本語で提供
+
 ### Fixed
 
 - **MCP `namedrange list` and `chart list` no longer return raw arrays or risk closing the session** (#653): Both list commands now return standard structured result envelopes with `success` and item collections, keep the active session usable after listing empty or populated workbooks, and normalize named range values to JSON-safe types before serialization.

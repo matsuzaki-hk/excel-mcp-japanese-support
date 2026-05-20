@@ -10,6 +10,14 @@ This changelog covers all components:
 
 ## [Unreleased]
 
+### Added
+
+- **日本語化対応**: SKILLファイルを日本語化
+  - skills/shared/配下の21ファイルを日本語化（behavioral-rules.md、gotchas.md、anti-patterns.md等）
+  - skills/templates/SKILL.mcp.sbnおよびSKILL.cli.sbnを日本語化
+  - skills/excel-mcp/SKILL.mdを日本語化
+  - ワークフロー、ベストプラクティス、制約事項を日本語で提供
+
 ### Fixed
 
 - **MCP `namedrange list` avoids hidden Power Query `ExternalData_1` crash paths** (#653): Workbooks with hidden/internal defined names are now listed from workbook package metadata first, so large hidden Power Query and AutoFilter names are skipped before their COM `Name` objects or backing ranges are touched. Visible user-defined names still return references and safe value previews, and large visible ranges continue to return metadata instead of materialized values.

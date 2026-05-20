@@ -69,6 +69,15 @@ public interface IVbaCommands
     /// <param name="moduleName">Name of the module to delete</param>
     [ServiceAction("delete")]
     OperationResult Delete(IExcelBatch batch, [RequiredParameter] string moduleName);
+
+    /// <summary>
+    /// Exports one or more VBA modules to .bas files
+    /// </summary>
+    /// <param name="moduleNames">Array of module names to export. If null or empty, exports all modules</param>
+    /// <param name="outputDirectory">Output directory path. If null, creates a folder in the workspace</param>
+    /// <param name="overwrite">Whether to overwrite existing files. If false, appends timestamp to avoid conflicts</param>
+    [ServiceAction("export")]
+    VbaExportResult Export(IExcelBatch batch, string[]? moduleNames, string? outputDirectory, bool overwrite = false);
 }
 
 

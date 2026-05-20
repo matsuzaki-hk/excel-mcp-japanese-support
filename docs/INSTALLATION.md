@@ -1,114 +1,114 @@
-# Installation Guide - ExcelMcp
+# インストールガイド - ExcelMcp
 
-Complete installation instructions for the ExcelMcp MCP Server and CLI tool.
+ExcelMcp MCPサーバーとCLIツールの完全なインストール手順。
 
-## System Requirements
+## システム要件
 
-### Required
-- **Windows OS** (Windows 10 or later)
-- **Microsoft Excel 2016 or later** (Desktop version - Office 365, Professional Plus, or Standalone)
+### 必須
+- **Windows OS**（Windows 10以降）
+- **Microsoft Excel 2016以降**（デスクトップ版 - Office 365、Professional Plus、またはスタンドアロン）
 
-> **.NET runtime is NOT required** for any installation method — all distributions are self-contained.
+> **.NETランタイムは不要** - すべての配布は自己完結型です。
 
-### Optional (for specific features)
-- **Microsoft Analysis Services OLE DB Provider (MSOLAP)** - Required for DAX query execution (`evaluate`, `execute-dmv` actions)
-  - Easiest: Install [Power BI Desktop](https://powerbi.microsoft.com/desktop) (includes MSOLAP)
-  - Alternative: [Microsoft OLE DB Driver for Analysis Services](https://learn.microsoft.com/analysis-services/client-libraries)
-- **Node.js** - Only required for `npx` commands (`add-mcp` auto-configuration, agent skills). Install with `winget install OpenJS.NodeJS.LTS` or from [nodejs.org](https://nodejs.org/)
+### オプション（特定機能用）
+- **Microsoft Analysis Services OLE DB Provider（MSOLAP）** - DAXクエリ実行に必要（`evaluate`、`execute-dmv`アクション）
+  - 最も簡単: [Power BI Desktop](https://powerbi.microsoft.com/desktop)をインストール（MSOLAPを含む）
+  - 代替: [Microsoft OLE DB Driver for Analysis Services](https://learn.microsoft.com/analysis-services/client-libraries)
+- **Node.js** - `npx`コマンドにのみ必要（`add-mcp`自動設定、エージェントスキル）。`winget install OpenJS.NodeJS.LTS`または[nodejs.org](https://nodejs.org/)からインストール
 
-### Recommended
-- Windows 11 for best performance
-- Office 365 with latest updates
-- 8GB RAM minimum
+### 推奨
+- Windows 11で最高のパフォーマンス
+- 最新の更新を適用したOffice 365
+- 最小8GB RAM
 
 ---
 
-## Quick Start (Recommended)
+## クイックスタート（推奨）
 
-Use this order to avoid setup confusion:
+セットアップの混乱を避けるためにこの順序を使用してください：
 
-1. **Choose one primary setup path**:
-   - **VS Code Extension** (GitHub Copilot users) — auto-configures everything
-   - **Claude Desktop MCPB** — one-click MCP installation
-   - **GitHub Copilot Plugins** (Copilot CLI users) — marketplace installation
-   - **Manual MCP setup** (other MCP clients like Cursor, Windsurf)
-2. **Validate MCP setup** (run the quick test prompt in Step 4 of manual setup, or test in your client after extension/MCPB/plugin install)
-3. **Optional:** install CLI (`excelcli`) for scripting/RPA
-4. **Optional:** install agent skills separately for non-extension environments
+1. **1つのプライマリセットアップパスを選択**:
+   - **VS Code拡張機能**（GitHub Copilotユーザー） - すべてを自動設定
+   - **Claude Desktop MCPB** - ワンクリックMCPインストール
+   - **GitHub Copilotプラグイン**（Copilot CLIユーザー） - マーケットプレイスインストール
+   - **手動MCPセットアップ**（Cursor、Windsurfなどの他のMCPクライアント）
+2. **MCPセットアップを検証**（手動セットアップのステップ4のクイックテストプロンプトを実行、または拡張機能/MCPB/プラグインインストール後にクライアントでテスト）
+3. **オプション:** スクリプティング/RPA用にCLI（`excelcli`）をインストール
+4. **オプション:** 拡張機能以外の環境用にエージェントスキルを別途インストール
 
-### GitHub Copilot Plugins
+### GitHub Copilotプラグイン
 
-**Best for:** GitHub Copilot CLI users who want plugin marketplace installation
+**最適な対象:** プラグインマーケットプレイスインストールを希望するGitHub Copilot CLIユーザー
 
 ```powershell
-# Register the plugin marketplace (one-time)
+# プラグインマーケットプレイスを登録（一度だけ）
 copilot plugin marketplace add sbroenne/mcp-server-excel-plugins
 
-# Install one or both plugins
-copilot plugin install excel-mcp@mcp-server-excel-plugins      # For conversational AI
-copilot plugin install excel-cli@mcp-server-excel-plugins      # For scripting / coding agents
+# 1つまたは両方のプラグインをインストール
+copilot plugin install excel-mcp@mcp-server-excel-plugins      # 対話型AI用
+copilot plugin install excel-cli@mcp-server-excel-plugins      # スクリプティング / コーディングエージェント用
 ```
 
-- **`excel-mcp`** — For conversational AI workflows
-- **`excel-cli`** — Skill for coding agents (install `excelcli` separately if you want the CLI tool)
+- **`excel-mcp`** — 対話型AIワークフロー用
+- **`excel-cli`** — コーディングエージェント用のスキル（CLIツールが必要な場合は別途`excelcli`をインストール）
 
-**Note:** After each release, there may be a short delay before plugins appear in the marketplace.
-
----
-
-### VS Code Extension (Easiest - One-Click Setup)
-
-1. **Install the Extension**
-   - Open VS Code
-   - Press `Ctrl+Shift+X` (Extensions)
-   - Search for **"ExcelMcp"**
-   - Click **Install**
-
-2. **That's It!**
-   - Bundles self-contained MCP server and CLI (no .NET runtime needed)
-   - Auto-configures GitHub Copilot
-   - Registers agent skills (excel-mcp + excel-cli) via `chatSkills`
-   - Shows quick start guide on first launch
-
-**Marketplace Link:** [Excel MCP VS Code Extension](https://marketplace.visualstudio.com/items?itemName=sbroenne.excel-mcp)
+**注意:** 各リリース後、プラグインがマーケットプレイスに表示されるまで少し遅延がある場合があります。
 
 ---
 
-### Claude Desktop (One-Click Install)
+### VS Code拡張機能（最も簡単 - ワンクリックセットアップ）
 
-**Best for:** Claude Desktop users who want the simplest installation
+1. **拡張機能のインストール**
+   - VS Codeを開く
+   - `Ctrl+Shift+X`（拡張機能）を押す
+   - **"ExcelMcp"**を検索
+   - **インストール**をクリック
 
-1. Download `excel-mcp-{version}.mcpb` from the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
-2. Double-click the `.mcpb` file (or drag-and-drop onto Claude Desktop)
-3. Restart Claude Desktop
+2. **これで完了！**
+   - 自己完結型MCPサーバーとCLIがバンドルされています（.NETランタイム不要）
+   - GitHub Copilotを自動設定
+   - `chatSkills`経由でエージェントスキルを登録（excel-mcp + excel-cli）
+   - 初回起動時にクイックスタートガイドを表示
 
-That's it! The MCPB bundle includes everything needed - no .NET installation required.
+**マーケットプレイスリンク:** [Excel MCP VS Code拡張機能](https://marketplace.visualstudio.com/items?itemName=sbroenne.excel-mcp)
 
 ---
 
-## Manual MCP Setup (All MCP Clients)
+### Claude Desktop（ワンクリックインストール）
 
-**Best for:** Other MCP clients (Cursor, Windsurf, Cline, Claude Code, Codex), advanced users
+**最適な対象:** 最も簡単なインストールを希望するClaude Desktopユーザー
 
-### Step 1: Download MCP Server
+1. [最新リリース](https://github.com/sbroenne/mcp-server-excel/releases/latest)から`excel-mcp-{version}.mcpb`をダウンロード
+2. `.mcpb`ファイルをダブルクリック（またはClaude Desktopにドラッグアンドドロップ）
+3. Claude Desktopを再起動
 
-1. Go to the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
-2. Download **`ExcelMcp-MCP-Server-{version}-windows.zip`**
-3. Extract the ZIP to a permanent location (e.g., `C:\Tools\ExcelMcp\`)
+これで完了！MCPBバンドルには必要なすべてが含まれています - .NETインストールは不要です。
+
+---
+
+## 手動MCPセットアップ（すべてのMCPクライアント）
+
+**最適な対象:** 他のMCPクライアント（Cursor、Windsurf、Cline、Claude Code、Codex）、上級ユーザー
+
+### ステップ1: MCPサーバーのダウンロード
+
+1. [最新リリース](https://github.com/sbroenne/mcp-server-excel/releases/latest)に移動
+2. **`ExcelMcp-MCP-Server-{version}-windows.zip`**をダウンロード
+3. ZIPを永続的な場所に解凍（例: `C:\Tools\ExcelMcp\`）
 
 ```powershell
-# Example extraction
+# 解凍例
 Expand-Archive "ExcelMcp-MCP-Server-1.x.x-windows.zip" -DestinationPath "C:\Tools\ExcelMcp"
 ```
 
-The ZIP contains `mcp-excel.exe` — a fully self-contained executable (no .NET runtime needed).
+ZIPには`mcp-excel.exe`が含まれています - 完全に自己完結型の実行ファイルです（.NETランタイム不要）。
 
-### Step 2: Add to PATH (Recommended)
+### ステップ2: PATHに追加（推奨）
 
-To use `mcp-excel` as a command without specifying the full path:
+フルパスを指定せずに`mcp-excel`をコマンドとして使用するには：
 
 ```powershell
-# Add to user PATH (persistent)
+# ユーザーPATHに追加（永続的）
 $toolsDir = "C:\Tools\ExcelMcp"
 $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($userPath -notlike "*$toolsDir*") {
@@ -117,58 +117,39 @@ if ($userPath -notlike "*$toolsDir*") {
 }
 ```
 
-Or manually: **Settings → System → About → Advanced system settings → Environment Variables → User variables → Path → Edit → New** → add `C:\Tools\ExcelMcp`
+または手動で: **設定 → システム → 詳細情報 → システムの詳細設定 → 環境変数 → ユーザー変数 → Path → 編集 → 新規** → `C:\Tools\ExcelMcp`を追加
 
-### Step 3: Configure Your MCP Client
+### ステップ3: MCPクライアントの設定
 
-#### Option A: Auto-Configure All Agents (Recommended)
-
-Use [`add-mcp`](https://github.com/neondatabase/add-mcp) to configure all detected coding agents with a single command:
-
+#### オプションA: すべてのエージェントを自動設定（推奨）
 ```powershell
 npx add-mcp "mcp-excel" --name excel-mcp
 ```
 
-This auto-detects and configures **Cursor, VS Code, Claude Code, Claude Desktop, Codex, Zed, Gemini CLI**, and more. Use flags to customize:
+これは**Cursor、VS Code、Claude Code、Claude Desktop、Codex、Zed、Gemini CLI**などを自動検出して設定します。フラグを使用してカスタマイズ：
 
 ```powershell
-# Configure specific agents only
+# 特定のエージェントのみを設定
 npx add-mcp "mcp-excel" --name excel-mcp -a cursor -a claude-code
 
-# Configure globally (user-wide, all projects)
+# グローバルに設定（ユーザー全体、すべてのプロジェクト）
 npx add-mcp "mcp-excel" --name excel-mcp -g
 
-# Non-interactive (skip prompts)
+# 非インタラクティブ（プロンプトをスキップ）
 npx add-mcp "mcp-excel" --name excel-mcp --all -y
 ```
 
-> **Requires:** [Node.js](https://nodejs.org/) for `npx`. Install with `winget install OpenJS.NodeJS.LTS` if not already available. No permanent `add-mcp` installation needed — `npx` downloads, runs, and cleans up automatically.
+> **必要:** `npx`用の[Node.js](https://nodejs.org/)。まだ利用可能でない場合は`winget install OpenJS.NodeJS.LTS`でインストール。永続的な`add-mcp`インストールは不要 - `npx`が自動的にダウンロード、実行、クリーンアップします。
 
-> **Note:** If `mcp-excel` is not on your PATH, use the full path instead: `npx add-mcp "C:\Tools\ExcelMcp\mcp-excel.exe" --name excel-mcp`
+> **注意:** `mcp-excel`がPATHにない場合は、代わりにフルパスを使用: `npx add-mcp "C:\Tools\ExcelMcp\mcp-excel.exe" --name excel-mcp`
 
-#### Option B: Manual Configuration
+#### オプションB: 手動設定
 
-**Quick Start:** Ready-to-use config files for all clients are available in [`examples/mcp-configs/`](https://github.com/sbroenne/mcp-server-excel/tree/main/examples/mcp-configs/)
+**クイックスタート:** すべてのクライアントの使用可能な設定ファイルが[`examples/mcp-configs/`](https://github.com/sbroenne/mcp-server-excel/tree/main/examples/mcp-configs/)にあります
 
-**For GitHub Copilot (VS Code):**
+**GitHub Copilot（VS Code）用:**
 
-Create `.vscode/mcp.json` in your workspace:
-
-```json
-{
-  "servers": {
-    "excel-mcp": {
-      "command": "mcp-excel"
-    }
-  }
-}
-```
-
-> If `mcp-excel` is not on PATH, use the full path: `"command": "C:\\Tools\\ExcelMcp\\mcp-excel.exe"`
-
-**For GitHub Copilot (Visual Studio):**
-
-Create `.mcp.json` in your solution directory or `%USERPROFILE%\.mcp.json`:
+ワークスペースに`.vscode/mcp.json`を作成:
 
 ```json
 {
@@ -180,11 +161,27 @@ Create `.mcp.json` in your solution directory or `%USERPROFILE%\.mcp.json`:
 }
 ```
 
-**For Claude Desktop:**
+> `mcp-excel`がPATHにない場合は、フルパスを使用: `"command": "C:\\Tools\\ExcelMcp\\mcp-excel.exe"`
 
-1. Locate config file: `%APPDATA%\Claude\claude_desktop_config.json`
-2. If file doesn't exist, create it with the content below
-3. If file exists, merge the `excel-mcp` entry into your existing `mcpServers` section
+**GitHub Copilot（Visual Studio）用:**
+
+ソリューションディレクトリまたは`%USERPROFILE%\.mcp.json`に`.mcp.json`を作成:
+
+```json
+{
+  "servers": {
+    "excel-mcp": {
+      "command": "mcp-excel"
+    }
+  }
+}
+```
+
+**Claude Desktop用:**
+
+1. 設定ファイルを探す: `%APPDATA%\Claude\claude_desktop_config.json`
+2. ファイルが存在しない場合は、以下の内容で作成
+3. ファイルが存在する場合は、`excel-mcp`エントリを既存の`mcpServers`セクションにマージ
 
 ```json
 {
@@ -198,34 +195,14 @@ Create `.mcp.json` in your solution directory or `%USERPROFILE%\.mcp.json`:
 }
 ```
 
-4. Save and restart Claude Desktop
+4. 保存してClaude Desktopを再起動
 
-**For Cursor:**
+**Cursor用:**
 
-1. Open Cursor Settings (Ctrl+,)
-2. Search for "MCP" in settings
-3. Click "Edit in settings.json" or create config at: `%APPDATA%\Cursor\User\globalStorage\mcp\mcp.json`
-4. Add this configuration:
-
-```json
-{
-  "mcpServers": {
-    "excel-mcp": {
-      "command": "mcp-excel",
-      "args": [],
-      "env": {}
-    }
-  }
-}
-```
-
-5. Save and restart Cursor
-
-**For Cline (VS Code Extension):**
-
-1. Install Cline extension in VS Code
-2. Open Cline panel and click the MCP settings gear icon
-3. Add this configuration:
+1. Cursor設定を開く（Ctrl+,）
+2. 設定で"MCP"を検索
+3. "settings.jsonで編集"をクリックまたは以下に設定を作成: `%APPDATA%\Cursor\User\globalStorage\mcp\mcp.json`
+4. この設定を追加:
 
 ```json
 {
@@ -239,13 +216,13 @@ Create `.mcp.json` in your solution directory or `%USERPROFILE%\.mcp.json`:
 }
 ```
 
-4. Save and restart VS Code
+5. 保存してCursorを再起動
 
-**For Windsurf:**
+**Cline（VS Code拡張機能）用:**
 
-1. Open Windsurf Settings
-2. Navigate to MCP Servers configuration  
-3. Add this configuration:
+1. VS CodeでCline拡張機能をインストール
+2. Clineパネルを開き、MCP設定の歯車アイコンをクリック
+3. この設定を追加:
 
 ```json
 {
@@ -259,44 +236,64 @@ Create `.mcp.json` in your solution directory or `%USERPROFILE%\.mcp.json`:
 }
 ```
 
-4. Save and restart Windsurf
+4. 保存してVS Codeを再起動
 
-### Step 4: Validate MCP Setup
+**Windsurf用:**
 
-Restart your MCP client, then ask:
-```
-Create an empty Excel file called "test.xlsx"
+1. Windsurf設定を開く
+2. MCPサーバー設定に移動
+3. この設定を追加:
+
+```json
+{
+  "mcpServers": {
+    "excel-mcp": {
+      "command": "mcp-excel",
+      "args": [],
+      "env": {}
+    }
+  }
+}
 ```
 
-If it works, you're all set! 🎉
+4. 保存してWindsurfを再起動
 
-**💡 Tip:** Want to watch the AI work? Ask:
+### ステップ4: MCPセットアップの検証
+
+MCPクライアントを再起動してから、以下を依頼:
 ```
-Show me Excel while you work on test.xlsx
+"test.xlsx"という空のExcelファイルを作成してください
 ```
-This opens Excel visibly so you can see every change in real-time - great for debugging and demos!
+
+動作すれば、準備完了です！🎉
+
+**💡 ヒント:** AIの作業を監視したいですか？以下を依頼:
+```
+test.xlsxの作業中Excelを表示してください
+```
+これでExcelが表示されてリアルタイムですべての変更を確認できます - デバッグとデモに最適！
 
 ---
 
-## Optional: CLI Installation (No AI Required)
+## オプション: CLIインストール（AI不要）
 
-**Best for:** Scripting, RPA, CI/CD pipelines, automation without AI
+**最適な対象:** スクリプティング、RPA、CI/CDパイプライン、AIなしの自動化
 
-The `excelcli.exe` tool is already included when you install the **excel-cli GitHub Copilot plugin** or the VS Code extension. Plain skill-only installs still need the CLI available separately.
+`excelcli.exe`ツールは**excel-cli GitHub Copilotプラグイン**またはVS Code拡張機能をインストールすると既に含まれています。スキルのみのインストールでは、CLIを別途使用可能にする必要があります。
 
-### If Not Already Installed Via Plugin or VS Code Extension
+### プラグインまたはVS Code拡張機能経由でまだインストールされていない場合
 
-Download and extract the standalone CLI:
+スタンドアロンCLIをダウンロードして解凍:
 
-1. Go to the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
-2. Download **`ExcelMcp-CLI-{version}-windows.zip`**
-3. Extract to a permanent location (e.g., `C:\Tools\ExcelMcp\`)
+1. [最新リリース](https://github.com/sbroenne/mcp-server-excel/releases/latest)に移動
+2. **`ExcelMcp-CLI-{version}-windows.zip`**をダウンロード
+3. 永続的な場所に解凍（例: `C:\Tools\ExcelMcp\`）
 
 ```powershell
 Expand-Archive "ExcelMcp-CLI-1.x.x-windows.zip" -DestinationPath "C:\Tools\ExcelMcp"
 ```
 
-### Add CLI to PATH
+### CLIをPATHに追加
 
 ```powershell
 $toolsDir = "C:\Tools\ExcelMcp"
@@ -307,13 +304,13 @@ if ($userPath -notlike "*$toolsDir*") {
 }
 ```
 
-### Quick Test
+### クイックテスト
 
 ```powershell
 excelcli --version
 excelcli --help
 
-# Test with a session
+# セッションでテスト
 excelcli -q session open test.xlsx
 excelcli -q session list
 excelcli -q session close --session <id>
@@ -321,17 +318,17 @@ excelcli -q session close --session <id>
 
 ---
 
-## GitHub Copilot Plugins (Alternative Installation)
+## GitHub Copilotプラグイン（代替インストール）
 
-**Best for:** GitHub Copilot users who want packaged Excel automation plugins through supported plugin surfaces
+**最適な対象:** サポートされているプラグインサーフェスを通じてパッケージ化されたExcel自動化プラグインを希望するGitHub Copilotユーザー
 
-ExcelMcp ships two **GitHub Copilot marketplace plugins**:
+ExcelMcpは2つの**GitHub Copilotマーケットプレイスプラグイン**を提供:
 
-- **`excel-mcp`** — Best for conversational Excel workflows through the MCP server
-- **`excel-cli`** — Best for token-efficient scripting and coding-agent workflows
-- You can install **either plugin alone or both together**
+- **`excel-mcp`** — MCPサーバーを通した対話型Excelワークフローに最適
+- **`excel-cli`** — トークン効率的なスクリプティングとコーディングエージェントワークフローに最適
+- **どちらかのプラグインのみ、または両方をインストール可能**
 
-### Copilot CLI Plugin Installation
+### Copilot CLIプラグインインストール
 
 ```powershell
 copilot plugin marketplace add sbroenne/mcp-server-excel-plugins
@@ -339,258 +336,258 @@ copilot plugin install excel-mcp@mcp-server-excel-plugins
 copilot plugin install excel-cli@mcp-server-excel-plugins
 ```
 
-**After Installation:**
-- **`excel-mcp`** — Ready to use; follow the plugin README if you want to merge the MCP config into your Copilot setup.
-- **`excel-cli`** — Install `excelcli` separately if you need it on PATH:
+**インストール後:**
+- **`excel-mcp`** — 使用可能です。MCP設定をCopilot設定にマージする場合は、プラグインREADMEに従ってください。
+- **`excel-cli`** — PATHに必要な場合は`excelcli`を別途インストール:
 
 ```powershell
 dotnet tool install --global Sbroenne.ExcelMcp.CLI
 excelcli --version
 ```
 
-> **Note:** The Copilot CLI install commands above are specific to the GitHub Copilot plugin marketplace. VS Code and Claude have their own plugin systems with separate installation flows.
+> **注意:** 上記のCopilot CLIインストールコマンドはGitHub Copilotプラグインマーケットプレイスに固有です。VS CodeとClaudeには独自のプラグインシステムがあり、インストールフローが別々です。
 
-Plugins are published automatically after each ExcelMcp release, though you may need to wait a few moments for the update to appear in the marketplace.
+プラグインは各ExcelMcpリリース後に自動的に公開されますが、マーケットプレイスに更新が表示されるまで少し待つ必要がある場合があります。
 
 ---
 
-## Alternative: NuGet .NET Tool Installation (Secondary)
+## 代替: NuGet .NETツールインストール（二次）
 
-**For users who prefer package managers or already have .NET installed**
+**パッケージマネージャーを好むユーザー、または既に.NETがインストールされているユーザー向け**
 
-NuGet is a secondary distribution channel. It requires the **.NET 10 Runtime or SDK** to be installed.
+NuGetは二次配布チャネルです。**.NET 10ランタイムまたはSDK**がインストールされている必要があります。
 
 ```powershell
-# Requires .NET 10 Runtime or SDK
+# .NET 10ランタイムまたはSDKが必要
 dotnet tool install --global Sbroenne.ExcelMcp.McpServer
 dotnet tool install --global Sbroenne.ExcelMcp.CLI
 ```
 
-After installation, configure your MCP client with `"command": "mcp-excel"` (same as standalone exe).
+インストール後、MCPクライアントを`"command": "mcp-excel"`で設定（スタンドアロンexeと同じ）。
 
-**Update via NuGet:**
+**NuGet経由で更新:**
 ```powershell
 dotnet tool update --global Sbroenne.ExcelMcp.McpServer
 dotnet tool update --global Sbroenne.ExcelMcp.CLI
 ```
 
-**Uninstall:**
+**アンインストール:**
 ```powershell
 dotnet tool uninstall --global Sbroenne.ExcelMcp.McpServer
 dotnet tool uninstall --global Sbroenne.ExcelMcp.CLI
 ```
 
-> **Why NuGet is secondary:** The standalone exe distributions require no .NET runtime, making them easier to install for most users. NuGet is available as an alternative for users who prefer package managers or already have .NET installed in their workflow.
+> **NuGetが二次である理由:** スタンドアロンexe配布は.NETランタイムを必要としないため、ほとんどのユーザーにとってインストールが容易です。NuGetは、パッケージマネージャーを好むユーザーやワークフローに既に.NETがインストールされているユーザー向けの代替として利用可能です。
 
 ---
 
-## Agent Skills Installation (Cross-Platform)
+## エージェントスキルインストール（クロスプラットフォーム）
 
-**Best for:** Adding AI guidance to coding agents (Copilot, Cursor, Windsurf, Claude Code, Gemini, Codex, etc.)
+**最適な対象:** コーディングエージェント（Copilot、Cursor、Windsurf、Claude Code、Gemini、Codexなど）にAIガイダンスを追加
 
-Skills are auto-installed by the VS Code extension. Plugins and skills are different things: plugins are packaged surface integrations, while skills are reusable AI guidance. For environments where you want skills directly, use the commands below:
+スキルはVS Code拡張機能によって自動インストールされます。プラグインとスキルは異なるものです: プラグインはパッケージ化されたサーフェス統合、スキルは再利用可能なAIガイダンスです。スキルを直接使用したい環境では、以下のコマンドを使用:
 
 ```powershell
-# CLI skill (for coding agents - token-efficient workflows)
+# CLIスキル（コーディングエージェント用 - トークン効率的なワークフロー）
 npx skills add sbroenne/mcp-server-excel --skill excel-cli
 
-# MCP skill (for conversational AI - rich tool schemas)
+# MCPスキル（対話型AI用 - リッチなツールスキーマ）
 npx skills add sbroenne/mcp-server-excel --skill excel-mcp
 
-# Install for specific agents
+# 特定のエージェント用にインストール
 npx skills add sbroenne/mcp-server-excel --skill excel-cli -a cursor
 npx skills add sbroenne/mcp-server-excel --skill excel-mcp -a claude-code
 
-# Install globally (user-wide)
+# グローバルにインストール（ユーザー全体）
 npx skills add sbroenne/mcp-server-excel --skill excel-cli --global
 ```
 
-**Supports 43+ agents** including claude-code, github-copilot, cursor, windsurf, gemini-cli, codex, goose, cline, continue, replit, and more.
+**43以上のエージェントをサポート** - claude-code、github-copilot、cursor、windsurf、gemini-cli、codex、goose、cline、continue、replitなどを含む。
 
-**📚 [Agent Skills Guide →](../skills/README.md)**
+**📚 [エージェントスキルガイド →](../skills/README.md)**
 
 ---
 
-## Updating ExcelMcp
+## ExcelMcpの更新
 
-### Check Current Version
+### 現在のバージョンを確認
 
 ```powershell
-# Check MCP Server version
+# MCPサーバーバージョンを確認
 mcp-excel --version
 
-# Check CLI version
+# CLIバージョンを確認
 excelcli --version
 ```
 
-### Update to New Version
+### 新しいバージョンに更新
 
-**Standalone exe (primary):**
+**スタンドアロンexe（プライマリ）:**
 
-1. Go to the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
-2. Download the new ZIP(s): `ExcelMcp-MCP-Server-{version}-windows.zip` and/or `ExcelMcp-CLI-{version}-windows.zip`
-3. Extract and overwrite the existing files in your installation directory
+1. [最新リリース](https://github.com/sbroenne/mcp-server-excel/releases/latest)に移動
+2. 新しいZIPをダウンロード: `ExcelMcp-MCP-Server-{version}-windows.zip`および/または`ExcelMcp-CLI-{version}-windows.zip`
+3. 解凍してインストールディレクトリの既存のファイルを上書き
 
 ```powershell
-# Example update
+# 更新例
 Expand-Archive "ExcelMcp-MCP-Server-1.x.x-windows.zip" -DestinationPath "C:\Tools\ExcelMcp" -Force
 ```
 
-4. Restart your MCP client (VS Code, Claude Desktop, Cursor, etc.)
+4. MCPクライアントを再起動（VS Code、Claude Desktop、Cursorなど）
 
-**NuGet (secondary):**
+**NuGet（二次）:**
 
 ```powershell
 dotnet tool update --global Sbroenne.ExcelMcp.McpServer
 dotnet tool update --global Sbroenne.ExcelMcp.CLI
 ```
 
-### Check What's New
+### 新着情報を確認
 
-Before updating, check the release notes:
-- **GitHub Releases:** https://github.com/sbroenne/mcp-server-excel/releases
+更新前にリリースノートを確認:
+- **GitHubリリース:** https://github.com/sbroenne/mcp-server-excel/releases
 - **Changelog:** https://github.com/sbroenne/mcp-server-excel/blob/main/CHANGELOG.md
 
 ---
 
-## Troubleshooting
+## トラブルシューティング
 
-### Common Issues
+### 一般的な問題
 
-#### 1. "mcp-excel is not recognized as an internal or external command"
+#### 1. "'mcp-excel' は内部コマンドまたは外部コマンドとして認識されません"
 
-**Solution:** `mcp-excel.exe` is not on your PATH.
+**解決策:** `mcp-excel.exe`がPATHにありません。
 
-Either:
-- Add the directory containing `mcp-excel.exe` to your PATH (see Step 2 above)
-- Or use the full path in your MCP client config: `"command": "C:\\Tools\\ExcelMcp\\mcp-excel.exe"`
+以下のいずれか:
+- `mcp-excel.exe`を含むディレクトリをPATHに追加（上記ステップ2を参照）
+- またはMCPクライアント設定でフルパスを使用: `"command": "C:\\Tools\\ExcelMcp\\mcp-excel.exe"`
 
-#### 2. MCP Server Not Responding
+#### 2. MCPサーバーが応答しない
 
-**Check if the exe exists:**
+**exeが存在するか確認:**
 ```powershell
 where.exe mcp-excel
-# Or with full path:
+# またはフルパスで:
 Test-Path "C:\Tools\ExcelMcp\mcp-excel.exe"
 ```
 
-**Verify it runs:**
+**動作するか確認:**
 ```powershell
 mcp-excel --version
 ```
 
-#### 3. "Workbook is locked" or "Cannot open file"
+#### 3. "ワークブックがロックされています" または "ファイルを開けません"
 
-**Solution:** Close all Excel windows before running ExcelMcp
+**解決策:** ExcelMcpを実行する前にすべてのExcelウィンドウを閉じてください
 
-ExcelMcp requires exclusive access to workbooks (Excel COM limitation).
+ExcelMcpはワークブックへの排他アクセスを必要とします（Excel COMの制限）。
 
-#### 4. MCP Server Still Running Old Version
+#### 4. MCPサーバーが古いバージョンで動作している
 
-**Solution:** Fully restart your MCP client
-- Close VS Code completely (including terminal windows)
-- Close Claude Desktop completely
-- Reopen the application
+**解決策:** MCPクライアントを完全に再起動
+- VS Codeを完全に閉じる（ターミナルウィンドウを含む）
+- Claude Desktopを完全に閉じる
+- アプリケーションを再開
 
-## Uninstallation
+## アンインストール
 
-### Uninstall MCP Server
+### MCPサーバーのアンインストール
 ```powershell
-# Standalone exe: simply delete the extracted files
+# スタンドアロンexe: 解凍したファイルを削除するだけ
 Remove-Item "C:\Tools\ExcelMcp\mcp-excel.exe" -Force
 
-# Remove from PATH if you added it
-# Settings → System → About → Advanced system settings → Environment Variables
-# Edit PATH and remove the ExcelMcp directory
+# PATHに追加した場合は削除
+# 設定 → システム → 詳細情報 → システムの詳細設定 → 環境変数
+# PATHを編集してExcelMcpディレクトリを削除
 
-# NuGet (if installed via dotnet tool):
+# NuGet（dotnet tool経由でインストールした場合）:
 dotnet tool uninstall --global Sbroenne.ExcelMcp.McpServer
 ```
 
-### Uninstall CLI
+### CLIのアンインストール
 ```powershell
-# Standalone exe:
+# スタンドアロンexe:
 Remove-Item "C:\Tools\ExcelMcp\excelcli.exe" -Force
 
-# NuGet (if installed via dotnet tool):
+# NuGet（dotnet tool経由でインストールした場合）:
 dotnet tool uninstall --global Sbroenne.ExcelMcp.CLI
 ```
 
 ---
 
-## Getting Help
+## ヘルプの取得
 
-- **Documentation:** [GitHub Repository](https://github.com/sbroenne/mcp-server-excel)
-- **Issues:** [GitHub Issues](https://github.com/sbroenne/mcp-server-excel/issues)
-- **Contributing:** [Contributing Guide](https://github.com/sbroenne/mcp-server-excel/blob/main/docs/CONTRIBUTING.md)
-
----
-
-## Next Steps
-
-After installation:
-
-1. **Learn the basics:** Try simple commands like creating worksheets, setting values
-2. **Explore features:** See [README](https://github.com/sbroenne/mcp-server-excel#readme) for complete feature list
-3. **Read the guides:**
-   - [MCP Server Guide](https://github.com/sbroenne/mcp-server-excel/blob/main/src/ExcelMcp.McpServer/README.md)
-   - [CLI Guide](https://github.com/sbroenne/mcp-server-excel/blob/main/src/ExcelMcp.CLI/README.md)
-   - [Agent Skills](https://github.com/sbroenne/mcp-server-excel/blob/main/skills/excel-mcp/SKILL.md) - Cross-platform AI guidance
-4. **Join the community:** Star the repo, report issues, contribute improvements
+- **ドキュメント:** [GitHubリポジトリ](https://github.com/sbroenne/mcp-server-excel)
+- **問題:** [GitHub Issues](https://github.com/sbroenne/mcp-server-excel/issues)
+- **貢献:** [貢献ガイド](https://github.com/sbroenne/mcp-server-excel/blob/main/docs/CONTRIBUTING.md)
 
 ---
 
-## Agent Skills (Optional)
+## 次のステップ
 
-Agent Skills provide domain-specific guidance to AI coding assistants, helping them use Excel MCP Server more effectively.
+インストール後:
 
-> **Note:** Agent Skills are for **coding agents** (GitHub Copilot, Claude Code, Cursor). **Claude Desktop** uses MCP Prompts instead (included automatically via the MCP Server).
+1. **基本を学ぶ:** ワークシートの作成、値の設定などの簡単なコマンドを試す
+2. **機能を探索する:** 完全な機能リストについては[README](https://github.com/sbroenne/mcp-server-excel#readme)を参照
+3. **ガイドを読む:**
+   - [MCPサーバーガイド](https://github.com/sbroenne/mcp-server-excel/blob/main/src/ExcelMcp.McpServer/README.md)
+   - [CLIガイド](https://github.com/sbroenne/mcp-server-excel/blob/main/src/ExcelMcp.CLI/README.md)
+   - [エージェントスキル](https://github.com/sbroenne/mcp-server-excel/blob/main/skills/excel-mcp/SKILL.md) - クロスプラットフォームAIガイダンス
+4. **コミュニティに参加:** リポジトリにスターを付け、問題を報告、改善に貢献
 
-### Two Skills for Different Use Cases
+---
 
-| Skill | Target | Best For |
+## エージェントスキル（オプション）
+
+エージェントスキルはAIコーディングアシスタントにドメイン固有のガイダンスを提供し、Excel MCPサーバーをより効果的に使用できるようにします。
+
+> **注意:** エージェントスキルは**コーディングエージェント**（GitHub Copilot、Claude Code、Cursor）用です。**Claude Desktop**は代わりにMCPプロンプトを使用します（MCPサーバー経由で自動的に含まれます）。
+
+### 異なる使用例向けの2つのスキル
+
+| スキル | 対象 | 最適な用途 |
 |-------|--------|----------|
-| **excel-cli** | CLI Tool | **Coding agents** (Copilot, Cursor, Windsurf) - token-efficient, `excelcli --help` discoverable |
-| **excel-mcp** | MCP Server | **Conversational AI** (Claude Desktop, VS Code Chat) - rich tool schemas, exploratory workflows |
+| **excel-cli** | CLIツール | **コーディングエージェント**（Copilot、Cursor、Windsurf） - トークン効率的、`excelcli --help`で発見可能 |
+| **excel-mcp** | MCPサーバー | **対話型AI**（Claude Desktop、VS Code Chat） - リッチなツールスキーマ、探索的ワークフロー |
 
-**VS Code Extension:** Skills are installed automatically to `~/.copilot/skills/`.
+**VS Code拡張機能:** スキルは自動的に`~/.copilot/skills/`にインストールされます。
 
-**Other Platforms (Claude Code, Cursor, Windsurf, Gemini, Codex, etc.):**
+**他のプラットフォーム（Claude Code、Cursor、Windsurf、Gemini、Codexなど）:**
 
 ```powershell
-# Install CLI skill (recommended for coding agents - Copilot, Cursor, Windsurf, Codex, etc.)
+# CLIスキルをインストール（コーディングエージェント用に推奨 - Copilot、Cursor、Windsurf、Codexなど）
 npx skills add sbroenne/mcp-server-excel --skill excel-cli
 
-# Install MCP skill (for conversational AI - Claude Desktop, VS Code Chat)
+# MCPスキルをインストール（対話型AI用 - Claude Desktop、VS Code Chat）
 npx skills add sbroenne/mcp-server-excel --skill excel-mcp
 
-# Interactive install - prompts to select excel-cli, excel-mcp, or both
+# インタラクティブインストール - excel-cli、excel-mcp、または両方を選択するプロンプト
 npx skills add sbroenne/mcp-server-excel
 
-# Install specific skill directly
-npx skills add sbroenne/mcp-server-excel --skill excel-cli   # Coding agents
-npx skills add sbroenne/mcp-server-excel --skill excel-mcp   # Conversational AI
+# 特定のスキルを直接インストール
+npx skills add sbroenne/mcp-server-excel --skill excel-cli   # コーディングエージェント
+npx skills add sbroenne/mcp-server-excel --skill excel-mcp   # 対話型AI
 
-# Install both skills
+# 両方のスキルをインストール
 npx skills add sbroenne/mcp-server-excel --skill '*'
 
-# Target specific agent (optional - auto-detects if omitted)
+# 特定のエージェントを対象（オプション - 省略すると自動検出）
 npx skills add sbroenne/mcp-server-excel --skill excel-cli -a cursor
 npx skills add sbroenne/mcp-server-excel --skill excel-mcp -a claude-code
 ```
 
-**Manual Installation:**
-1. Download `excel-skills-v{version}.zip` from [GitHub Releases](https://github.com/sbroenne/mcp-server-excel/releases/latest)
-2. The package contains both skills:
-   - `skills/excel-cli/` - for coding agents (Copilot, Cursor, Windsurf)
-   - `skills/excel-mcp/` - for conversational AI (Claude Desktop, VS Code Chat)
-3. Extract the skill(s) you need to your AI assistant's skills directory:
-   - Copilot: `~/.copilot/skills/excel-cli/` or `~/.copilot/skills/excel-mcp/`
-   - Claude Code: `.claude/skills/excel-cli/` or `.claude/skills/excel-mcp/`
-   - Cursor: `.cursor/skills/excel-cli/` or `.cursor/skills/excel-mcp/`
+**手動インストール:**
+1. [GitHubリリース](https://github.com/sbroenne/mcp-server-excel/releases/latest)から`excel-skills-v{version}.zip`をダウンロード
+2. パッケージには両方のスキルが含まれています:
+   - `skills/excel-cli/` - コーディングエージェント用（Copilot、Cursor、Windsurf）
+   - `skills/excel-mcp/` - 対話型AI用（Claude Desktop、VS Code Chat）
+3. 必要なスキルをAIアシスタントのスキルディレクトリに解凍:
+   - Copilot: `~/.copilot/skills/excel-cli/` または `~/.copilot/skills/excel-mcp/`
+   - Claude Code: `.claude/skills/excel-cli/` または `.claude/skills/excel-mcp/`
+   - Cursor: `.cursor/skills/excel-cli/` または `.cursor/skills/excel-mcp/`
 
-**See:** [Agent Skills Documentation](https://github.com/sbroenne/mcp-server-excel/blob/main/skills/README.md)
+**参照:** [エージェントスキルドキュメント](https://github.com/sbroenne/mcp-server-excel/blob/main/skills/README.md)
 
 ---
 
-**Happy automating! 🚀**
+**ハッピーオートメーション！🚀**

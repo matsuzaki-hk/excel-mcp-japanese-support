@@ -10,6 +10,14 @@ This changelog covers all components:
 
 ## [Unreleased]
 
+### Added
+
+- **日本語化対応**: SKILLファイルを日本語化
+  - skills/shared/配下の21ファイルを日本語化（behavioral-rules.md、gotchas.md、anti-patterns.md等）
+  - skills/templates/SKILL.mcp.sbnおよびSKILL.cli.sbnを日本語化
+  - skills/excel-mcp/SKILL.mdを日本語化
+  - ワークフロー、ベストプラクティス、制約事項を日本語で提供
+
 ### Fixed
 
 - **Session open/create timeouts are shorter and more actionable** (#559): The default Excel session startup/operation timeout is now 120 seconds instead of 5 minutes, while MCP `timeout_seconds` and CLI `--timeout` continue to override it for slow workbooks. Startup timeout errors now explicitly identify likely prompt/auth/IRM causes and tell agents to retry with a longer timeout or `show=true` / `--show`.

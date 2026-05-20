@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to ExcelMcp will be documented in this file.
 
@@ -22,6 +22,14 @@ This changelog covers all components:
 - **Dependency audit pin refreshed**: Updated the central `Nerdbank.MessagePack` security override to a non-vulnerable version so NuGet audit restore/build checks no longer fail on the prior pinned package.
 
 - **Dependency freshness refresh**: Bumped all outdated centrally managed packages to their latest stable versions: Azure.Core (1.57.0 → 1.59.0), the `Microsoft.Extensions.*` / `System.*` 10.0.8 family → 10.0.9 (Hosting, Logging, Logging.Abstractions, Caching.Abstractions, Configuration, Configuration.Binder, DependencyInjection, Diagnostics, Diagnostics.Abstractions, ObjectPool, Options, Options.ConfigurationExtensions, Bcl.AsyncInterfaces, Collections.Immutable, Reflection.Metadata, Text.Encoding.CodePages, Memory.Data, Security.Cryptography.ProtectedData, Text.Json, Threading.RateLimiting), Microsoft.Extensions.AI.Abstractions and Microsoft.Extensions.Resilience (10.6.0 → 10.7.0), Microsoft.Identity.Client + Microsoft.Identity.Client.Extensions.Msal (4.84.1 → 4.84.2), MessagePack + MessagePack.Annotations (3.1.6 → 3.1.7), System.ClientModel (1.13.0 → 1.14.0), Scriban (7.2.3 → 7.2.4), Microsoft.CodeAnalysis.NetAnalyzers (10.0.300 → 10.0.301), ModelContextProtocol (1.3.0 → 1.4.0), and Spectre.Console (0.55.2 → 0.56.0; Spectre.Console.Cli stays at 0.55.0 as it has no 0.56.0 stable). Microsoft.Office.Interop.Excel stays at 16.0.18925.20022 (already latest). Refreshed the VS Code extension dev dependencies (@types/node, @vscode/vsce, oxlint) and regenerated its lockfile with 0 npm audit vulnerabilities.
+
+### Added
+
+- **日本語化対応**: SKILLファイルを日本語化
+  - skills/shared/配下の21ファイルを日本語化（behavioral-rules.md、gotchas.md、anti-patterns.md等）
+  - skills/templates/SKILL.mcp.sbnおよびSKILL.cli.sbnを日本語化
+  - skills/excel-mcp/SKILL.mdを日本語化
+  - ワークフロー、ベストプラクティス、制約事項を日本語で提供
 
 ### Fixed
 

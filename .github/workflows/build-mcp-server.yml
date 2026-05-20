@@ -18,6 +18,7 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
       - '.github/workflows/build-mcp-server.yml'
+  workflow_dispatch:
 
 jobs:
   build-mcp-server:

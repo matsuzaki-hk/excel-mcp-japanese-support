@@ -31,6 +31,7 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
       - '.github/workflows/build-cli.yml'
+  workflow_dispatch:
 
 jobs:
   build-cli:

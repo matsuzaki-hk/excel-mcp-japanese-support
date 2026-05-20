@@ -168,6 +168,187 @@ public partial class VbaCommands
             }
         });
     }
+
+    /// <inheritdoc />
+    public VbaExportResult Export(IExcelBatch batch, string[]? moduleNames, string? outputDirectory, bool overwrite = false)
+    {
+        var (isValid, validationError) = ValidateVbaFile(batch.WorkbookPath);
+        if (!isValid)
+        {
+            throw new InvalidOperationException(validationError);
+        }
+
+        // Check VBA trust BEFORE attempting operation
+        if (!IsVbaTrustEnabled())
+        {
+            throw new InvalidOperationException(VbaTrustErrorMessage);
+        }
+
+        // Determine output directory
+        if (string.IsNullOrEmpty(outputDirectory))
+        {
+            // Create a folder in the workspace
+            outputDirectory = Path.Combine(Path.GetDirectoryName(batch.WorkbookPath) ?? Directory.GetCurrentDirectory(), "vba_export");
+            Directory.CreateDirectory(outputDirectory);
+        }
+        else if (!Directory.Exists(outputDirectory))
+        {
+            Directory.CreateDirectory(outputDirectory);
+        }
+
+        return batch.Execute((ctx, ct) =>
+        {
+            dynamic? vbaProject = null;
+            dynamic? vbComponents = null;
+            try
+            {
+                vbaProject = ((dynamic)ctx.Book).VBProject;
+                vbComponents = vbaProject.VBComponents;
+
+                var result = new VbaExportResult
+                {
+                    Success = true,
+                    FilePath = batch.WorkbookPath,
+                    OutputDirectory = outputDirectory,
+                    ModulesExported = 0,
+                    ExportedFiles = [],
+                    FailedModules = []
+                };
+
+                // Determine which modules to export
+                var modulesToExport = new List<string>();
+                if (moduleNames == null || moduleNames.Length == 0)
+                {
+                    // Export all modules
+                    for (int i = 1; i <= vbComponents.Count; i++)
+                    {
+                        dynamic? component = null;
+                        try
+                        {
+                            component = vbComponents.Item(i);
+                            var componentType = component.Type;
+                            // Only export standard modules (type = 1), class modules (type = 2), and forms (type = 3)
+                            // Skip document modules (type = 100) as they are tied to worksheets
+                            if (componentType is 1 or 2 or 3)
+                            {
+                                modulesToExport.Add(component.Name);
+                            }
+                        }
+                        finally
+                        {
+                            if (component != null)
+                            {
+                                ComUtilities.Release(ref component);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    modulesToExport.AddRange(moduleNames);
+                }
+
+                // Export each module
+                foreach (var moduleName in modulesToExport)
+                {
+                    dynamic? component = null;
+                    try
+                    {
+                        // Find the component
+                        component = null;
+                        for (int i = 1; i <= vbComponents.Count; i++)
+                        {
+                            dynamic? comp = null;
+                            try
+                            {
+                                comp = vbComponents.Item(i);
+                                if (comp.Name == moduleName)
+                                {
+                                    component = comp;
+                                    comp = null;
+                                    break;
+                                }
+                            }
+                            finally
+                            {
+                                if (comp != null)
+                                {
+                                    ComUtilities.Release(ref comp);
+                                }
+                            }
+                        }
+
+                        if (component == null)
+                        {
+                            result.FailedModules.Add(moduleName);
+                            continue;
+                        }
+
+                        // Generate output file path
+                        var fileName = $"{moduleName}.bas";
+                        var filePath = Path.Combine(outputDirectory, fileName);
+
+                        // Handle overwrite
+                        if (!overwrite && File.Exists(filePath))
+                        {
+                            // Append timestamp to avoid overwrite
+                            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+                            fileName = $"{moduleName}_{timestamp}.bas";
+                            filePath = Path.Combine(outputDirectory, fileName);
+                        }
+
+                        // Export the module
+                        component.Export(filePath);
+
+                        // Read the file to get line count
+                        var lines = File.ReadAllLines(filePath);
+                        var lineCount = lines.Length;
+
+                        result.ExportedFiles.Add(new ExportedModuleInfo
+                        {
+                            ModuleName = moduleName,
+                            FilePath = filePath,
+                            Overwritten = overwrite && File.Exists(Path.Combine(outputDirectory, $"{moduleName}.bas")),
+                            LineCount = lineCount
+                        });
+
+                        result.ModulesExported++;
+                    }
+                    catch (Exception ex)
+                    {
+                        result.FailedModules.Add(moduleName);
+                        result.Success = false;
+                        result.ErrorMessage = $"Failed to export module '{moduleName}': {ex.Message}";
+                    }
+                    finally
+                    {
+                        if (component != null)
+                        {
+                            ComUtilities.Release(ref component);
+                        }
+                    }
+                }
+
+                if (result.FailedModules.Count > 0)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = $"Failed to export {result.FailedModules.Count} module(s): {string.Join(", ", result.FailedModules)}";
+                }
+
+                return result;
+            }
+            catch (COMException comEx) when (comEx.Message.Contains("programmatic access", StringComparison.OrdinalIgnoreCase) ||
+                                             comEx.ErrorCode == unchecked((int)0x800A03EC))
+            {
+                throw new InvalidOperationException(VbaTrustErrorMessage, comEx);
+            }
+            finally
+            {
+                ComUtilities.Release(ref vbComponents);
+                ComUtilities.Release(ref vbaProject);
+            }
+        });
+    }
 }
 
 

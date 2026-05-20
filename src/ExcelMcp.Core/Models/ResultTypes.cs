@@ -729,6 +729,58 @@ public class VbaViewResult : ResultBase
 }
 
 /// <summary>
+/// Result for exporting VBA modules to .bas files
+/// </summary>
+public class VbaExportResult : ResultBase
+{
+    /// <summary>
+    /// Output directory where files were saved
+    /// </summary>
+    public string OutputDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Number of modules exported
+    /// </summary>
+    public int ModulesExported { get; set; }
+
+    /// <summary>
+    /// List of exported files with their paths
+    /// </summary>
+    public List<ExportedModuleInfo> ExportedFiles { get; set; } = [];
+
+    /// <summary>
+    /// List of modules that failed to export
+    /// </summary>
+    public List<string> FailedModules { get; set; } = [];
+}
+
+/// <summary>
+/// Information about an exported VBA module
+/// </summary>
+public class ExportedModuleInfo
+{
+    /// <summary>
+    /// Module name
+    /// </summary>
+    public string ModuleName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// File path where the module was saved
+    /// </summary>
+    public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the file was overwritten or a new file was created with timestamp
+    /// </summary>
+    public bool Overwritten { get; set; }
+
+    /// <summary>
+    /// Number of lines in the exported module
+    /// </summary>
+    public int LineCount { get; set; }
+}
+
+/// <summary>
 /// Information about a VBA script
 /// </summary>
 public class ScriptInfo

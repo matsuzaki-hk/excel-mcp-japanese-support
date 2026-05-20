@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to ExcelMcp will be documented in this file.
 
@@ -170,6 +170,14 @@ Entries are short and end-user-facing. Format follows [Keep a Changelog](https:/
 
 - **Excel automation now uses Microsoft's official 16.x interop assembly, fully embedded** (#559): Improves reliability and removes a class of "missing office.dll" startup failures on machines without the exact matching Office version installed.
 - Routine dependency updates across the .NET and VS Code extension toolchains to keep packages current and free of known vulnerabilities.
+
+### Added
+
+- **日本語化対応**: SKILLファイルを日本語化
+  - skills/shared/配下の21ファイルを日本語化（behavioral-rules.md、gotchas.md、anti-patterns.md等）
+  - skills/templates/SKILL.mcp.sbnおよびSKILL.cli.sbnを日本語化
+  - skills/excel-mcp/SKILL.mdを日本語化
+  - ワークフロー、ベストプラクティス、制約事項を日本語で提供
 
 ### Fixed
 

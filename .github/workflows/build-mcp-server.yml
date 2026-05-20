@@ -5,7 +5,7 @@ permissions:
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, ja-localization ]
     paths:
       - 'src/ExcelMcp.McpServer/**'
       - 'src/ExcelMcp.Core/**'

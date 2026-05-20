@@ -5,7 +5,7 @@ name: "CodeQL Advanced Security"
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "ja-localization" ]
     paths:
       - 'src/**'
       - 'tests/**'
@@ -16,7 +16,7 @@ on:
       - '.github/workflows/codeql.yml'
       - '.github/codeql/**'
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "ja-localization" ]
     paths:
       - 'src/**'
       - 'tests/**'

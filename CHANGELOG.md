@@ -10,6 +10,14 @@ This changelog covers all components:
 
 ## [Unreleased]
 
+### Added
+
+- **日本語化対応**: SKILLファイルを日本語化
+  - skills/shared/配下の21ファイルを日本語化（behavioral-rules.md、gotchas.md、anti-patterns.md等）
+  - skills/templates/SKILL.mcp.sbnおよびSKILL.cli.sbnを日本語化
+  - skills/excel-mcp/SKILL.mdを日本語化
+  - ワークフロー、ベストプラクティス、制約事項を日本語で提供
+
 ### Fixed
 
 - **MCP Server stdio no longer emits Application Insights info noise during startup** (#559): Application Insights informational logs are now explicitly filtered out of the console provider so stdio clients no longer see lines such as `info: Microsoft.ApplicationInsights.TelemetryClient[0]` on stderr during MCP initialization. Warning and error logs still go to stderr, while stdout remains reserved for JSON-RPC frames.

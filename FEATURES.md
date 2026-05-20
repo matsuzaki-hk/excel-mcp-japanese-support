@@ -1,509 +1,506 @@
-# ExcelMcp - Complete Feature Reference
+# ExcelMcp - 完全な機能リファレンス
 
-**25 specialized tools with 230 operations for comprehensive Excel automation**
-
----
-
-## 📁 File Operations (6 operations)
-
-- **List Sessions:** View all active Excel sessions
-- **Open:** Open workbook and create session (returns session ID for all subsequent operations). IRM/AIP-protected files are automatically detected and opened read-only with Excel visible for credential authentication — no extra parameters needed.
-- **Close:** Close session with optional save
-- **Close Workbook:** Close workbook without closing Excel
-- **Create Empty:** Create new .xlsx or .xlsm workbook
-- **Test:** Verify workbook can be opened and is accessible. Returns `isIrmProtected` flag for IRM/AIP-protected files.
+**包括的なExcel自動化のための25の専門ツールと230操作**
 
 ---
 
-## 🧮 Calculation Mode (3 operations)
+## 📁 ファイル操作（6操作）
 
-- **Get Mode:** Query current calculation mode and calculation state
-- **Set Mode:** Switch between automatic, manual, and semi-automatic modes
-- **Calculate:** Explicitly recalculate workbook, sheet, or range
-
----
-
-## 🔄 Power Query & M Code (12 operations)
-
-**Atomic Operations** - Single-call workflows:
-- **List:** List all Power Query queries in workbook
-- **View:** View the M code of a Power Query
-- **Create:** Import + load in one operation (atomic workflow), preserving M code by default
-- **Update:** Update M code, preserving M code by default, with optional auto-refresh
-- **Rename:** Rename a Power Query (trim + case-insensitive uniqueness check)
-- **Refresh:** Refresh a Power Query with timeout detection
-- **Refresh All:** Batch refresh all queries in workbook
-- **Load To:** Configure load destination and refresh (atomic)
-- **Get Load Config:** Get current load configuration
-- **Unload:** Remove data from all destinations (keeps query definition)
-- **Delete:** Remove Power Query from workbook
-- **Evaluate:** Execute M code directly and return results (without creating a permanent query)
-
-**M-Code Formatting:** M code is preserved exactly by default. Create and Update can opt in to remote formatting with `formatMCode=true`, which sends M code to powerqueryformatter.com and adds network latency. If remote formatting fails, the original M code is saved unchanged.
+- **セッション一覧:** すべてのアクティブなExcelセッションを表示
+- **開く:** ワークブックを開いてセッションを作成（すべての後続操作のためにセッションIDを返す）。IRM/AIP保護ファイルは自動的に検出され、資格情報認証のためにExcelを表示して読み取り専用で開かれます - 追加のパラメータは不要です。
+- **閉じる:** オプションで保存してセッションを閉じる
+- **ワークブックを閉じる:** Excelを閉じずにワークブックを閉じる
+- **空の作成:** 新しい.xlsxまたは.xlsmワークブックを作成
+- **テスト:** ワークブックを開いてアクセス可能か確認する。IRM/AIP保護ファイルのために`isIrmProtected`フラグを返します。
 
 ---
 
-## 📊 Data Model & DAX (Power Pivot) (19 operations)
+## 🧮 計算モード（3操作）
 
-- **List Tables:** Discover all tables in the Data Model
-- **Read Table:** Get specific table information
-- **Rename Table:** Rename a Data Model table (best-effort via Power Query; returns clear error if not supported)
-- **List Columns:** List columns for a table
-- **List Measures:** List all DAX measures with formula previews
-- **Read Info:** Get comprehensive model information
-- **Create Measure:** Create new DAX measure, preserving DAX by default (format types: Currency, Percentage, Decimal, General)
-- **Update Measure:** Modify existing measure, preserving DAX by default
-- **Delete Measure:** Remove measure from model
-- **Delete Table:** Remove table from Data Model
-- **List Relationships:** View all table relationships
-- **Read Relationship:** Get specific relationship info
-- **Create Relationship:** Create relationship between tables
-- **Update Relationship:** Modify relationship (toggle active/inactive)
-- **Delete Relationship:** Remove relationship
-- **Refresh:** Refresh entire Data Model
-- **List Workbook Connections:** List Power Query sources available for integration
-- **Evaluate:** Execute DAX EVALUATE queries and return tabular results (for ad-hoc analysis)
-- **Execute DMV:** Execute SQL-like DMV (Dynamic Management View) queries for metadata discovery
-
-**DAX Formatting:** DAX formulas are preserved exactly by default, subject to Excel locale separator translation. CreateMeasure and UpdateMeasure can opt in to remote formatting with `formatDax=true`, which sends DAX to daxformatter.com and adds network latency. If remote formatting fails, the original DAX is saved unchanged.
-
-**Note:** DAX calculated columns not supported - use Excel UI for calculated columns
+- **モード取得:** 現在の計算モードと計算状態を確認
+- **モード設定:** 自動、手動、セミ自動モードを切り替え
+- **計算:** ワークブック、シート、または範囲を明示的に再計算
 
 ---
 
-## 🎨 Excel Tables (ListObjects) (27 operations)
+## 🔄 Power QueryとMコード（12操作）
 
-**Lifecycle:**
-- List, read, create, rename, resize, delete tables
+**アトミック操作** - 単一呼び出しワークフロー:
+- **一覧:** ワークブック内のすべてのPower Queryクエリを一覧表示
+- **表示:** Power QueryのMコードを表示
+- **作成:** インポートとロードを1回の操作で実行（アトミックワークフロー）、デフォルトでMコードを保持
+- **更新:** Mコードを更新、デフォルトでMコードを保持、オプションで自動更新
+- **名前変更:** Power Queryの名前を変更（トリム + 大文字小文字を区別しない一意性チェック）
+- **更新:** タイムアウト検出でPower Queryを更新
+- **すべて更新:** ワークブック内のすべてのクエリをバッチ更新
+- **ロード先:** ロード先を設定して更新（アトミック）
+- **ロード設定取得:** 現在のロード設定を取得
+- **アンロード:** すべての宛先からデータを削除（クエリ定義は保持）
+- **削除:** ワークブックからPower Queryを削除
+- **評価:** Mコードを直接実行して結果を返す（永続的なクエリを作成せず）
 
-**Styling & Formatting:**
-- Apply table styles
-- Toggle totals row
-- Set column totals
-
-**Data Operations:**
-- Append rows
-- Get table data (with optional visible-only filtering)
-- Add to Data Model
-
-**DAX-Backed Tables:**
-- Create from DAX (create Excel Table populated by DAX EVALUATE query)
-- Update DAX (change the DAX query of an existing DAX-backed table)
-- Get DAX (retrieve DAX query info from a table)
-
-**Filter Operations:**
-- Apply filter (criteria)
-- Apply filter (values)
-- Clear filters
-- Get filter state
-
-**Column Management:**
-- Add, remove, rename columns
-
-**Structured References:**
-- Get structured reference (formula syntax for table columns/ranges)
-
-**Sorting:**
-- Single-column sort
-- Multi-column sort (up to 3 levels)
-
-**Number Formatting:**
-- Get column number formats
-- Set column number formats
+**Mコードフォーマット:** Mコードはデフォルトで正確に保持されます。作成と更新は`formatMCode=true`でリモートフォーマットをオプトインでき、Mコードをpowerqueryformatter.comに送信してネットワーク遅延を追加します。リモートフォーマットが失敗した場合、元のMコードは変更されずに保存されます。
 
 ---
 
-## 📈 PivotTables (30 operations)
+## 📊 Data ModelとDAX（Power Pivot）（19操作）
 
-**Creation:**
-- Create from range
-- Create from Excel Table
-- Create from Data Model
+- **テーブル一覧:** Data Model内のすべてのテーブルを発見
+- **テーブル読み取り:** 特定のテーブル情報を取得
+- **テーブル名変更:** Data Modelテーブルの名前を変更（Power Query経由でベストエフォート; サポートされていない場合は明確なエラーを返す）
+- **列一覧:** テーブルの列を一覧表示
+- **メジャー一覧:** 数式プレビュー付きですべてのDAXメジャーを一覧表示
+- **情報読み取り:** 包括的なモデル情報を取得
+- **メジャー作成:** 新しいDAXメジャーを作成、デフォルトでDAXを保持（フォーマットタイプ: 通貨、パーセンテージ、小数、一般）
+- **メジャー更新:** 既存のメジャーを変更、デフォルトでDAXを保持
+- **メジャー削除:** モデルからメジャーを削除
+- **テーブル削除:** Data Modelからテーブルを削除
+- **リレーションシップ一覧:** すべてのテーブルリレーションシップを表示
+- **リレーションシップ読み取り:** 特定のリレーションシップ情報を取得
+- **リレーションシップ作成:** テーブル間のリレーションシップを作成
+- **リレーションシップ更新:** リレーションシップを変更（アクティブ/非アクティブを切り替え）
+- **リレーションシップ削除:** リレーションシップを削除
+- **更新:** Data Model全体を更新
+- **ワークブック接続一覧:** 統合に利用可能なPower Queryソースを一覧表示
+- **評価:** DAX EVALUATEクエリを実行して表形式の結果を返す（アドホック分析用）
+- **DMV実行:** メタデータ発見のためにSQLライクなDMV（動的管理ビュー）クエリを実行
 
-**Field Management:**
-- List all fields (row, column, value, filter areas)
-- Add row field, column field, value field, filter field
-- Remove field
+**DAXフォーマット:** DAX数式はデフォルトで正確に保持され、Excelロケール区切り文字の変換が適用されます。CreateMeasureとUpdateMeasureは`formatDax=true`でリモートフォーマットをオプトインでき、DAXをdaxformatter.comに送信してネットワーク遅延を追加します。リモートフォーマットが失敗した場合、元のDAXは変更されずに保存されます。
 
-**Field Configuration:**
-- Set field aggregation function (Sum, Average, Count, Min, Max, etc.)
-- Set custom field name
-- Set field number format
-- Set field filter criteria
-- Sort field (ascending/descending)
-
-**Calculated Fields (Regular PivotTables):**
-- List calculated fields
-- Create calculated field
-- Delete calculated field
-
-**Calculated Members (OLAP/Data Model PivotTables):**
-- List calculated members
-- Create calculated member
-- Delete calculated member
-
-**Layout & Formatting:**
-- Set layout (table or outline)
-- Set subtotals display
-- Set grand totals display
-
-**Data Operations:**
-- Get PivotTable data as 2D array
-- Refresh PivotTable
-
-**Lifecycle:**
-- List PivotTables
-- Read PivotTable info
-- Delete PivotTable
+**注意:** DAX計算列はサポートされていません - 計算列にはExcel UIを使用してください
 
 ---
 
-## 📉 Charts (28 operations)
+## 🎨 Excelテーブル（ListObjects）（27操作）
 
-**Creation:**
-- Create from range
-- Create from PivotTable
+**ライフサイクル:**
+- テーブルの一覧、読み取り、作成、名前変更、サイズ変更、削除
 
-**Series Management:**
-- Add series
-- Remove series
-- Update series data
+**スタイリングとフォーマット:**
+- テーブルスタイルを適用
+- 合計行の切り替え
+- 列合計の設定
 
-**Configuration:**
-- Set data source range
-- Set chart type
-- Show/hide legend
-- Set style
+**データ操作:**
+- 行の追加
+- テーブルデータの取得（オプションで表示のみフィルタリング）
+- Data Modelに追加
 
-**Formatting:**
-- Set chart title
-- Set axis title
-- Set axis number format
-- Get axis number format
+**DAXバックテーブル:**
+- DAXから作成（DAX EVALUATEクエリで入力されたExcelテーブルを作成）
+- DAX更新（既存のDAXバックテーブルのDAXクエリを変更）
+- DAX取得（テーブルからDAXクエリ情報を取得）
 
-**Data Labels:**
-- Configure data labels (show values, percentages, category names, etc.)
-- Set label position (Center, InsideEnd, OutsideEnd, etc.)
-- Apply to all series or specific series
+**フィルタ操作:**
+- フィルタ適用（条件）
+- フィルタ適用（値）
+- フィルタクリア
+- フィルタ状態の取得
 
-**Axis Scale:**
-- Get axis scale settings
-- Set minimum/maximum scale
-- Set major/minor units
+**列管理:**
+- 列の追加、削除、名前変更
 
-**Gridlines:**
-- Get gridlines configuration
-- Set major/minor gridlines visibility
+**構造化参照:**
+- 構造化参照の取得（テーブル列/範囲の数式構文）
 
-**Series Formatting:**
-- Set marker style (Circle, Square, Diamond, Triangle, etc.)
-- Set marker size
-- Set marker colors
+**ソート:**
+- 単一列ソート
+- 複数列ソート（最大3レベル）
 
-**Trendlines:**
-- Add trendline (Linear, Exponential, Logarithmic, Polynomial, Power, MovingAverage)
-- List trendlines on series
-- Delete trendline
-- Configure trendline (forecast forward/backward, display equation, display R²)
-
-**Placement & Positioning:**
-- Set chart placement (move/size with cells options)
-- Fit to range (position and size to match a range)
-
-**Lifecycle:**
-- List charts
-- Read chart info
-- Move chart (to different worksheet or new sheet)
-- Delete chart
+**数値フォーマット:**
+- 列数値フォーマットの取得
+- 列数値フォーマットの設定
 
 ---
 
-## 📋 Ranges (46 operations)
+## 📈 PivotTables（30操作）
 
-Formatting split: use `range` for number display formats such as dates, currency, percentages, and text display. Use `range_format` for visual styling, validation, auto-fit, and size/layout changes.
+**作成:**
+- 範囲から作成
+- Excelテーブルから作成
+- Data Modelから作成
 
-**Data Operations:**
-- Get values
-- Set values
-- Get formulas
-- Set formulas
-- Clear all
-- Clear contents
-- Clear formats
-- Copy
-- Copy values
-- Copy formulas
-- Insert cells
-- Delete cells
-- Insert rows
-- Delete rows
-- Insert columns
-- Delete columns
-- Find
-- Replace
-- Sort
+**フィールド管理:**
+- すべてのフィールドを一覧表示（行、列、値、フィルタ領域）
+- 行フィールド、列フィールド、値フィールド、フィルタフィールドを追加
+- フィールドを削除
 
-**Discovery & Utilities:**
-- Get used range
-- Get current region
-- Get range info (address, dimensions)
+**フィールド設定:**
+- フィールド集計関数の設定（合計、平均、カウント、最小、最大など）
+- カスタムフィールド名の設定
+- フィールド数値フォーマットの設定
+- フィールドフィルタ条件の設定
+- フィールドのソート（昇順/降順）
 
-**Hyperlinks:**
-- Add hyperlink
-- Remove hyperlink
-- List hyperlinks
-- Get specific hyperlink
+**計算フィールド（通常のPivotTables）:**
+- 計算フィールドの一覧表示
+- 計算フィールドの作成
+- 計算フィールドの削除
 
-**Number Formatting (`range`):**
-- Get number formats (as 2D array)
-- Set number format (uniform)
-- Set number formats (individual)
+**計算メンバー（OLAP/Data Model PivotTables）:**
+- 計算メンバーの一覧表示
+- 計算メンバーの作成
+- 計算メンバーの削除
 
-**Visual Formatting (`range_format`):**
-- Get style
-- Set style (built-in Excel styles)
-- Format range (font, color, borders, alignment, orientation)
-- Format multiple ranges with one shared formatting payload
+**レイアウトとフォーマット:**
+- レイアウトの設定（テーブルまたはアウトライン）
+- 小計表示の設定
+- 総計表示の設定
 
-**Data Validation (`range_format`):**
-- Add validation rules (dropdowns, number/date/text rules)
-- Get validation info
-- Remove validation
+**データ操作:**
+- PivotTableデータを2次元配列として取得
+- PivotTableの更新
 
-**Merge Operations (`range_format`):**
-- Merge cells
-- Unmerge cells
-- Get merge info
-
-**Cell Protection:**
-- Set cell lock status
-- Get cell lock status
-
-**Auto-Sizing (`range_format`):**
-- Auto-fit columns
-- Auto-fit rows
+**ライフサイクル:**
+- PivotTableの一覧表示
+- PivotTable情報の読み取り
+- PivotTableの削除
 
 ---
 
-## 📄 Worksheets (16 operations)
+## 📉 チャート（28操作）
 
-**Lifecycle:**
-- List worksheets
-- Create worksheet
-- Rename worksheet
-- Copy worksheet
-- Move worksheet
-- Delete worksheet
+**作成:**
+- 範囲から作成
+- PivotTableから作成
 
-**Cross-Workbook Operations:**
-- Copy worksheet to file (atomic)
-- Move worksheet to file (atomic)
+**系列管理:**
+- 系列の追加
+- 系列の削除
+- データソース範囲の設定
 
-**Tab Colors:**
-- Set tab color (RGB)
-- Get tab color
-- Clear tab color
+**設定:**
+- データソース範囲の設定
+- チャートタイプの設定
+- 凡例の表示/非表示
+- スタイルの設定
 
-**Visibility:**
-- Show worksheet
-- Hide worksheet
-- Very hide worksheet (hidden from UI)
-- Get visibility status
-- Set visibility status
+**フォーマット:**
+- チャートタイトルの設定
+- 軸タイトルの設定
+- 軸数値フォーマットの設定
+- 軸数値フォーマットの取得
 
----
+**データラベル:**
+- データラベルの設定（値、パーセンテージ、カテゴリ名などを表示）
+- ラベル位置の設定（中央、内側端、外側端など）
+- すべての系列または特定の系列に適用
 
-## 🔌 Data Connections (9 operations)
+**軸スケール:**
+- 軸スケール設定の取得
+- 最小/最大スケールの設定
+- 主/副単位の設定
 
-- **List:** View all data connections
-- **View:** Get connection details
-- **Create:** Create OLEDB/ODBC connections (requires provider installed)
-- **Test:** Verify connection validity
-- **Refresh:** Refresh connection data
-- **Delete:** Remove connection
-- **Load To:** Load connection data to worksheet (when supported)
-- **Get Properties:** Get connection string and metadata
-- **Set Properties:** Update connection string, command text, and settings
+**グリッド線:**
+- グリッド線設定の取得
+- 主/副グリッド線の表示/非表示の設定
 
-**Supported Types:**
-- OLEDB (requires Microsoft.ACE.OLEDB.16.0 or similar)
-- ODBC (requires ODBC driver installed)
-- Power Query connections (atomic redirect to powerquery)
+**系列フォーマット:**
+- マーカースタイルの設定（円、四角、ひし形、三角形など）
+- マーカーサイズの設定
+- マーカーカラーの設定
 
-**Automatic Fallback:**
-- TEXT/WEB connections automatically redirect to powerquery for reliable imports
+**トレンドライン:**
+- トレンドラインの追加（線形、指数、対数、多項式、累乗、移動平均）
+- 系列のトレンドライン一覧表示
+- トレンドラインの削除
+- トレンドラインの設定（予測前方/後方、数式表示、R²表示）
 
----
+**配置と配置:**
+- チャート配置の設定（セルでの移動/サイズ変更オプション）
+- 範囲に合わせる（範囲に一致する位置とサイズ）
 
-## 🏷️ Named Ranges (Parameters) (6 operations)
-
-- **List:** List all named ranges with references
-- **Read:** Get value of a named range
-- **Write:** Set value of a named range (ideal for parameter automation)
-- **Create:** Create new named range
-- **Update:** Modify existing named range
-- **Delete:** Remove named range
-
-**Use Cases:**
-- Workbook parameter management without touching worksheets
-- Ideal for automation: update parameter → Power Query refreshes automatically
+**ライフサイクル:**
+- チャートの一覧表示
+- チャート情報の読み取り
+- チャートの移動（別のワークシートまたは新しいシートへ）
+- チャートの削除
 
 ---
 
-## 📝 VBA Macros (6 operations)
+## 📋 範囲（46操作）
 
-- **List:** List VBA components and discovered procedures
-- **View:** Display component code without exporting
-- **Import:** Create a new standard module from code or file input
-- **Update:** Replace code in an existing VBA component
-- **Delete:** Remove a VBA component by name
-- **Run:** Execute a procedure with optional string parameters
+フォーマットの分割: 日付、通貨、パーセンテージ、テキスト表示などの数値表示フォーマットには`range`を使用します。視覚スタイリング、検証、自動調整、サイズ/レイアウトの変更には`range_format`を使用します。
 
-**Features:**
-- Procedural/module-focused VBA support for `.xlsm` workbooks
-- Manual VBA trust prerequisite in Excel (no trust-configuration command)
-- Import creates standard modules; list/view also cover class, form, and document components
+**データ操作:**
+- 値の取得
+- 値の設定
+- 数式の取得
+- 数式の設定
+- すべてクリア
+- コンテンツのクリア
+- フォーマットのクリア
+- コピー
+- 値のコピー
+- 数式のコピー
+- セルの挿入
+- セルの削除
+- 行の挿入
+- 行の削除
+- 列の挿入
+- 列の削除
+- 検索
+- 置換
+- ソート
 
----
+**発見とユーティリティ:**
+- 使用範囲の取得
+- 現在の領域の取得
+- 範囲情報の取得（アドレス、寸法）
 
-## �️ Slicers (8 operations)
+**ハイパーリンク:**
+- ハイパーリンクの追加
+- ハイパーリンクの削除
+- ハイパーリンクの一覧表示
+- 特定のハイパーリンクの取得
 
-**PivotTable Slicers:**
-- **Create Slicer:** Add slicer for PivotTable field with optional position
-- **List Slicers:** List all PivotTable slicers in workbook
-- **Set Selection:** Filter PivotTable by slicer selection (single or multi-select)
-- **Delete Slicer:** Remove PivotTable slicer
+**数値フォーマット（`range`）:**
+- 数値フォーマットの取得（2次元配列として）
+- 数値フォーマットの設定（統一）
+- 数値フォーマットの設定（個別）
 
-**Table Slicers:**
-- **Create Table Slicer:** Add slicer for Excel Table column
-- **List Table Slicers:** List all Table slicers in workbook
-- **Set Table Selection:** Filter Table by slicer selection
-- **Delete Table Slicer:** Remove Table slicer
+**視覚フォーマット（`range_format`）:**
+- スタイルの取得
+- スタイルの設定（組み込みExcelスタイル）
+- 範囲のフォーマット（フォント、色、境界線、配置、方向）
+- 複数の範囲を1つの共有フォーマットでフォーマット
 
-**Use Cases:**
-- Interactive data filtering without modifying PivotTable/Table structure
-- Dashboard creation with visual filter controls
-- Multi-slicer filtering for complex data analysis
+**データ検証（`range_format`）:**
+- 検証ルールの追加（ドロップダウン、数値/日付/テキストルール）
+- 検証情報の取得
+- 検証の削除
 
----
+**結合操作（`range_format`）:**
+- セルの結合
+- セルの結合解除
+- 結合情報の取得
 
-## �🎨 Conditional Formatting (2 operations)
+**セル保護:**
+- セルロック状態の設定
+- セルロック状態の取得
 
-- **Add Rule:** Create conditional formatting rules
-  - Cell value comparisons (>, <, =, etc.)
-  - Expression-based formulas (custom DAX/Excel formulas)
-  - Color scales, data bars, icons
-- **Clear Rules:** Remove formatting from ranges
-
----
-
-## 📸 Screenshot (2 operations)
-
-- **Capture Range:** Capture a specific range as a PNG image
-- **Capture Sheet:** Capture the entire used area of a worksheet as a PNG image
-  - Uses Excel's built-in rendering (CopyPicture) — captures formatting, charts, conditional formatting
-  - MCP: Returns image directly as ImageContent (base64 PNG)
-  - CLI: Returns JSON with base64-encoded image data
-
----
-
-## 🪧 Window Management (9 operations)
-
-- **Show:** Makes Excel visible and brings it to the foreground
-- **Hide:** Hides the Excel window
-- **Bring to Front:** Brings Excel to the foreground without changing visibility
-- **Get Info:** Gets current window state (visibility, position, size, foreground status)
-- **Set State:** Sets window state to normal, minimized, or maximized
-- **Set Position:** Sets window position and size in points (left, top, width, height)
-- **Arrange:** Arranges Excel window using preset layouts
-- **Set Status Bar:** Displays custom text in Excel's status bar for real-time feedback
-- **Clear Status Bar:** Restores the default status bar text
-
-**Arrange Presets:**
-- `left-half` / `right-half` — Side-by-side with other applications
-- `top-half` / `bottom-half` — Stacked view
-- `center` — Centered window (60% of screen)
-- `full-screen` — Maximized
-
-**Use Cases:**
-- Interactive "agent mode" where users watch Excel respond to AI commands in real-time
-- Side-by-side: Excel on one half, AI assistant on the other
-- Visibility changes are reflected in session metadata (session list shows updated state)
+**自動サイズ調整（`range_format`）:**
+- 列の自動調整
+- 行の自動調整
 
 ---
 
-## 📊 Total Operations Summary
+## 📄 ワークシート（16操作）
 
-| Category | Operations |
+**ライフサイクル:**
+- ワークシートの一覧表示
+- ワークシートの作成
+- ワークシートの名前変更
+- ワークシートのコピー
+- ワークシートの移動
+- ワークシートの削除
+
+**ワークブック間操作:**
+- ワークシートをファイルにコピー（アトミック）
+- ワークシートをファイルに移動（アトミック）
+
+**タブ色:**
+- タブ色の設定（RGB）
+- タブ色の取得
+- タブ色のクリア
+
+**可視性:**
+- ワークシートの表示
+- ワークシートの非表示
+- ワークシートの非常に隠す（UIから非表示）
+- 可視性ステータスの取得
+- 可視性ステータスの設定
+
+---
+
+## 🔌 データ接続（9操作）
+
+- **一覧:** すべてのデータ接続を表示
+- **表示:** 接続の詳細を取得
+- **作成:** OLEDB/ODBC接続を作成（プロバイダーがインストールされている必要があります）
+- **テスト:** 接続の有効性を確認
+- **更新:** 接続データを更新
+- **削除:** 接続を削除
+- **ロード先:** 接続データをワークシートにロード（サポートされている場合）
+- **プロパティの取得:** 接続文字列とメタデータを取得
+- **プロパティの設定:** 接続文字列、コマンドテキスト、設定を更新
+
+**サポートされるタイプ:**
+- OLEDB（Microsoft.ACE.OLEDB.16.0または同等が必要）
+- ODBC（ODBCドライバーがインストールされている必要があります）
+- Power Query接続（powerqueryへのアトミックリダイレクト）
+
+**自動フォールバック:**
+- TEXT/WEB接続は信頼できるインポートのために自動的にpowerqueryにリダイレクト
+
+---
+
+## 🏷️ 名前付き範囲（パラメータ）（6操作）
+
+- **一覧:** 参照付きですべての名前付き範囲を一覧表示
+- **読み取り:** 名前付き範囲の値を取得
+- **書き込み:** 名前付き範囲の値を設定（パラメータ自動化に最適）
+- **作成:** 新しい名前付き範囲を作成
+- **更新:** 既存の名前付き範囲を変更
+- **削除:** 名前付き範囲を削除
+
+**使用例:**
+- ワークシートに触れずにワークブックパラメータ管理
+- 自動化に最適: パラメータを更新 → Power Queryが自動的に更新
+
+---
+
+## 📝 VBAマクロ（6操作）
+
+- **一覧:** VBAコンポーネントと発見されたプロシージャを一覧表示
+- **表示:** エクスポートせずにコンポーネントコードを表示
+- **インポート:** コードまたはファイル入力から新しい標準モジュールを作成
+- **更新:** 既存のVBAコンポーネントのコードを置換
+- **削除:** 名前でVBAコンポーネントを削除
+- **実行:** オプションの文字列パラメータでプロシージャを実行
+
+**機能:**
+- `.xlsm`ワークブック用の手続き/モジュール重視のVBAサポート
+- Excelでの手動VBA信頼前提条件（信頼設定コマンドなし）
+- インポートは標準モジュールを作成; 一覧/表示もクラス、フォーム、ドキュメントコンポーネントをカバー
+
+---
+
+## 🎚️ スライサー（8操作）
+
+**ピボットテーブルスライサー:**
+- **スライサー作成:** オプションの位置でピボットテーブルフィールドのスライサーを追加
+- **スライサー一覧:** ワークブック内のすべてのピボットテーブルスライサーを一覧表示
+- **選択設定:** スライサー選択でピボットテーブルをフィルタリング（単一または複数選択）
+- **スライサー削除:** ピボットテーブルスライサーを削除
+
+**テーブルスライサー:**
+- **テーブルスライサー作成:** Excelテーブル列のスライサーを追加
+- **テーブルスライサー一覧:** ワークブック内のすべてのテーブルスライサーを一覧表示
+- **テーブル選択設定:** スライサー選択でテーブルをフィルタリング
+- **テーブルスライサー削除:** テーブルスライサーを削除
+
+**使用例:**
+
+---
+
+## 🎨 条件付き書式（2操作）
+
+- **ルール追加:** 条件付き書式ルールを作成
+  - セル値の比較（>、<、=など）
+  - 式ベースの数式（カスタムDAX/Excel数式）
+  - カラースケール、データバー、アイコン
+- **ルールクリア:** 範囲からフォーマットを削除
+
+---
+
+## 📸 スクリーンショット（2操作）
+
+- **範囲キャプチャ:** 特定の範囲をPNG画像としてキャプチャ
+- **シートキャプチャ:** ワークシートの使用領域全体をPNG画像としてキャプチャ
+  - Excelの組み込みレンダリング（CopyPicture）を使用 - フォーマット、チャート、条件付き書式をキャプチャ
+  - MCP: 画像をImageContentとして直接返す（base64 PNG）
+  - CLI: base64エンコードされた画像データでJSONを返す
+
+---
+
+## 🪧 ウィンドウ管理（9操作）
+
+- **表示:** Excelを表示して前面に移動
+- **非表示:** Excelウィンドウを非表示
+- **前面に移動:** 表示を変更せずにExcelを前面に移動
+- **情報取得:** 現在のウィンドウ状態を取得（可視性、位置、サイズ、前面ステータス）
+- **状態設定:** ウィンドウ状態を標準、最小化、または最大化に設定
+- **位置設定:** ポイント単位でウィンドウの位置とサイズを設定（左、上、幅、高さ）
+- **配置:** プリセットレイアウトを使用してExcelウィンドウを配置
+- **ステータスバー設定:** リアルタイムフィードバックのためにExcelのステータスバーにカスタムテキストを表示
+- **ステータスバークリア:** デフォルトのステータスバーテキストを復元
+
+**配置プリセット:**
+- `left-half` / `right-half` — 他のアプリケーションと並べて表示
+- `top-half` / `bottom-half` — 積み重ねビュー
+- `center` — 中央揃えウィンドウ（画面の60%）
+- `full-screen` — 最大化
+
+**使用例:**
+- ユーザーがAIコマンドに対するExcelの応答をリアルタイムで監視するインタラクティブ「エージェントモード」
+- 並べて表示: 一方にExcel、もう一方にAIアシスタント
+- 可視性の変更はセッションメタデータに反映されます（セッション一覧が更新された状態を表示）
+
+---
+
+## 📊 操作合計サマリー
+
+| カテゴリ | 操作 |
 |----------|-----------|
-| File Operations | 6 |
+| ファイル操作 | 6 |
 | Power Query | 12 |
 | Data Model/DAX | 19 |
-| Excel Tables | 27 |
+| Excelテーブル | 27 |
 | PivotTables | 30 |
-| Charts | 29 |
-| Ranges | 46 |
-| Worksheets | 16 |
-| Connections | 9 |
-| Named Ranges | 6 |
-| VBA Macros | 6 |
-| Slicers | 8 |
-| Conditional Formatting | 2 |
-| Screenshot | 2 |
-| Calculation Mode | 3 |
-| Window Management | 9 |
-| **Total** | **230** |
+| チャート | 29 |
+| 範囲 | 46 |
+| ワークシート | 16 |
+| 接続 | 9 |
+| 名前付き範囲 | 6 |
+| VBAマクロ | 6 |
+| スライサー | 8 |
+| 条件付き書式 | 2 |
+| スクリーンショット | 2 |
+| 計算モード | 3 |
+| ウィンドウ管理 | 9 |
+| **合計** | **230** |
 
 ---
 
-## 🚀 Key Capabilities
+## 🚀 主要な機能
 
-**Data Transformation:**
-- Comprehensive Power Query M code management
-- Atomic import + load workflows
-- Calculated fields and members for analysis
+**データ変換:**
+- 包括的なPower Query Mコード管理
+- アトミックインポートとロードワークフロー
+- 分析用の計算フィールドとメンバー
 
 **Data Model:**
-- Full DAX measure lifecycle
-- Relationship management
-- Multi-table integration
+- 完全なDAXメジャーライフサイクル
+- リレーションシップ管理
+- マルチテーブル統合
 
-**Analysis & Visualization:**
-- PivotTable creation and configuration
-- Chart automation
-- Custom calculations
+**分析と可視化:**
+- PivotTableの作成と設定
+- チャート自動化
+- カスタム計算
 
-**Automation:**
-- VBA macro execution and management
-- Named range parameter automation
-- Conditional formatting rules
+**自動化:**
+- VBAマクロの実行と管理
+- 名前付き範囲パラメータ自動化
+- 条件付き書式ルール
 
-**Data Loading:**
-- Multiple connection type support
-- OLEDB/ODBC management
-- Power Query atomic workflows
+**データロード:**
+- 複数の接続タイプサポート
+- OLEDB/ODBC管理
+- Power Queryアトミックワークフロー
 
 ---
 
-## 🔧 Tool Selection Quick Reference
+## 🔧 ツール選択クイックリファレンス
 
-| Task | Tool |
+| タスク | ツール |
 |------|------|
-| Import data | `powerquery` or `connection` |
-| Create analysis | `pivottable` (data model-based for OLAP) |
-| Visualize data | `chart` |
-| Update parameters | `namedrange` (write operation) |
-| Manage formulas | `range` (set-formulas) |
-| Format data | `range` / `range_format` (`format-range`, `format-ranges`, `validate-range`) |
-| Script automation | `vba` (run macro) |
+| データのインポート | `powerquery` または `connection` |
+| 分析の作成 | `pivottable` （OLAPの場合はData Modelベース） |
+| データの可視化 | `chart` |
+| パラメータの更新 | `namedrange` （書き込み操作） |
+| 数式の管理 | `range` （set-formulas） |
+| データのフォーマット | `range` / `range_format` （`format-range`, `format-ranges`, `validate-range`） |
+| スクリプト自動化 | `vba` （マクロ実行） |
 
 ---
 
-## 📚 Documentation
+## 📚 ドキュメント
 
-- **[Installation Guide](https://github.com/sbroenne/mcp-server-excel/blob/main/docs/INSTALLATION.md)** - Setup for all AI assistants
-- **[MCP Server Guide](https://github.com/sbroenne/mcp-server-excel/blob/main/src/ExcelMcp.McpServer/README.md)** - Tool documentation and examples
-- **[CLI Guide](https://github.com/sbroenne/mcp-server-excel/blob/main/src/ExcelMcp.CLI/README.md)** - Command-line reference
-- **[Agent Skills](https://github.com/sbroenne/mcp-server-excel/blob/main/skills/excel-mcp/SKILL.md)** - Cross-platform AI assistant guidance (agentskills.io)
-- **[Contributing](https://github.com/sbroenne/mcp-server-excel/blob/main/docs/CONTRIBUTING.md)** - Development guidelines
-- **[Releases](https://github.com/sbroenne/mcp-server-excel/releases)** - Latest updates and features
+- **[インストールガイド](https://github.com/sbroenne/mcp-server-excel/blob/main/docs/INSTALLATION.md)** - すべてのAIアシスタントのセットアップ
+- **[MCPサーバーガイド](https://github.com/sbroenne/mcp-server-excel/blob/main/src/ExcelMcp.McpServer/README.md)** - ツールドキュメントと例
+- **[CLIガイド](https://github.com/sbroenne/mcp-server-excel/blob/main/src/ExcelMcp.CLI/README.md)** - コマンドラインリファレンス
+- **[エージェントスキル](https://github.com/sbroenne/mcp-server-excel/blob/main/skills/excel-mcp/SKILL.md)** - クロスプラットフォームAIアシスタントガイダンス（agentskills.io）
+- **[貢献](https://github.com/sbroenne/mcp-server-excel/blob/main/docs/CONTRIBUTING.md)** - 開発ガイドライン
+- **[リリース](https://github.com/sbroenne/mcp-server-excel/releases)** - 最新の更新と機能

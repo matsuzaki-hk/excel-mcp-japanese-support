@@ -25,6 +25,12 @@ This changelog covers all components:
 
 ### Added
 
+- **VBAモジュールエクスポート機能**: VBAモジュールを.basファイルとしてエクスポート
+  - 複数モジュールの一括エクスポート対応
+  - 出力ディレクトリ指定可能（未指定の場合はワークスペースにvba_exportフォルダを作成）
+  - 上書き回避機能（overwrite=falseの場合、日時を付与してファイル名を変更）
+  - エクスポート結果にファイルパス、上書きフラグ、行数を含む詳細情報を返す
+
 - **日本語化対応**: SKILLファイルを日本語化
   - skills/shared/配下の21ファイルを日本語化（behavioral-rules.md、gotchas.md、anti-patterns.md等）
   - skills/templates/SKILL.mcp.sbnおよびSKILL.cli.sbnを日本語化

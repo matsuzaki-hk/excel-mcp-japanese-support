@@ -284,8 +284,18 @@ public partial class VbaCommands
                             continue;
                         }
 
+                        // Determine file extension based on component type
+                        // 1=Standard Module(.bas), 2=Class Module(.cls), 3=UserForm(.frm), 100=Document(skip)
+                        int componentType = component.Type;
+                        string extension = componentType switch
+                        {
+                            2 => ".cls",
+                            3 => ".frm",
+                            _ => ".bas"
+                        };
+
                         // Generate output file path
-                        var fileName = $"{moduleName}.bas";
+                        var fileName = $"{moduleName}{extension}";
                         var filePath = Path.Combine(outputDirectory, fileName);
 
                         // Handle overwrite
@@ -293,11 +303,11 @@ public partial class VbaCommands
                         {
                             // Append timestamp to avoid overwrite
                             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-                            fileName = $"{moduleName}_{timestamp}.bas";
+                            fileName = $"{moduleName}_{timestamp}{extension}";
                             filePath = Path.Combine(outputDirectory, fileName);
                         }
 
-                        // Export the module
+                        // Export the module (for UserForms, VBE also exports a .frx binary alongside .frm)
                         component.Export(filePath);
 
                         // Read the file to get line count
@@ -308,7 +318,7 @@ public partial class VbaCommands
                         {
                             ModuleName = moduleName,
                             FilePath = filePath,
-                            Overwritten = overwrite && File.Exists(Path.Combine(outputDirectory, $"{moduleName}.bas")),
+                            Overwritten = overwrite && File.Exists(Path.Combine(outputDirectory, $"{moduleName}{extension}")),
                             LineCount = lineCount
                         });
 

@@ -227,12 +227,17 @@ public partial class VbaCommands
     }
 
     /// <inheritdoc />
-    public OperationResult Import(IExcelBatch batch, string moduleName, string vbaCode)
+    public OperationResult Import(IExcelBatch batch, string moduleName, string? vbaCode, string? vbaFilePath = null)
     {
         var (isValid, validationError) = ValidateVbaFile(batch.WorkbookPath);
         if (!isValid)
         {
             throw new InvalidOperationException(validationError);
+        }
+
+        if (string.IsNullOrWhiteSpace(vbaFilePath) && string.IsNullOrWhiteSpace(vbaCode))
+        {
+            throw new ArgumentException("Either vbaCode or vbaFilePath must be provided.");
         }
 
         // Check VBA trust BEFORE attempting operation
@@ -254,7 +259,18 @@ public partial class VbaCommands
                 vbaProject = ((dynamic)ctx.Book).VBProject;
                 vbComponents = vbaProject.VBComponents;
 
-                // Check if module already exists
+                // File-based import: supports UserForms (.frm+.frx), standard modules (.bas), class modules (.cls)
+                // Module name is taken from the file itself; moduleName parameter is ignored
+                if (!string.IsNullOrWhiteSpace(vbaFilePath))
+                {
+                    if (!File.Exists(vbaFilePath))
+                        throw new FileNotFoundException($"VBA file not found: {vbaFilePath}", vbaFilePath);
+
+                    vbComponents.Import(vbaFilePath);
+                    return new OperationResult { Success = true, FilePath = batch.WorkbookPath };
+                }
+
+                // Inline code: check if module already exists
                 for (int i = 1; i <= vbComponents.Count; i++)
                 {
                     dynamic? component = null;
@@ -263,7 +279,7 @@ public partial class VbaCommands
                         component = vbComponents.Item(i);
                         if (component.Name == moduleName)
                         {
-                            throw new InvalidOperationException($"Module '{moduleName}' already exists. Use script-update to modify it.");
+                            throw new InvalidOperationException($"Module '{moduleName}' already exists. Use update action to modify it.");
                         }
                     }
                     finally
@@ -272,7 +288,7 @@ public partial class VbaCommands
                     }
                 }
 
-                // Add new module
+                // Add new standard module from inline code
                 newModule = vbComponents.Add(1); // 1 = vbext_ct_StdModule
                 newModule.Name = moduleName;
 

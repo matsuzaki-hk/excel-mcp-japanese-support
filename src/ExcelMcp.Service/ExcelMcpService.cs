@@ -822,7 +822,11 @@ public sealed class ExcelMcpService : IDisposable
     {
         if (string.IsNullOrWhiteSpace(sessionId))
         {
-            return Task.FromResult(new ServiceResponse { Success = false, ErrorMessage = "sessionId is required" });
+            return Task.FromResult(new ServiceResponse
+            {
+                Success = false,
+                ErrorMessage = "session_id is required. Use file(action:'open') first to open the workbook and obtain a session_id, then pass it to this operation."
+            });
         }
 
         var sessionError = TryBeginUsableSession(sessionId, out var batch);

@@ -234,6 +234,40 @@ git push origin ja-localization --force-with-lease
 - **ドキュメントの更新**: ドキュメントを常に最新の状態に保つ
 - **バックアップ**: 重要な変更前にバックアップを作成する
 
+## MCPサーバー使用ルール
+
+### 基本ルール
+- **excel-mcp-forFILES-DEBUGの使用**: 本プロジェクトでの開発・テストでは、明示的に指定しない限り`excel-mcp-forFILES-DEBUG`のみを使用する
+- **他のMCPサーバーの使用禁止**: `excel-mcp-forFILES`や`excel-mcp-forVBA`などの他のMCPサーバーは、ユーザーの明示的な許可なしに使用しない
+- **使用許可の要求**: 他のMCPサーバーを使用が必要と判断した場合は、必ず事前にユーザーに使用許可を求める
+
+### 理由
+- **最新ビルドの確認**: `excel-mcp-forFILES-DEBUG`は最新ビルドのMCPサーバーを指しており、開発中の機能を正しくテストするために必要
+- **意図しない動作の防止**: 古いバージョンや異なる設定のMCPサーバーを使用することで、意図しない動作や誤ったテスト結果が発生するのを防止
+- **開発の一貫性**: 常に最新ビルドを使用することで、開発の一貫性を維持
+
+### MCPサーバー設定
+- **設定ファイル**: `c:\Users\avalo\.codeium\windsurf-next\mcp_config.json`
+- **excel-mcp-forFILES-DEBUGパス**: `C:\work\ExcelMcp-MCP-Server\mcp-excel-260521-v4.exe`（最新ビルド）
+- **バージョン管理**: ビルドごとにバージョン番号を更新し、最新ビルドを指すように設定を更新する
+
+### ビルドとpublishルール
+- **変更後は必ずpublishを実行**: コード変更後は必ず`dotnet publish`を実行してEXEを作成する
+- **publishコマンド**: `dotnet publish src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -p:PublishReadyToRun=false -p:NuGetAudit=false --output C:\temp\ExcelMcpPublish`
+- **成果物のコピー**: publish後、`C:\temp\ExcelMcpPublish\Sbroenne.ExcelMcp.McpServer.exe`を`C:\work\ExcelMcp-MCP-Server\`にコピーし、バージョン番号を更新する
+- **バージョン番号の更新**: 現在のバージョン番号を確認し、次のバージョン番号（例：1.7.1 → 1.7.2）を付けてコピーする
+- **mcp_config.jsonの更新**: 新しいEXEを指すように`mcp_config.json`を更新する
+- **MCPサーバーの再起動**: mcp_config.json更新後、MCPサーバーを再起動する
+
+### デプロイ手順（必須）
+publish成功後、以下の手順を必ず実行する：
+1. 成果物をコピー: `$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"; Copy-Item "C:\temp\ExcelMcpPublish\Sbroenne.ExcelMcp.McpServer.exe" "C:\work\ExcelMcp-MCP-Server\mcp-excel-260521-$timestamp.exe" -Force`
+2. 最新のEXEを確認: `Get-ChildItem "C:\work\ExcelMcp-MCP-Server\mcp-excel-260521-*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1`
+3. mcp_config.jsonを更新: `excel-mcp-forFILES-DEBUG`の`command`を最新のEXEに更新する
+4. MCPサーバーを再起動: Windsurfの設定またはコマンドパレットからMCPサーバーを再起動する
+
+**重要**: 成果物のコピー時に末尾にビルド日時を付与して既存ファイルと重複しないようにする
+
 ## まとめ
 
 このプロジェクトは、日本語ユーザー向けにExcel MCPの日本語対応を提供することを目的としています。本家の更新を安全に取り込みつつ、日本語化を維持するためにリベース戦略を採用し、明確なブランチ構造と運用手順を定めています。すべての作業はこの方針と作法に従って行われます。

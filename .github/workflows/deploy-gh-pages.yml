@@ -37,8 +37,14 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
-          bundler-cache: true
+          bundler-cache: false
           working-directory: gh-pages
+
+      - name: Install dependencies
+        working-directory: gh-pages
+        run: |
+          gem install bundler
+          bundle install
 
       - name: Build with Jekyll
         working-directory: gh-pages
@@ -52,7 +58,7 @@ jobs:
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: 'gh-pages/_site'
 

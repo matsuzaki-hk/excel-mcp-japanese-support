@@ -49,8 +49,22 @@ jobs:
       - name: Get upstream version
         id: version
         run: |
-          # Use git show to read file content without checking out
-          VERSION=$(git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj | grep -oP '<Version>\K[^<]+' || echo "unknown")
+          # Debug: list files in upstream main
+          echo "Listing src directory in upstream/main:"
+          git ls-tree upstream/main src/ | head -10
+          
+          # Try to get file content
+          echo "Attempting to read csproj file:"
+          git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj | head -5 || echo "Failed to read file"
+          
+          # Extract version with multiple fallback methods
+          VERSION=$(git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj 2>/dev/null | grep -oE '<Version>[^<]+</Version>' | sed 's/<Version>//' | sed 's/<\/Version>//' || echo "")
+          
+          if [ -z "$VERSION" ]; then
+            echo "First method failed, trying alternative..."
+            VERSION=$(git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj 2>/dev/null | grep -oP '(?<=<Version>)[^<]+' || echo "unknown")
+          fi
+          
           echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT
           echo "Upstream version: $VERSION"
 

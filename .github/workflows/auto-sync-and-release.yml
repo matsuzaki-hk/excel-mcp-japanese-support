@@ -53,19 +53,24 @@ jobs:
           echo "Listing src directory in upstream/main:"
           git ls-tree upstream/main src/ | head -10
           
-          # Try to get file content (read full file, Version tag is not in first 5 lines)
-          echo "Attempting to read csproj file (searching for Version tag):"
-          FULL_CONTENT=$(git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj 2>/dev/null)
-          echo "File length: $(echo "$FULL_CONTENT" | wc -l) lines"
-          echo "Searching for Version tag..."
-          echo "$FULL_CONTENT" | grep -i "<Version>" | head -1
+          # Try to get file content
+          echo "Reading csproj file..."
+          git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj > /tmp/csproj.xml 2>/dev/null || echo "Failed to read file"
           
-          # Extract version from full content
-          VERSION=$(echo "$FULL_CONTENT" | grep -oE '<Version>[^<]+</Version>' | head -1 | sed 's/<Version>//' | sed 's/<\/Version>//' || echo "")
+          # Debug: show Version line
+          echo "Version lines in file:"
+          cat /tmp/csproj.xml | grep -i "version" | head -3
           
-          if [ -z "$VERSION" ]; then
-            echo "First method failed, trying alternative..."
-            VERSION=$(echo "$FULL_CONTENT" | grep -oP '(?<=<Version>)[^<]+' | head -1 || echo "unknown")
+          # Extract version using simple grep and cut
+          VERSION=$(cat /tmp/csproj.xml | grep '<Version>' | head -1 | sed 's/.*<Version>//' | sed 's/<\/Version>.*//' | tr -d '[:space:]')
+          
+          if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
+            echo "Simple extraction failed, trying alternative..."
+            VERSION=$(cat /tmp/csproj.xml | grep -oP '<Version>\K[^<]+' | head -1 | tr -d '[:space:]')
+          fi
+          
+          if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
+            VERSION="unknown"
           fi
           
           echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT

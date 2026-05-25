@@ -59,7 +59,7 @@ This fork uses a proper branch structure to track upstream updates while maintai
 このフォークは日本語サポートを維持しつつ本家の更新を追跡するために適切なブランチ構造を使用します：
 
 - `main` - Upstream tracking branch (English only) / 本家追従用ブランチ（英語のみ）
-- `ja-localization` - Japanese localization branch (includes Japanese SKILL files) / 日本語化ブランチ（日本語SKILLファイルを含む）
+- `ja-localization` - **Default branch** / Japanese localization branch (includes Japanese SKILL files and VBA export/import support) / **デフォルトブランチ** / 日本語化ブランチ（日本語SKILLファイルとVBA export/import対応を含む）
 - `feature/*` - Feature development branches / 機能開発ブランチ
 
 ### Upstream Sync Workflow / アップストリーム同期ワークフロー

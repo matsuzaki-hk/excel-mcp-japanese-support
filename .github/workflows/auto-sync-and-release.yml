@@ -13,6 +13,8 @@ on:
         description: 'Dry run mode (check conflicts only, no actual changes)'
         type: boolean
         default: false
+  repository_dispatch:
+    types: [upstream-sync-completed]
 
 env:
   DOTNET_VERSION: '10.0.x'

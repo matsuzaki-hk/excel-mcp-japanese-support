@@ -62,6 +62,14 @@ jobs:
             fi
           elif [ -n "${{ inputs.custom_version }}" ]; then
             VERSION="${{ inputs.custom_version }}"
+            # バージョンが無効な場合（unknownなど）はフォールバック
+            if [[ "$VERSION" == *"unknown"* ]] || [[ "$VERSION" == "" ]]; then
+              echo "Invalid version received: ${VERSION}"
+              echo "Falling back to latest tag calculation"
+              LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+              CURRENT_VERSION="${LATEST_TAG#v}"
+              VERSION="${CURRENT_VERSION}"
+            fi
             echo "Using custom version: ${VERSION}"
           else
             LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")

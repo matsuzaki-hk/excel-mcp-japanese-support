@@ -163,6 +163,14 @@ jobs:
           
           # mainを更新（明示的にupstream/mainをチェックアウト）
           git checkout -B main refs/remotes/upstream/main
+          
+          # ワークフローファイルの変更をリセット（GitHub App権限問題回避）
+          if git diff --cached --name-only | grep -q ".github/workflows/"; then
+            echo "Resetting workflow file changes to avoid GitHub App permission issue"
+            git checkout HEAD -- .github/workflows/
+            git add .github/workflows/
+          fi
+          
           git push origin main --force-with-lease
           
           # ja-localizationをリベース

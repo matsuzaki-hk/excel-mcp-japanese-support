@@ -156,26 +156,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Add upstream and rebase
+      - name: Rebase ja-localization
         run: |
           git remote add upstream https://github.com/sbroenne/mcp-server-excel.git
           git fetch upstream main
           
-          # mainを更新（明示的にupstream/mainをチェックアウト）
-          git checkout -B main refs/remotes/upstream/main
-          
-          # ワークフローファイルの変更をリセット（GitHub App権限問題回避）
-          if git diff --cached --name-only | grep -q ".github/workflows/"; then
-            echo "Resetting workflow file changes to avoid GitHub App permission issue"
-            git checkout HEAD -- .github/workflows/
-            git add .github/workflows/
-          fi
-          
-          git push origin main --force-with-lease
-          
-          # ja-localizationをリベース
-          git checkout ja-localization
-          git rebase main
+          # ja-localizationをupstream/mainにリベース
+          git rebase upstream/main
           git push origin ja-localization --force-with-lease
           
           echo "✅ Rebase completed successfully"

@@ -161,9 +161,8 @@ jobs:
           git remote add upstream https://github.com/sbroenne/mcp-server-excel.git
           git fetch upstream main
           
-          # mainを更新
-          git checkout main
-          git reset --hard upstream/main
+          # mainを更新（明示的にupstream/mainをチェックアウト）
+          git checkout -B main refs/remotes/upstream/main
           git push origin main --force-with-lease
           
           # ja-localizationをリベース

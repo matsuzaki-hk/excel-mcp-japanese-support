@@ -49,11 +49,10 @@ jobs:
       - name: Get upstream version
         id: version
         run: |
-          git checkout upstream/main --quiet
-          VERSION=$(grep -oP '<Version>\K[^<]+' src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj || echo "unknown")
+          # Use git show to read file content without checking out
+          VERSION=$(git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj | grep -oP '<Version>\K[^<]+' || echo "unknown")
           echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT
           echo "Upstream version: $VERSION"
-          git checkout ja-localization --quiet
 
       - name: Check for merge conflicts (dry-run)
         id: conflict_check

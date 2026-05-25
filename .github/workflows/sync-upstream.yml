@@ -183,3 +183,18 @@ jobs:
         with:
           script: |
             console.log('No upstream changes to sync');
+
+      - name: Trigger auto-sync-and-release
+        if: steps.merge.outputs.merge_success == 'true' || steps.resolve_conflict.outputs.resolution_success == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              event_type: 'upstream-sync-completed',
+              client_payload: {
+                upstream_version: '${{ steps.merge.outputs.upstream_version }}'
+              }
+            });
+            console.log('✅ Triggered auto-sync-and-release workflow');

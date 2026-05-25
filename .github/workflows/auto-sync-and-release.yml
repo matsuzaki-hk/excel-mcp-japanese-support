@@ -1,0 +1,243 @@
+name: Auto Sync and Release
+
+# 本家との競合を評価し、競合がなければ自動的にリベースしてリリース
+# 競合がある場合はIssueを作成して通知
+
+on:
+  schedule:
+    # 毎週月曜日午前9時（日本時間）に実行
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (check conflicts only, no actual changes)'
+        type: boolean
+        default: false
+
+env:
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+  # ステップ1: 本家との競合検出
+  check-conflicts:
+    name: Check for Conflicts with Upstream
+    runs-on: ubuntu-latest
+    outputs:
+      has_conflicts: ${{ steps.conflict_check.outputs.has_conflicts }}
+      conflict_files: ${{ steps.conflict_check.outputs.conflict_files }}
+      upstream_version: ${{ steps.version.outputs.upstream_version }}
+      can_automerge: ${{ steps.conflict_check.outputs.can_automerge }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ja-localization
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/sbroenne/mcp-server-excel.git
+          git fetch upstream main
+
+      - name: Get upstream version
+        id: version
+        run: |
+          git checkout upstream/main --quiet
+          VERSION=$(grep -oP '<Version>\K[^<]+' src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj || echo "unknown")
+          echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Upstream version: $VERSION"
+          git checkout ja-localization --quiet
+
+      - name: Check for merge conflicts (dry-run)
+        id: conflict_check
+        run: |
+          echo "Checking for conflicts between ja-localization and upstream/main..."
+          
+          # upstream/mainを一時ブランチにマージして競合を確認
+          git checkout -b temp-merge-check
+          
+          if git merge upstream/main --no-edit --no-commit; then
+            echo "✅ No conflicts detected - auto-merge is possible"
+            echo "has_conflicts=false" >> $GITHUB_OUTPUT
+            echo "can_automerge=true" >> $GITHUB_OUTPUT
+            echo "conflict_files=" >> $GITHUB_OUTPUT
+            git merge --abort || true
+          else
+            echo "⚠️ Conflicts detected - manual resolution required"
+            echo "has_conflicts=true" >> $GITHUB_OUTPUT
+            echo "can_automerge=false" >> $GITHUB_OUTPUT
+            
+            # 競合ファイルを列挙
+            CONFLICT_FILES=$(git diff --name-only --diff-filter=U | tr '\n' ', ' | sed 's/, $//')
+            echo "conflict_files=$CONFLICT_FILES" >> $GITHUB_OUTPUT
+            echo "Conflict files: $CONFLICT_FILES"
+            
+            git merge --abort || true
+          fi
+          
+          git checkout ja-localization
+          git branch -D temp-merge-check || true
+
+  # ステップ2: 競合がある場合はIssue作成
+  create-issue-on-conflict:
+    name: Create Issue for Conflicts
+    needs: check-conflicts
+    if: needs.check-conflicts.outputs.has_conflicts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conflictFiles = '${{ needs.check-conflicts.outputs.conflict_files }}';
+            const upstreamVersion = '${{ needs.check-conflicts.outputs.upstream_version }}';
+            
+            const title = `⚠️ Upstream sync conflict detected (v${upstreamVersion})`;
+            const body = `## 本家更新との競合検出
+            
+            **検出時刻:** ${new Date().toISOString()}
+            **本家バージョン:** ${upstreamVersion}
+            
+            ### 競合ファイル
+            ${conflictFiles ? conflictFiles.split(', ').map(f => `- \`${f}\``).join('\n') : '（検出中）'}
+            
+            ### 対応手順
+            1. ローカルで競合を解決
+               \`\`\`bash
+               git checkout main
+               git fetch upstream
+               git reset --hard upstream/main
+               git checkout ja-localization
+               git rebase main
+               # 競合解決
+               git rebase --continue
+               git push origin ja-localization --force-with-lease
+               \`\`\`
+            2. GitHub Actionsで「Release Fork (GitHub Only)」を手動実行
+            
+            ### 自動化停止中
+            競合が解決されるまで自動同期・リリースは一時停止されます。
+            
+            cc: @matsuzaki-hk`;
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['conflict', 'upstream-sync', 'help wanted']
+            });
+
+  # ステップ3: 競合がない場合は自動リベース
+  auto-rebase:
+    name: Auto Rebase ja-localization
+    needs: check-conflicts
+    if: needs.check-conflicts.outputs.has_conflicts == 'false' && github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ja-localization
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream and rebase
+        run: |
+          git remote add upstream https://github.com/sbroenne/mcp-server-excel.git
+          git fetch upstream main
+          
+          # mainを更新
+          git checkout main
+          git reset --hard upstream/main
+          git push origin main --force-with-lease
+          
+          # ja-localizationをリベース
+          git checkout ja-localization
+          git rebase main
+          git push origin ja-localization --force-with-lease
+          
+          echo "✅ Rebase completed successfully"
+
+      - name: Save upstream version
+        run: |
+          echo "${{ needs.check-conflicts.outputs.upstream_version }}" > .upstream-version
+          git add .upstream-version
+          git commit -m "chore: record upstream version ${{ needs.check-conflicts.outputs.upstream_version }}" || echo "No changes to commit"
+          git push origin ja-localization || echo "Nothing to push"
+
+  # ステップ4: リリースワークフローをトリガー
+  trigger-release:
+    name: Trigger Release Build
+    needs: [check-conflicts, auto-rebase]
+    if: needs.check-conflicts.outputs.has_conflicts == 'false' && github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Release Fork workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const upstreamVersion = '${{ needs.check-conflicts.outputs.upstream_version }}';
+            const newVersion = `${upstreamVersion}-ja.1`;
+            
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release-fork.yml',
+              ref: 'ja-localization',
+              inputs: {
+                version_bump: 'patch',
+                custom_version: newVersion
+              }
+            });
+            
+            console.log(`✅ Release triggered with version: ${newVersion}`);
+
+  # ステップ5: 成功通知（オプション）
+  notify-success:
+    name: Notify Success
+    needs: [check-conflicts, auto-rebase, trigger-release]
+    if: needs.check-conflicts.outputs.has_conflicts == 'false' && github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment on any open sync issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const upstreamVersion = '${{ needs.check-conflicts.outputs.upstream_version }}';
+            
+            // Find and close open conflict issues
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'conflict,upstream-sync'
+            });
+            
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `✅ **Resolved!** Auto-sync completed successfully for v${upstreamVersion}.\n\nRelease build triggered automatically.`
+              });
+              
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }

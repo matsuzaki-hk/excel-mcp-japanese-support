@@ -53,16 +53,19 @@ jobs:
           echo "Listing src directory in upstream/main:"
           git ls-tree upstream/main src/ | head -10
           
-          # Try to get file content
-          echo "Attempting to read csproj file:"
-          git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj | head -5 || echo "Failed to read file"
+          # Try to get file content (read full file, Version tag is not in first 5 lines)
+          echo "Attempting to read csproj file (searching for Version tag):"
+          FULL_CONTENT=$(git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj 2>/dev/null)
+          echo "File length: $(echo "$FULL_CONTENT" | wc -l) lines"
+          echo "Searching for Version tag..."
+          echo "$FULL_CONTENT" | grep -i "<Version>" | head -1
           
-          # Extract version with multiple fallback methods
-          VERSION=$(git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj 2>/dev/null | grep -oE '<Version>[^<]+</Version>' | sed 's/<Version>//' | sed 's/<\/Version>//' || echo "")
+          # Extract version from full content
+          VERSION=$(echo "$FULL_CONTENT" | grep -oE '<Version>[^<]+</Version>' | head -1 | sed 's/<Version>//' | sed 's/<\/Version>//' || echo "")
           
           if [ -z "$VERSION" ]; then
             echo "First method failed, trying alternative..."
-            VERSION=$(git show upstream/main:src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj 2>/dev/null | grep -oP '(?<=<Version>)[^<]+' || echo "unknown")
+            VERSION=$(echo "$FULL_CONTENT" | grep -oP '(?<=<Version>)[^<]+' | head -1 || echo "unknown")
           fi
           
           echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT

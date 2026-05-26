@@ -49,28 +49,45 @@ jobs:
       - name: Get upstream version
         id: version
         run: |
-          # Fetch upstream tags to get latest release version
+          # Fetch upstream tags
           git fetch upstream --tags
           
-          # Get latest release tag (e.g., v1.8.65 -> 1.8.65)
-          LATEST_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || git tag --list --sort=-version:refname 'v*' | head -1)
-          echo "Latest upstream tag: $LATEST_TAG"
+          # Debug: check what tags we have
+          echo "All tags fetched from upstream:"
+          git tag --list 'v*' | sort -V | tail -5
+          
+          # Get latest release tag using git ls-remote (more reliable)
+          echo "Fetching latest tag from upstream remote..."
+          LATEST_TAG=$(git ls-remote --tags upstream 'v*' | awk -F/ '{print $3}' | sort -V | tail -1)
+          echo "Latest upstream tag (from remote): $LATEST_TAG"
+          
+          # Fallback: try local tags if remote fails
+          if [ -z "$LATEST_TAG" ]; then
+            echo "Remote tag fetch failed, trying local tags..."
+            LATEST_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1)
+            echo "Latest local tag: $LATEST_TAG"
+          fi
           
           # Remove 'v' prefix if present
           VERSION="${LATEST_TAG#v}"
           
-          if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
+          # Additional fallback
+          if [ -z "$VERSION" ] || [ "$VERSION" = "" ] || [ "$VERSION" = "LATEST_TAG" ]; then
             echo "Failed to get version from tags, trying Directory.Build.props..."
-            git show upstream/main:Directory.Build.props > /tmp/build.props 2>/dev/null
-            VERSION=$(cat /tmp/build.props 2>/dev/null | grep '<Version>' | head -1 | sed 's/.*<Version>//' | sed 's/<\/Version>.*//' | tr -d '[:space:]')
+            git show upstream/main:Directory.Build.props > /tmp/build.props 2>/dev/null || echo "Failed to read Directory.Build.props"
+            if [ -f /tmp/build.props ]; then
+              VERSION=$(cat /tmp/build.props | grep '<Version>' | head -1 | sed 's/.*<Version>//' | sed 's/<\/Version>.*//' | tr -d '[:space:]')
+              echo "Version from Directory.Build.props: $VERSION"
+            fi
           fi
           
           if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
             VERSION="unknown"
+            echo "WARNING: Could not determine version, using 'unknown'"
           fi
           
           echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Upstream version: $VERSION"
+          echo "=== FINAL VERSION: $VERSION ==="
 
       - name: Check for merge conflicts (dry-run)
         id: conflict_check

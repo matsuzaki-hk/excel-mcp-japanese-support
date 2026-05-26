@@ -49,24 +49,20 @@ jobs:
       - name: Get upstream version
         id: version
         run: |
-          # Debug: list files in upstream main
-          echo "Listing src directory in upstream/main:"
-          git ls-tree upstream/main src/ | head -10
+          # Fetch upstream tags to get latest release version
+          git fetch upstream --tags
           
-          # Read version from Directory.Build.props (not csproj)
-          echo "Reading Directory.Build.props..."
-          git show upstream/main:Directory.Build.props > /tmp/build.props 2>/dev/null || echo "Failed to read file"
+          # Get latest release tag (e.g., v1.8.65 -> 1.8.65)
+          LATEST_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || git tag --list --sort=-version:refname 'v*' | head -1)
+          echo "Latest upstream tag: $LATEST_TAG"
           
-          # Debug: show Version line
-          echo "Version line in file:"
-          cat /tmp/build.props | grep '<Version>' | head -1
-          
-          # Extract version
-          VERSION=$(cat /tmp/build.props | grep '<Version>' | head -1 | sed 's/.*<Version>//' | sed 's/<\/Version>.*//' | tr -d '[:space:]')
+          # Remove 'v' prefix if present
+          VERSION="${LATEST_TAG#v}"
           
           if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
-            echo "Extraction failed, trying alternative..."
-            VERSION=$(cat /tmp/build.props | grep -oP '<Version>\K[^<]+' | head -1 | tr -d '[:space:]')
+            echo "Failed to get version from tags, trying Directory.Build.props..."
+            git show upstream/main:Directory.Build.props > /tmp/build.props 2>/dev/null
+            VERSION=$(cat /tmp/build.props 2>/dev/null | grep '<Version>' | head -1 | sed 's/.*<Version>//' | sed 's/<\/Version>.*//' | tr -d '[:space:]')
           fi
           
           if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then

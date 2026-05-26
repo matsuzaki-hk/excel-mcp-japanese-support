@@ -358,32 +358,98 @@ jobs:
       with:
         path: artifacts
 
+    - name: Fetch Upstream Release Info
+      id: upstream
+      uses: actions/github-script@v7
+      with:
+        script: |
+          // Get upstream latest release
+          const upstreamRelease = await github.rest.repos.getLatestRelease({
+            owner: 'sbroenne',
+            repo: 'mcp-server-excel'
+          });
+          
+          const upstreamVersion = upstreamRelease.data.tag_name;
+          const upstreamBody = upstreamRelease.data.body || 'No release notes available';
+          
+          // Trim body to first 2000 chars if too long
+          const trimmedBody = upstreamBody.length > 2000 
+            ? upstreamBody.substring(0, 2000) + '\n\n...(truncated)' 
+            : upstreamBody;
+          
+          core.setOutput('upstream_version', upstreamVersion);
+          core.setOutput('upstream_body', trimmedBody);
+          console.log(`Upstream version: ${upstreamVersion}`);
+
+    - name: Extract Fork Features from README
+      id: readme
+      run: |
+        # Extract Japanese localization section from README
+        FORK_FEATURES=$(cat README.md | sed -n '/### Branch Structure/,/### /p' | head -20 | sed 's/^/  /')
+        
+        # Extract VBA section if present
+        VBA_FEATURES=$(cat README.md | sed -n '/VBA エクスポート\/インポート機能/,/## /p' | head -15 | sed 's/^/  /')
+        
+        echo "fork_features<<EOF" >> $GITHUB_OUTPUT
+        echo "$FORK_FEATURES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        echo "vba_features<<EOF" >> $GITHUB_OUTPUT
+        echo "$VBA_FEATURES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
     - name: Create Release
       run: |
         VERSION=${{ env.VERSION }}
         TAG=${{ needs.version.outputs.tag }}
+        UPSTREAM_VER=${{ steps.upstream.outputs.upstream_version }}
 
-        cat > release_notes.md << 'NOTES'
-        ## ExcelMcp ${{ env.VERSION }} (Japanese Support Fork)
+        cat > release_notes.md << NOTES
+        ## ExcelMcp $VERSION (Japanese Support Fork / 日本語対応フォーク)
 
-        🇯🇵 This is the Japanese support fork of [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel).
+        🇯🇵 本家 [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) の日本語対応フォークです。
 
-        ### What's New
-        - Full Unicode support for Japanese table names
-        - Automatic upstream sync with conflict resolution
-        - See README.md for details
+        ---
 
-        ### Installation
-        **MCP Server:** Download \`ExcelMcp-MCP-Server-${{ env.VERSION }}-windows.zip\`, extract \`mcp-excel.exe\`
-        **CLI:** Download \`ExcelMcp-CLI-${{ env.VERSION }}-windows.zip\`, extract \`excelcli.exe\`
+        ## 本家変更 (Based on $UPSTREAM_VER)
 
-        ### Requirements
+        ${{ steps.upstream.outputs.upstream_body }}
+
+        ---
+
+        ## FORK固有機能 / 日本語対応機能
+
+        ### 日本語化サポート
+        - Excel上の日本語テーブル名・シート名の完全サポート
+        - 日本語SKILLファイルによるAI応答の最適化
+        - 自動アップストリーム同期（競合検出・解決付き）
+
+        ### VBA エクスポート/インポート機能
+        - 標準モジュール・クラスモジュールのエクスポート/インポート
+        - UserForm対応（.frm + .frxファイル）
+        - 複数モジュール一括処理
+
+        ### その他の改善
+        - 日本語環境での動作最適化
+        - 詳細は README.md を参照
+
+        ---
+
+        ## インストール / Installation
+
+        **MCP Server:** \`ExcelMcp-MCP-Server-$VERSION-windows.zip\` をダウンロードし、\`mcp-excel.exe\` を展開
+        **CLI:** \`ExcelMcp-CLI-$VERSION-windows.zip\` をダウンロードし、\`excelcli.exe\` を展開
+
+        ### 動作環境
         - Windows OS
         - Microsoft Excel 2016+
-        - No .NET runtime required (standalone executables)
+        - .NETランタイム不要（スタンドアロン実行ファイル）
 
-        ### Original Project
-        [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel)
+        ---
+
+        ## 関連リンク
+        - [本家プロジェクト (Original Project)](https://github.com/sbroenne/mcp-server-excel)
+        - [FORK リポジトリ](https://github.com/matsuzaki-hk/excel-mcp-japanese-support)
         NOTES
 
         ARTIFACTS=""

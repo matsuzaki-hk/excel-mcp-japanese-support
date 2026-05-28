@@ -377,9 +377,13 @@ jobs:
             upstreamBody = upstreamBody.substring(0, 2000) + '\n\n...(truncated)';
           }
           
-          // Remove ANSI escape codes (color codes, terminal formatting)
-          // Pattern matches ESC[...m sequences used for terminal colors
-          upstreamBody = upstreamBody.replace(/\x1b\[[0-9;]*m/g, '');
+          // Remove ANSI escape codes (color codes, terminal formatting, cursor control)
+          // Matches: ESC[...m (colors), ESC[?...l/h (cursor), ESC[...D/J (clear), ESC[2m/22m (dim/bold), etc.
+          upstreamBody = upstreamBody.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+          // Remove remaining escape sequences like \x1b[?25l, \x1b[999D, \x1b[J, etc.
+          upstreamBody = upstreamBody.replace(/\x1b\[[0-9]*[A-Za-z]/g, '');
+          // Remove any remaining ESC sequences
+          upstreamBody = upstreamBody.replace(/\x1b\[[^a-zA-Z]*[a-zA-Z]/g, '');
           
           // Base64 encode to safely pass through shell without interpretation
           // This prevents any shell expansion of $variables, backticks, etc.

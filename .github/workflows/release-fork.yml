@@ -397,15 +397,33 @@ jobs:
             
             upstreamBody = changelogContent.substring(startIndex, endIndex);
           } else {
-            // Fallback: try to get upstream release body
-            try {
-              const upstreamRelease = await github.rest.repos.getLatestRelease({
-                owner: 'sbroenne',
-                repo: 'mcp-server-excel'
-              });
-              upstreamBody = upstreamRelease.data.body || 'No release notes available';
-            } catch (error) {
-              upstreamBody = 'No release notes available';
+            // Fallback: try to extract [Unreleased] section
+            const unreleasedPattern = /## \[Unreleased\]/;
+            const unreleasedMatch = changelogContent.match(unreleasedPattern);
+            
+            if (unreleasedMatch) {
+              const startIndex = changelogContent.indexOf(unreleasedMatch[0]);
+              // Find the next version section or end of file
+              const nextVersionPattern = /## \[\d+\.\d+\.\d+\] - [\d-]+/;
+              const nextVersionMatch = changelogContent.substring(startIndex + unreleasedMatch[0].length).match(nextVersionPattern);
+              
+              let endIndex = changelogContent.length;
+              if (nextVersionMatch) {
+                endIndex = startIndex + unreleasedMatch[0].length + changelogContent.substring(startIndex + unreleasedMatch[0].length).indexOf(nextVersionMatch[0]);
+              }
+              
+              upstreamBody = changelogContent.substring(startIndex, endIndex);
+            } else {
+              // Final fallback: try to get upstream release body
+              try {
+                const upstreamRelease = await github.rest.repos.getLatestRelease({
+                  owner: 'sbroenne',
+                  repo: 'mcp-server-excel'
+                });
+                upstreamBody = upstreamRelease.data.body || 'No release notes available';
+              } catch (error) {
+                upstreamBody = 'No release notes available';
+              }
             }
           }
           

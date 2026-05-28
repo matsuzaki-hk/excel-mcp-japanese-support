@@ -377,6 +377,10 @@ jobs:
             upstreamBody = upstreamBody.substring(0, 2000) + '\n\n...(truncated)';
           }
           
+          // Remove ANSI escape codes (color codes, terminal formatting)
+          // Pattern matches ESC[...m sequences used for terminal colors
+          upstreamBody = upstreamBody.replace(/\x1b\[[0-9;]*m/g, '');
+          
           // Escape special characters for shell safety
           // Replace backticks, $, and \ to prevent shell interpretation
           const safeBody = upstreamBody

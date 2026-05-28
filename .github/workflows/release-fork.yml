@@ -381,16 +381,14 @@ jobs:
           // Pattern matches ESC[...m sequences used for terminal colors
           upstreamBody = upstreamBody.replace(/\x1b\[[0-9;]*m/g, '');
           
-          // Escape special characters for shell safety
-          // Replace backticks, $, and \ to prevent shell interpretation
-          const safeBody = upstreamBody
-            .replace(/\\/g, '\\\\')
-            .replace(/`/g, '\\`')
-            .replace(/\$/g, '\\$');
+          // Base64 encode to safely pass through shell without interpretation
+          // This prevents any shell expansion of $variables, backticks, etc.
+          const base64Body = Buffer.from(upstreamBody).toString('base64');
           
           core.setOutput('upstream_version', upstreamVersion);
-          core.setOutput('upstream_body', safeBody);
+          core.setOutput('upstream_body_b64', base64Body);
           console.log(`Upstream version: ${upstreamVersion}`);
+          console.log(`Body length: ${upstreamBody.length}, Base64 length: ${base64Body.length}`);
 
     - name: Extract Fork Features from README
       id: readme
@@ -414,17 +412,21 @@ jobs:
         VERSION=${{ env.VERSION }}
         TAG=${{ needs.version.outputs.tag }}
         UPSTREAM_VER=${{ steps.upstream.outputs.upstream_version }}
+        
+        # Decode base64 upstream body
+        UPSTREAM_BODY_B64="${{ steps.upstream.outputs.upstream_body_b64 }}"
+        UPSTREAM_BODY=$(echo "$UPSTREAM_BODY_B64" | base64 -d)
 
-        cat > release_notes.md << NOTES
-        ## ExcelMcp $VERSION (Japanese Support Fork / 日本語対応フォーク)
+        cat > release_notes.md << 'NOTES_EOF'
+        ## ExcelMcp ${{ env.VERSION }} (Japanese Support Fork / 日本語対応フォーク)
 
         🇯🇵 本家 [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) の日本語対応フォークです。
 
         ---
 
-        ## 本家変更 (Based on $UPSTREAM_VER)
+        ## 本家変更 (Based on ${{ steps.upstream.outputs.upstream_version }})
 
-        ${{ steps.upstream.outputs.upstream_body }}
+        ${{ steps.upstream.outputs.upstream_body_b64 }}
 
         ---
 
@@ -448,8 +450,8 @@ jobs:
 
         ## インストール / Installation
 
-        **MCP Server:** \`ExcelMcp-MCP-Server-$VERSION-windows.zip\` をダウンロードし、\`mcp-excel.exe\` を展開
-        **CLI:** \`ExcelMcp-CLI-$VERSION-windows.zip\` をダウンロードし、\`excelcli.exe\` を展開
+        **MCP Server:** `ExcelMcp-MCP-Server-${{ env.VERSION }}-windows.zip` をダウンロードし、`mcp-excel.exe` を展開
+        **CLI:** `ExcelMcp-CLI-${{ env.VERSION }}-windows.zip` をダウンロードし、`excelcli.exe` を展開
 
         ### 動作環境
         - Windows OS
@@ -461,7 +463,10 @@ jobs:
         ## 関連リンク
         - [本家プロジェクト (Original Project)](https://github.com/sbroenne/mcp-server-excel)
         - [FORK リポジトリ](https://github.com/matsuzaki-hk/excel-mcp-japanese-support)
-        NOTES
+        NOTES_EOF
+        
+        # Replace base64 placeholder with actual decoded content
+        sed -i "s|${{ steps.upstream.outputs.upstream_body_b64 }}|$UPSTREAM_BODY|g" release_notes.md
 
         ARTIFACTS=""
         for f in artifacts/mcp-server-zip/*.zip; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done

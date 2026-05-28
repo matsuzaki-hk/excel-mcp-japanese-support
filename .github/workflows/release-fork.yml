@@ -363,14 +363,10 @@ jobs:
       uses: actions/github-script@v7
       with:
         script: |
-          // Get upstream latest release
-          const upstreamRelease = await github.rest.repos.getLatestRelease({
-            owner: 'sbroenne',
-            repo: 'mcp-server-excel'
-          });
-          
-          const upstreamVersion = upstreamRelease.data.tag_name;
-          const versionNumber = upstreamVersion.replace('v', '');
+          // Extract upstream version from fork version (e.g., 1.8.67-ja.5 -> 1.8.67)
+          const forkVersion = '${{ env.VERSION }}';
+          const versionMatch = forkVersion.match(/^(\d+\.\d+\.\d+)/);
+          const versionNumber = versionMatch ? versionMatch[1] : '1.8.67';
           
           // Fetch CHANGELOG.md
           const changelogResponse = await github.rest.repos.getContent({
@@ -382,27 +378,35 @@ jobs:
           const changelogContent = Buffer.from(changelogResponse.data.content, 'base64').toString('utf-8');
           
           // Extract version-specific changes from CHANGELOG.md
-          // Pattern: ## [1.8.68] - YYYY-MM-DD
+          // Pattern: ## [1.8.67] - YYYY-MM-DD
           const versionPattern = new RegExp(`## \\[${versionNumber}\\] - [\\d-]+`);
-          const versionMatch = changelogContent.match(versionPattern);
+          const versionMatchResult = changelogContent.match(versionPattern);
           
           let upstreamBody = 'No release notes available';
           
-          if (versionMatch) {
-            const startIndex = changelogContent.indexOf(versionMatch[0]);
+          if (versionMatchResult) {
+            const startIndex = changelogContent.indexOf(versionMatchResult[0]);
             // Find the next version section or end of file
             const nextVersionPattern = /## \[\d+\.\d+\.\d+\] - [\d-]+/;
-            const nextVersionMatch = changelogContent.substring(startIndex + versionMatch[0].length).match(nextVersionPattern);
+            const nextVersionMatch = changelogContent.substring(startIndex + versionMatchResult[0].length).match(nextVersionPattern);
             
             let endIndex = changelogContent.length;
             if (nextVersionMatch) {
-              endIndex = startIndex + versionMatch[0].length + changelogContent.substring(startIndex + versionMatch[0].length).indexOf(nextVersionMatch[0]);
+              endIndex = startIndex + versionMatchResult[0].length + changelogContent.substring(startIndex + versionMatchResult[0].length).indexOf(nextVersionMatch[0]);
             }
             
             upstreamBody = changelogContent.substring(startIndex, endIndex);
           } else {
-            // Fallback to release body if version not found in CHANGELOG
-            upstreamBody = upstreamRelease.data.body || 'No release notes available';
+            // Fallback: try to get upstream release body
+            try {
+              const upstreamRelease = await github.rest.repos.getLatestRelease({
+                owner: 'sbroenne',
+                repo: 'mcp-server-excel'
+              });
+              upstreamBody = upstreamRelease.data.body || 'No release notes available';
+            } catch (error) {
+              upstreamBody = 'No release notes available';
+            }
           }
           
           // Trim body to first 3000 chars if too long
@@ -417,9 +421,10 @@ jobs:
           // This prevents any shell expansion of $variables, backticks, etc.
           const base64Body = Buffer.from(upstreamBody).toString('base64');
           
-          core.setOutput('upstream_version', upstreamVersion);
+          core.setOutput('upstream_version', `v${versionNumber}`);
           core.setOutput('upstream_body_b64', base64Body);
-          console.log(`Upstream version: ${upstreamVersion}`);
+          console.log(`Fork version: ${forkVersion}`);
+          console.log(`Upstream version: v${versionNumber}`);
           console.log(`Body length: ${upstreamBody.length}, Base64 length: ${base64Body.length}`);
 
     - name: Extract Fork Features from README

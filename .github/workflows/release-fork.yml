@@ -420,6 +420,9 @@ jobs:
         # Pattern matches ESC[...m, ESC[?...l/h, ESC[...D/J, etc.
         UPSTREAM_BODY=$(echo "$UPSTREAM_BODY" | sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' -e 's/\x1b\[[0-9]*[A-Za-z]//g' -e 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g')
         
+        # Escape backticks to prevent shell command execution
+        UPSTREAM_BODY=$(echo "$UPSTREAM_BODY" | sed 's/`/\\`/g')
+        
         # Write release notes using printf to handle special characters safely
         printf '%s\n' "## ExcelMcp $VERSION (Japanese Support Fork / 日本語対応フォーク)" > release_notes.md
         printf '\n' >> release_notes.md

@@ -370,15 +370,22 @@ jobs:
           });
           
           const upstreamVersion = upstreamRelease.data.tag_name;
-          const upstreamBody = upstreamRelease.data.body || 'No release notes available';
+          let upstreamBody = upstreamRelease.data.body || 'No release notes available';
           
           // Trim body to first 2000 chars if too long
-          const trimmedBody = upstreamBody.length > 2000 
-            ? upstreamBody.substring(0, 2000) + '\n\n...(truncated)' 
-            : upstreamBody;
+          if (upstreamBody.length > 2000) {
+            upstreamBody = upstreamBody.substring(0, 2000) + '\n\n...(truncated)';
+          }
+          
+          // Escape special characters for shell safety
+          // Replace backticks, $, and \ to prevent shell interpretation
+          const safeBody = upstreamBody
+            .replace(/\\/g, '\\\\')
+            .replace(/`/g, '\\`')
+            .replace(/\$/g, '\\$');
           
           core.setOutput('upstream_version', upstreamVersion);
-          core.setOutput('upstream_body', trimmedBody);
+          core.setOutput('upstream_body', safeBody);
           console.log(`Upstream version: ${upstreamVersion}`);
 
     - name: Extract Fork Features from README

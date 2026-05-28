@@ -370,11 +370,44 @@ jobs:
           });
           
           const upstreamVersion = upstreamRelease.data.tag_name;
-          let upstreamBody = upstreamRelease.data.body || 'No release notes available';
+          const versionNumber = upstreamVersion.replace('v', '');
           
-          // Trim body to first 2000 chars if too long
-          if (upstreamBody.length > 2000) {
-            upstreamBody = upstreamBody.substring(0, 2000) + '\n\n...(truncated)';
+          // Fetch CHANGELOG.md
+          const changelogResponse = await github.rest.repos.getContent({
+            owner: 'sbroenne',
+            repo: 'mcp-server-excel',
+            path: 'CHANGELOG.md'
+          });
+          
+          const changelogContent = Buffer.from(changelogResponse.data.content, 'base64').toString('utf-8');
+          
+          // Extract version-specific changes from CHANGELOG.md
+          // Pattern: ## [1.8.68] - YYYY-MM-DD
+          const versionPattern = new RegExp(`## \\[${versionNumber}\\] - [\\d-]+`);
+          const versionMatch = changelogContent.match(versionPattern);
+          
+          let upstreamBody = 'No release notes available';
+          
+          if (versionMatch) {
+            const startIndex = changelogContent.indexOf(versionMatch[0]);
+            // Find the next version section or end of file
+            const nextVersionPattern = /## \[\d+\.\d+\.\d+\] - [\d-]+/;
+            const nextVersionMatch = changelogContent.substring(startIndex + versionMatch[0].length).match(nextVersionPattern);
+            
+            let endIndex = changelogContent.length;
+            if (nextVersionMatch) {
+              endIndex = startIndex + versionMatch[0].length + changelogContent.substring(startIndex + versionMatch[0].length).indexOf(nextVersionMatch[0]);
+            }
+            
+            upstreamBody = changelogContent.substring(startIndex, endIndex);
+          } else {
+            // Fallback to release body if version not found in CHANGELOG
+            upstreamBody = upstreamRelease.data.body || 'No release notes available';
+          }
+          
+          // Trim body to first 3000 chars if too long
+          if (upstreamBody.length > 3000) {
+            upstreamBody = upstreamBody.substring(0, 3000) + '\n\n...(truncated)';
           }
           
           // Note: ANSI escape code removal will be done in shell step instead

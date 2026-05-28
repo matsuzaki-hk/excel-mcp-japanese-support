@@ -377,13 +377,8 @@ jobs:
             upstreamBody = upstreamBody.substring(0, 2000) + '\n\n...(truncated)';
           }
           
-          // Remove ANSI escape codes (color codes, terminal formatting, cursor control)
-          // Matches: ESC[...m (colors), ESC[?...l/h (cursor), ESC[...D/J (clear), ESC[2m/22m (dim/bold), etc.
-          upstreamBody = upstreamBody.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
-          // Remove remaining escape sequences like \x1b[?25l, \x1b[999D, \x1b[J, etc.
-          upstreamBody = upstreamBody.replace(/\x1b\[[0-9]*[A-Za-z]/g, '');
-          // Remove any remaining ESC sequences
-          upstreamBody = upstreamBody.replace(/\x1b\[[^a-zA-Z]*[a-zA-Z]/g, '');
+          // Note: ANSI escape code removal will be done in shell step instead
+          // to ensure compatibility across environments
           
           // Base64 encode to safely pass through shell without interpretation
           // This prevents any shell expansion of $variables, backticks, etc.
@@ -420,6 +415,10 @@ jobs:
         # Decode base64 upstream body
         UPSTREAM_BODY_B64="${{ steps.upstream.outputs.upstream_body_b64 }}"
         UPSTREAM_BODY=$(echo "$UPSTREAM_BODY_B64" | base64 -d)
+        
+        # Remove ANSI escape codes using sed
+        # Pattern matches ESC[...m, ESC[?...l/h, ESC[...D/J, etc.
+        UPSTREAM_BODY=$(echo "$UPSTREAM_BODY" | sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' -e 's/\x1b\[[0-9]*[A-Za-z]//g' -e 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g')
         
         # Write release notes using printf to handle special characters safely
         printf '%s\n' "## ExcelMcp $VERSION (Japanese Support Fork / 日本語対応フォーク)" > release_notes.md

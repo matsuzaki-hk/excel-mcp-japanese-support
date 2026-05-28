@@ -413,64 +413,52 @@ jobs:
 
     - name: Create Release
       run: |
-        VERSION=${{ env.VERSION }}
-        TAG=${{ needs.version.outputs.tag }}
-        UPSTREAM_VER=${{ steps.upstream.outputs.upstream_version }}
+        VERSION="${{ env.VERSION }}"
+        TAG="${{ needs.version.outputs.tag }}"
+        UPSTREAM_VER="${{ steps.upstream.outputs.upstream_version }}"
         
         # Decode base64 upstream body
         UPSTREAM_BODY_B64="${{ steps.upstream.outputs.upstream_body_b64 }}"
         UPSTREAM_BODY=$(echo "$UPSTREAM_BODY_B64" | base64 -d)
-
-        cat > release_notes.md << 'NOTES_EOF'
-        ## ExcelMcp ${{ env.VERSION }} (Japanese Support Fork / 日本語対応フォーク)
-
-        🇯🇵 本家 [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) の日本語対応フォークです。
-
-        ---
-
-        ## 本家変更 (Based on ${{ steps.upstream.outputs.upstream_version }})
-
-        ${{ steps.upstream.outputs.upstream_body_b64 }}
-
-        ---
-
-        ## FORK固有機能 / 日本語対応機能
-
-        ### 日本語化サポート
-        - Excel上の日本語テーブル名・シート名の完全サポート
-        - 日本語SKILLファイルによるAI応答の最適化
-        - 自動アップストリーム同期（競合検出・解決付き）
-
-        ### VBA エクスポート/インポート機能
-        - 標準モジュール・クラスモジュールのエクスポート/インポート
-        - UserForm対応（.frm + .frxファイル）
-        - 複数モジュール一括処理
-
-        ### その他の改善
-        - 日本語環境での動作最適化
-        - 詳細は README.md を参照
-
-        ---
-
-        ## インストール / Installation
-
-        **MCP Server:** `ExcelMcp-MCP-Server-${{ env.VERSION }}-windows.zip` をダウンロードし、`mcp-excel.exe` を展開
-        **CLI:** `ExcelMcp-CLI-${{ env.VERSION }}-windows.zip` をダウンロードし、`excelcli.exe` を展開
-
-        ### 動作環境
-        - Windows OS
-        - Microsoft Excel 2016+
-        - .NETランタイム不要（スタンドアロン実行ファイル）
-
-        ---
-
-        ## 関連リンク
-        - [本家プロジェクト (Original Project)](https://github.com/sbroenne/mcp-server-excel)
-        - [FORK リポジトリ](https://github.com/matsuzaki-hk/excel-mcp-japanese-support)
-        NOTES_EOF
         
-        # Replace base64 placeholder with actual decoded content
-        sed -i "s|${{ steps.upstream.outputs.upstream_body_b64 }}|$UPSTREAM_BODY|g" release_notes.md
+        # Write release notes using printf to handle special characters safely
+        printf '%s\n' "## ExcelMcp $VERSION (Japanese Support Fork / 日本語対応フォーク)" > release_notes.md
+        printf '\n' >> release_notes.md
+        printf '%s\n' "🇯🇵 本家 [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) の日本語対応フォークです。" >> release_notes.md
+        printf '\n---\n\n' >> release_notes.md
+        printf '%s\n' "## 本家変更 (Based on $UPSTREAM_VER)" >> release_notes.md
+        printf '\n' >> release_notes.md
+        printf '%s\n' "$UPSTREAM_BODY" >> release_notes.md
+        printf '\n---\n\n' >> release_notes.md
+        printf '%s\n' "## FORK固有機能 / 日本語対応機能" >> release_notes.md
+        printf '\n' >> release_notes.md
+        printf '%s\n' "### 日本語化サポート" >> release_notes.md
+        printf '%s\n' "- Excel上の日本語テーブル名・シート名の完全サポート" >> release_notes.md
+        printf '%s\n' "- 日本語SKILLファイルによるAI応答の最適化" >> release_notes.md
+        printf '%s\n' "- 自動アップストリーム同期（競合検出・解決付き）" >> release_notes.md
+        printf '\n' >> release_notes.md
+        printf '%s\n' "### VBA エクスポート/インポート機能" >> release_notes.md
+        printf '%s\n' "- 標準モジュール・クラスモジュールのエクスポート/インポート" >> release_notes.md
+        printf '%s\n' "- UserForm対応（.frm + .frxファイル）" >> release_notes.md
+        printf '%s\n' "- 複数モジュール一括処理" >> release_notes.md
+        printf '\n' >> release_notes.md
+        printf '%s\n' "### その他の改善" >> release_notes.md
+        printf '%s\n' "- 日本語環境での動作最適化" >> release_notes.md
+        printf '%s\n' "- 詳細は README.md を参照" >> release_notes.md
+        printf '\n---\n\n' >> release_notes.md
+        printf '%s\n' "## インストール / Installation" >> release_notes.md
+        printf '\n' >> release_notes.md
+        printf '%s\n' "**MCP Server:** \`ExcelMcp-MCP-Server-$VERSION-windows.zip\` をダウンロードし、\`mcp-excel.exe\` を展開" >> release_notes.md
+        printf '%s\n' "**CLI:** \`ExcelMcp-CLI-$VERSION-windows.zip\` をダウンロードし、\`excelcli.exe\` を展開" >> release_notes.md
+        printf '\n' >> release_notes.md
+        printf '%s\n' "### 動作環境" >> release_notes.md
+        printf '%s\n' "- Windows OS" >> release_notes.md
+        printf '%s\n' "- Microsoft Excel 2016+" >> release_notes.md
+        printf '%s\n' "- .NETランタイム不要（スタンドアロン実行ファイル）" >> release_notes.md
+        printf '\n---\n\n' >> release_notes.md
+        printf '%s\n' "## 関連リンク" >> release_notes.md
+        printf '%s\n' "- [本家プロジェクト (Original Project)](https://github.com/sbroenne/mcp-server-excel)" >> release_notes.md
+        printf '%s\n' "- [FORK リポジトリ](https://github.com/matsuzaki-hk/excel-mcp-japanese-support)" >> release_notes.md
 
         ARTIFACTS=""
         for f in artifacts/mcp-server-zip/*.zip; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done

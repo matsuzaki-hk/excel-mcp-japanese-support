@@ -29,6 +29,7 @@ jobs:
       conflict_files: ${{ steps.conflict_check.outputs.conflict_files }}
       upstream_version: ${{ steps.version.outputs.upstream_version }}
       can_automerge: ${{ steps.conflict_check.outputs.can_automerge }}
+      has_new_version: ${{ steps.check_new_version.outputs.has_new_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -87,6 +88,35 @@ jobs:
           echo "================================"
           echo "FINAL VERSION: $VERSION"
           echo "================================"
+
+      - name: Check if upstream has new version
+        id: check_new_version
+        run: |
+          # Get the latest fork tag
+          echo "Checking fork tags..."
+          git fetch origin --tags 2>/dev/null || echo "Note: Some tags skipped due to conflicts (this is OK)"
+          LATEST_FORK_TAG=$(git ls-remote --tags origin 'v*' 2>/dev/null | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+-ja\.[0-9]\+$' | sort -V | tail -1)
+          echo "Latest fork tag: $LATEST_FORK_TAG"
+          
+          # Extract base version from fork tag (e.g., v1.8.68-ja.1 -> 1.8.68)
+          if [ -n "$LATEST_FORK_TAG" ]; then
+            FORK_BASE_VERSION=$(echo "$LATEST_FORK_TAG" | sed 's/v\([0-9]\+\.[0-9]\+\.[0-9]\+\)-ja\.[0-9]\+/\1/')
+            echo "Fork base version: $FORK_BASE_VERSION"
+            echo "fork_base_version=$FORK_BASE_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "No fork tags found, will build"
+            echo "fork_base_version=" >> $GITHUB_OUTPUT
+          fi
+          
+          # Compare versions
+          UPSTREAM_VERSION="${{ steps.version.outputs.upstream_version }}"
+          if [ "$FORK_BASE_VERSION" = "$UPSTREAM_VERSION" ]; then
+            echo "Upstream version $UPSTREAM_VERSION already built in fork"
+            echo "has_new_version=false" >> $GITHUB_OUTPUT
+          else
+            echo "New upstream version $UPSTREAM_VERSION detected"
+            echo "has_new_version=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Check for merge conflicts (dry-run)
         id: conflict_check
@@ -172,7 +202,7 @@ jobs:
   auto-rebase:
     name: Auto Rebase ja-localization
     needs: check-conflicts
-    if: needs.check-conflicts.outputs.has_conflicts == 'false' && github.event.inputs.dry_run != 'true'
+    if: needs.check-conflicts.outputs.has_conflicts == 'false' && needs.check-conflicts.outputs.has_new_version == 'true' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -211,7 +241,7 @@ jobs:
   trigger-release:
     name: Trigger Release Build
     needs: [check-conflicts, auto-rebase]
-    if: needs.check-conflicts.outputs.has_conflicts == 'false' && github.event.inputs.dry_run != 'true'
+    if: needs.check-conflicts.outputs.has_conflicts == 'false' && needs.check-conflicts.outputs.has_new_version == 'true' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Release Fork workflow

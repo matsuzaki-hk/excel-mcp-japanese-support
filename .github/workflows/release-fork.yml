@@ -141,7 +141,7 @@ jobs:
       shell: pwsh
 
     - name: Restore
-      run: dotnet restore src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --no-cache --runtime win-x64 -p:Version=$env:NUMERIC_VERSION.0
+      run: dotnet restore src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj --no-cache --runtime win-x64 -p:Version=$env:NUMERIC_VERSION.0 -p:NoWarn=NU1902
       shell: pwsh
 
     - name: Clean
@@ -238,7 +238,7 @@ jobs:
       shell: pwsh
 
     - name: Restore
-      run: dotnet restore src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --no-cache --runtime win-x64 -p:Version=$env:NUMERIC_VERSION.0
+      run: dotnet restore src/ExcelMcp.CLI/ExcelMcp.CLI.csproj --no-cache --runtime win-x64 -p:Version=$env:NUMERIC_VERSION.0 -p:NoWarn=NU1902
       shell: pwsh
 
     - name: Clean CLI

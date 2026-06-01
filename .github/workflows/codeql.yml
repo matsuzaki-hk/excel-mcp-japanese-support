@@ -1,34 +1,35 @@
 # GitHub CodeQL Analysis Workflow
 # Performs advanced security scanning for code vulnerabilities
+# NOTE: Disabled due to .NET 10.0 compatibility issues
 
-name: "CodeQL Advanced Security"
+name: "CodeQL Advanced Security (DISABLED)"
 
 on:
-  push:
-    branches: [ "main", "develop", "ja-localization" ]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '**.csproj'
-      - '**.sln'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - '.github/workflows/codeql.yml'
-      - '.github/codeql/**'
-  pull_request:
-    branches: [ "main", "ja-localization" ]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '**.csproj'
-      - '**.sln'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - '.github/workflows/codeql.yml'
-      - '.github/codeql/**'
-  schedule:
-    # Run CodeQL analysis every Monday at 10:00 AM UTC
-    - cron: '0 10 * * 1'
+  # push:
+  #   branches: [ "main", "develop", "ja-localization" ]
+  #   paths:
+  #     - 'src/**'
+  #     - 'tests/**'
+  #     - '**.csproj'
+  #     - '**.sln'
+  #     - 'Directory.Build.props'
+  #     - 'Directory.Packages.props'
+  #     - '.github/workflows/codeql.yml'
+  #     - '.github/codeql/**'
+  # pull_request:
+  #   branches: [ "main", "ja-localization" ]
+  #   paths:
+  #     - 'src/**'
+  #     - 'tests/**'
+  #     - '**.csproj'
+  #     - '**.sln'
+  #     - 'Directory.Build.props'
+  #     - 'Directory.Packages.props'
+  #     - '.github/workflows/codeql.yml'
+  #     - '.github/codeql/**'
+  # schedule:
+  #   # Run CodeQL analysis every Monday at 10:00 AM UTC
+  #   - cron: '0 10 * * 1'
   workflow_dispatch:
 
 permissions:

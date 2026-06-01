@@ -1,12 +1,13 @@
-name: Sync with Upstream
+name: Sync with Upstream (DISABLED)
 
 # 定期的に本家リポジトリの変更を追跡してマージする
 # 競合が発生した場合はIssueを作成して通知する
+# NOTE: This workflow is disabled. Use auto-sync-and-release.yml instead.
 
 on:
-  schedule:
-    # 毎週月曜日午前9時（日本時間）に実行
-    - cron: '0 0 * * 1'
+  # schedule:
+  #   # 毎週月曜日午前9時（日本時間）に実行
+  #   - cron: '0 0 * * 1'
   workflow_dispatch:  # 手動実行も可能
 
 jobs:

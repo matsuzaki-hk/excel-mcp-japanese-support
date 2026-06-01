@@ -144,11 +144,11 @@ jobs:
             ### 対応手順
             1. ローカルで競合を解決
                \`\`\`bash
-               git checkout main
+               git checkout origin/main
                git fetch upstream
                git reset --hard upstream/main
                git checkout ja-localization
-               git rebase main
+               git rebase origin/main
                # 競合解決
                git rebase --continue
                git push origin ja-localization --force-with-lease

@@ -110,6 +110,9 @@ jobs:
           
           # Compare versions
           UPSTREAM_VERSION="${{ steps.version.outputs.upstream_version }}"
+          echo "Upstream version: $UPSTREAM_VERSION"
+          echo "Fork base version: $FORK_BASE_VERSION"
+          
           if [ "$FORK_BASE_VERSION" = "$UPSTREAM_VERSION" ]; then
             echo "Upstream version $UPSTREAM_VERSION already built in fork"
             echo "has_new_version=false" >> $GITHUB_OUTPUT

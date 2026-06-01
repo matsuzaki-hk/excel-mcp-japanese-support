@@ -252,7 +252,6 @@ jobs:
         with:
           script: |
             const upstreamVersion = '${{ needs.check-conflicts.outputs.upstream_version }}';
-            const newVersion = `${upstreamVersion}-ja.1`;
             
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
@@ -260,12 +259,11 @@ jobs:
               workflow_id: 'release-fork.yml',
               ref: 'ja-localization',
               inputs: {
-                version_bump: 'patch',
-                custom_version: newVersion
+                version_bump: 'patch'
               }
             });
             
-            console.log(`✅ Release triggered with version: ${newVersion}`);
+            console.log(`✅ Release triggered for upstream version: ${upstreamVersion}`);
 
   # ステップ5: 成功通知（オプション）
   notify-success:

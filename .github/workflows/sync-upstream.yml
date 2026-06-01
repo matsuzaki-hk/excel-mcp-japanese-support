@@ -52,7 +52,7 @@ jobs:
             git checkout upstream/main
             VERSION=$(grep -oP '<Version>\K[^<]+' src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj || echo "unknown")
             echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT
-            git checkout main
+            git checkout origin/main
           fi
 
       - name: Attempt merge
@@ -60,7 +60,7 @@ jobs:
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
           echo "Attempting to merge upstream/main into main..."
-          git checkout main
+          git checkout origin/main
           
           # マージを試みる
           if git merge upstream/main --no-edit; then
@@ -147,7 +147,7 @@ jobs:
             ### Manual Resolution Steps
             \`\`\`bash
             cd mcp-server-excel
-            git checkout main
+            git checkout origin/main
             git fetch upstream
             git merge upstream/main
             # Resolve conflicts manually

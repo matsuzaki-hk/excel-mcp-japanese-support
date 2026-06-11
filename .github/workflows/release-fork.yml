@@ -1,4 +1,4 @@
-﻿name: Release Fork (GitHub Only)
+name: Release Fork (GitHub Only)
 
 # Fork-specific release workflow - creates GitHub release only
 # Skips NuGet, VS Code Marketplace, and MCP Registry publishing
@@ -72,36 +72,59 @@ jobs:
             fi
             echo "Using custom version: ${VERSION}"
           else
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-            echo "Latest tag: ${LATEST_TAG}"
-            CURRENT_VERSION="${LATEST_TAG#v}"
-            echo "Current version: ${CURRENT_VERSION}"
+            # Get upstream version and append auto-incremented -ja.X suffix
+            git remote add upstream https://github.com/sbroenne/mcp-server-excel.git 2>/dev/null || true
+            git fetch upstream --tags 2>/dev/null || true
             
-            # Check if version contains -ja suffix (fork version)
-            if [[ "$CURRENT_VERSION" == *"-ja"* ]]; then
-              # Extract base version (e.g., 1.8.68-ja.1 -> 1.8.68)
-              BASE_VERSION=$(echo "$CURRENT_VERSION" | sed 's/-ja\.[0-9]\+$//')
-              echo "Base version: ${BASE_VERSION}"
-              CURRENT_VERSION="${BASE_VERSION}"
+            UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "")
+            
+            if [ -n "$UPSTREAM_TAG" ]; then
+              UPSTREAM_VERSION="${UPSTREAM_TAG#v}"
+              echo "Latest upstream version: ${UPSTREAM_VERSION}"
+              BASE_VERSION="$UPSTREAM_VERSION"
+              
+              # Find highest existing -ja.X suffix for this base version
+              LATEST_JA=$(git tag --list "v${BASE_VERSION}-ja.*" | sort -V | tail -1)
+              if [ -n "$LATEST_JA" ]; then
+                JA_NUM=$(echo "$LATEST_JA" | sed -E 's/.*-ja\.([0-9]+)$/\1/')
+                JA_NUM=$((JA_NUM + 1))
+              else
+                JA_NUM=1
+              fi
+              
+              VERSION="${BASE_VERSION}-ja.${JA_NUM}"
+              echo "New fork version: ${VERSION}"
+            else
+              # Fallback to latest local tag bump
+              LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+              echo "Latest tag: ${LATEST_TAG}"
+              CURRENT_VERSION="${LATEST_TAG#v}"
+              echo "Current version: ${CURRENT_VERSION}"
+              
+              if [[ "$CURRENT_VERSION" == *"-ja"* ]]; then
+                BASE_VERSION=$(echo "$CURRENT_VERSION" | sed 's/-ja\.[0-9]\+$//')
+                echo "Base version: ${BASE_VERSION}"
+                CURRENT_VERSION="${BASE_VERSION}"
+              fi
+              
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+              case "${{ inputs.version_bump }}" in
+                major)
+                  MAJOR=$((MAJOR + 1))
+                  MINOR=0
+                  PATCH=0
+                  ;;
+                minor)
+                  MINOR=$((MINOR + 1))
+                  PATCH=0
+                  ;;
+                patch)
+                  PATCH=$((PATCH + 1))
+                  ;;
+              esac
+              VERSION="${MAJOR}.${MINOR}.${PATCH}-ja.1"
+              echo "New version: ${VERSION}"
             fi
-            
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-            case "${{ inputs.version_bump }}" in
-              major)
-                MAJOR=$((MAJOR + 1))
-                MINOR=0
-                PATCH=0
-                ;;
-              minor)
-                MINOR=$((MINOR + 1))
-                PATCH=0
-                ;;
-              patch)
-                PATCH=$((PATCH + 1))
-                ;;
-            esac
-            VERSION="${MAJOR}.${MINOR}.${PATCH}"
-            echo "New version: ${VERSION}"
           fi
           TAG="v${VERSION}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT

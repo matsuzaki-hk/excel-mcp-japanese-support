@@ -1,4 +1,4 @@
-name: Release Fork (GitHub Only)
+﻿name: Release Fork (GitHub Only)
 
 # Fork-specific release workflow - creates GitHub release only
 # Skips NuGet, VS Code Marketplace, and MCP Registry publishing
@@ -316,7 +316,11 @@ jobs:
         run: |
           TAG="${{ needs.version.outputs.tag }}"
           echo "Creating tag: $TAG"
+          # Remove existing local tag if present
+          git tag -d "$TAG" 2>/dev/null || true
           git tag -a "$TAG" -m "Release $TAG (Japanese Support Fork)"
+          # Remove existing remote tag if present, then push
+          git push --delete origin "$TAG" 2>/dev/null || true
           git push origin "$TAG"
 
   # Cleanup .upstream-version file

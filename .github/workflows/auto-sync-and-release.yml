@@ -164,7 +164,30 @@ jobs:
           script: |
             const conflictFiles = '${{ needs.check-conflicts.outputs.conflict_files }}';
             const upstreamVersion = '${{ needs.check-conflicts.outputs.upstream_version }}';
-            
+
+            // 重複Issue防止: 既存のオープンIssue（conflict + upstream-sync ラベル）を検索
+            // 同一競合が未解決のまま連日実行されるのを防ぐ
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'conflict,upstream-sync',
+              per_page: 100
+            });
+            if (existingIssues.data.length > 0) {
+              const existing = existingIssues.data[0];
+              console.log(`⚠️ 既存の未解決競合Issue #${existing.number} が存在するため、新規Issue作成をスキップします`);
+              console.log(`既存Issue: ${existing.html_url}`);
+              // 既存Issueに最新の検出状況をコメントで追記（連日重複作成せず1件に集約）
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `### 再検出 (${new Date().toISOString()})\n本家バージョン: ${upstreamVersion}\n競合ファイル: ${conflictFiles || '（検出中）'}\n\n既存Issueが未解決のため新規作成をスキップしました。競合解決後にこのIssueはクローズしてください。`
+              });
+              return;
+            }
+
             const title = `⚠️ Upstream sync conflict detected (v${upstreamVersion})`;
             const body = `## 本家更新との競合検出
             

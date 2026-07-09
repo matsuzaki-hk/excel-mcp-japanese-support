@@ -1,65 +1,65 @@
-# Installation Guide - ExcelMcp
+# インストールガイド - ExcelMcp
 
-ExcelMcp ships two **equal entry points** — the **MCP Server** for AI assistants and the **CLI** for scripting, RPA, and CI/CD. Pick the guide that matches how you'll use it (or read both, they're independent):
+ExcelMcpは2つの**同等のエントリポイント**を提供します — AIアシスタント用の**MCP Server**と、スクリプト作成・RPA・CI/CD用の**CLI**です。用途に合ったガイドを選んでください（両方読んでも構いません。それぞれ独立しています）：
 
-| Guide | Best For |
+| ガイド | 最適な用途 |
 |-------|----------|
-| 📖 **[Installing the MCP Server](INSTALLATION-MCP-SERVER.md)** | AI assistants — GitHub Copilot, Claude Desktop, Cursor, Windsurf, and any other MCP client |
-| 📖 **[Installing the CLI](INSTALLATION-CLI.md)** | Scripting, RPA, CI/CD pipelines, and coding agents that prefer a token-efficient single tool |
+| 📖 **[MCP Serverのインストール](https://excelmcpserver.dev/installation-mcp-server/)** | AIアシスタント — GitHub Copilot、Claude Desktop、Cursor、Windsurf、その他のMCPクライアント |
+| 📖 **[CLIのインストール](https://excelmcpserver.dev/installation-cli/)** | スクリプト作成、RPA、CI/CDパイプライン、トークン効率の良い単一ツールを好むコーディングエージェント |
 
-Both require **Windows OS** and **Microsoft Excel 2016+** — no .NET runtime needed for the standalone exe distributions.
+両方とも**Windows OS**と**Microsoft Excel 2016以降**が必要です — スタンドアロンexe配布版には.NETランタイムは不要です。
 
-> **Tip:** The **VS Code Extension** bundles the MCP Server only (install the CLI separately if you need it for scripting). The **GitHub Copilot plugins** are separate — install `excel-mcp` and/or `excel-cli` depending on which entry point you need — see the MCP Server guide's Quick Start for the one-click paths.
+> **ヒント:** **VS Code拡張機能**はMCP Serverのみをバンドルしています（スクリプト用にCLIが必要な場合は別途インストールしてください）。**GitHub Copilotプラグイン**は別々です — 必要なエントリポイントに応じて`excel-mcp`や`excel-cli`をインストールしてください — ワンクリックパスについてはMCP Serverガイドのクイックスタートを参照してください。
 
 ---
 
-## Agent Skills Installation (Cross-Platform)
+## エージェントスキルのインストール（クロスプラットフォーム）
 
-**Best for:** Adding AI guidance to coding agents (Copilot, Cursor, Windsurf, Claude Code, Gemini, Codex, etc.)
+**最適な用途:** コーディングエージェント（Copilot、Cursor、Windsurf、Claude Code、Gemini、Codexなど）へのAIガイダンス追加
 
-The VS Code extension auto-installs the `excel-mcp` skill only. Plugins and skills are different things: plugins are packaged surface integrations, while skills are reusable AI guidance. For the `excel-cli` skill, or for environments where you want skills directly, use the commands below:
+VS Code拡張機能は`excel-mcp`スキルのみを自動インストールします。プラグインとスキルは異なるものです：プラグインはパッケージ化された統合ですが、スキルは再利用可能なAIガイダンスです。`excel-cli`スキル、またはスキルを直接利用したい環境では、以下のコマンドを使用してください：
 
 ```powershell
-# CLI skill (for coding agents - token-efficient workflows)
+# CLIスキル（コーディングエージェント用 - トークン効率の良いワークフロー）
 npx skills add sbroenne/mcp-server-excel --skill excel-cli
 
-# MCP skill (for conversational AI - rich tool schemas)
+# MCPスキル（会話型AI用 - 豊富なツールスキーマ）
 npx skills add sbroenne/mcp-server-excel --skill excel-mcp
 
-# Interactive install - prompts to select excel-cli, excel-mcp, or both
+# インタラクティブインストール - excel-cli、excel-mcp、または両方を選択
 npx skills add sbroenne/mcp-server-excel
 
-# Install for specific agents
+# 特定のエージェント向けにインストール
 npx skills add sbroenne/mcp-server-excel --skill excel-cli -a cursor
 npx skills add sbroenne/mcp-server-excel --skill excel-mcp -a claude-code
 
-# Install both skills
+# 両方のスキルをインストール
 npx skills add sbroenne/mcp-server-excel --skill '*'
 
-# Install globally (user-wide)
+# グローバルにインストール（ユーザー全体）
 npx skills add sbroenne/mcp-server-excel --skill excel-cli --global
 ```
 
-**Supports 43+ agents** including claude-code, github-copilot, cursor, windsurf, gemini-cli, codex, goose, cline, continue, replit, and more.
+**43以上のエージェント**に対応しています。claude-code、github-copilot、cursor、windsurf、gemini-cli、codex、goose、cline、continue、replitなど。
 
-**Manual Installation:**
-1. Download `excel-skills-v{version}.zip` from [GitHub Releases](https://github.com/sbroenne/mcp-server-excel/releases/latest)
-2. The package contains both skills:
-   - `skills/excel-cli/` - for coding agents (Copilot, Cursor, Windsurf)
-   - `skills/excel-mcp/` - for conversational AI (Claude Desktop, VS Code Chat)
-3. Extract the skill(s) you need to your AI assistant's skills directory:
-   - Copilot: `~/.copilot/skills/excel-cli/` or `~/.copilot/skills/excel-mcp/`
-   - Claude Code: `.claude/skills/excel-cli/` or `.claude/skills/excel-mcp/`
-   - Cursor: `.cursor/skills/excel-cli/` or `.cursor/skills/excel-mcp/`
+**手動インストール:**
+1. [GitHub Releases](https://github.com/sbroenne/mcp-server-excel/releases/latest)から`excel-skills-v{version}.zip`をダウンロード
+2. パッケージには両方のスキルが含まれています：
+   - `skills/excel-cli/` - コーディングエージェント用（Copilot、Cursor、Windsurf）
+   - `skills/excel-mcp/` - 会話型AI用（Claude Desktop、VS Code Chat）
+3. 必要なスキルをAIアシスタントのスキルディレクトリに展開します：
+   - Copilot: `~/.copilot/skills/excel-cli/` または `~/.copilot/skills/excel-mcp/`
+   - Claude Code: `.claude/skills/excel-cli/` または `.claude/skills/excel-mcp/`
+   - Cursor: `.cursor/skills/excel-cli/` または `.cursor/skills/excel-mcp/`
 
-**See:** [Agent Skills Documentation](../skills/README.md)
+**参照:** [エージェントスキルドキュメント](https://excelmcpserver.dev/skills/)
 
 ---
 
-## Getting Help
+## ヘルプ・サポート
 
-- **Documentation:** [GitHub Repository](https://github.com/sbroenne/mcp-server-excel)
+- **ドキュメント:** [GitHubリポジトリ](https://github.com/sbroenne/mcp-server-excel)
 - **Issues:** [GitHub Issues](https://github.com/sbroenne/mcp-server-excel/issues)
-- **Contributing:** [Contributing Guide](CONTRIBUTING.md)
+- **コントリビューション:** [コントリビューションガイド](https://excelmcpserver.dev/contributing/)
 
-**Happy automating! 🚀**
+**自動化を楽しみましょう！ 🚀**

@@ -65,10 +65,6 @@ Drives the **actual Excel application** via COM — not a file-format parser —
 
 ---
 
-## 🤝 Related Tools & Support
-
----
-
 ## 📖 Complete Documentation
 
 - **[GitHub Releases](https://github.com/sbroenne/mcp-server-excel/releases/latest)** - Download latest standalone exe (primary)
@@ -172,10 +168,6 @@ These tests open actual workbooks, issue `session open/list/close`, and call `ex
 ---
 
 ## 🤝 Related Tools
-
-- **[ExcelMcp MCP Server](https://github.com/sbroenne/mcp-server-excel/releases/latest)** - MCP server for AI assistant integration (`mcp-excel.exe`)
-- **[Excel MCP VS Code Extension](https://marketplace.visualstudio.com/items?itemName=sbroenne.excel-mcp)** - One-click Excel automation in VS Code
->>>>>>> 08d2ec617123490fa4dad1d99da58d5a508e2a95
 
 - **[MCP Server](https://excelmcpserver.dev/mcp-server/)** - For conversational AI (Claude Desktop, VS Code Chat)
 - **[VS Code Extension](https://marketplace.visualstudio.com/items?itemName=sbroenne.excel-mcp)** - One-click Excel automation in VS Code

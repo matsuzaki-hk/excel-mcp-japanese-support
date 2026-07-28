@@ -249,11 +249,24 @@ jobs:
         run: |
           git remote add upstream https://github.com/sbroenne/mcp-server-excel.git
           git fetch upstream main
-          
+
+          # fork側のworkflowファイルを退避（GITHUB_TOKENではworkflowファイルを
+          # pushできないため、rebase後に元に戻す）
+          mkdir -p /tmp/fork-workflows
+          cp -a .github/workflows/. /tmp/fork-workflows/
+
           # ja-localizationをupstream/mainにリベース
           git rebase upstream/main
+
+          # workflowファイルをrebase前の状態に戻す
+          cp -a /tmp/fork-workflows/. .github/workflows/
+          git add .github/workflows/
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: preserve fork workflow files during upstream rebase"
+          fi
+
           git push origin ja-localization --force-with-lease
-          
+
           echo "✅ Rebase completed successfully"
 
       - name: Save upstream version

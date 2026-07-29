@@ -189,6 +189,61 @@ This package provides both **CLI** and **MCP Server** interfaces. Choose based o
 
 **⚡ CLI Commands:** Generated automatically from Core service definitions using Roslyn source generators. All CLI commands maintain exact 1:1 parity with MCP tools through shared code generation. See [code generation docs](docs/DEVELOPMENT.md#-cli-command-code-generation) for details.
 
+### MCP クライアント設定
+
+`mcp-excel.exe` は標準入出力（stdio）で動作します。MCP クライアントに登録する方法は 2 通りです。
+
+#### A. フルパスで指定する方法
+
+ZIP を任意の場所（例：`C:\Tools\ExcelMcp`）に展開し、MCP クライアントの設定ファイルの `command` にフルパスを指定してください。
+
+```json
+{
+  "mcpServers": {
+    "excel-mcp": {
+      "command": "C:\\Tools\\ExcelMcp\\mcp-excel.exe",
+      "args": []
+    }
+  }
+}
+```
+
+#### B. ファイル名だけで指定する方法（PATH を通す）
+
+展開先フォルダを PATH に追加すると、`command` に `mcp-excel.exe` だけを指定できます。
+
+**B-1. スタートメニューから設定する**
+
+1. Windows キーを押して `環境変数` と入力
+2. `システム環境変数の編集` または `環境変数を編集` を選択
+3. 開いた `システムのプロパティ` ウィンドウで `詳細設定` タブを開き、`環境変数(N)` ボタンをクリック
+4. `ユーザー環境変数`（または `システム環境変数`）エリアで `Path` を選択し、`編集` をクリック
+5. `新規` をクリックし、`mcp-excel.exe` を展開したフォルダのパス（例：`C:\Tools\ExcelMcp`）を追加
+6. `OK` を複数回押してウィンドウを閉じる
+7. 新しい PowerShell / ターミナルを開き、`mcp-excel.exe` と入力してパスが通っているか確認
+
+**B-2. PowerShell コマンドから設定する**
+
+```powershell
+# 例：C:\Tools\ExcelMcp を PATH に追加（ユーザー環境変数）
+[Environment]::SetEnvironmentVariable("Path", "$env:Path;C:\Tools\ExcelMcp", "User")
+```
+
+新しい PowerShell / ターミナルで `mcp-excel.exe` が実行できることを確認してから、以下のように設定してください。
+
+```json
+{
+  "mcpServers": {
+    "excel-mcp": {
+      "command": "mcp-excel.exe",
+      "args": []
+    }
+  }
+}
+```
+
+> **注意:** 設定変更後は MCP クライアントの再起動が必要です。
+
 ### 📦 本家でのその他の配布形態
 
 本家 [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) では以下も提供されていますが、**本フォークはスタンドアロン実行ファイルのみをリリースしています**。

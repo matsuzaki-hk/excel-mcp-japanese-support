@@ -452,9 +452,10 @@ jobs:
             } else {
               // Final fallback: try to get upstream release body
               try {
-                const upstreamRelease = await github.rest.repos.getLatestRelease({
+                const upstreamRelease = await github.rest.repos.getReleaseByTag({
                   owner: 'sbroenne',
-                  repo: 'mcp-server-excel'
+                  repo: 'mcp-server-excel',
+                  tag: 'v' + versionNumber
                 });
                 upstreamBody = upstreamRelease.data.body || 'No release notes available';
               } catch (error) {
@@ -463,23 +464,37 @@ jobs:
             }
           }
           
-          // Trim body to first 3000 chars if too long
-          if (upstreamBody.length > 3000) {
-            upstreamBody = upstreamBody.substring(0, 3000) + '\n\n...(truncated)';
+          // Extract only the change notes from the upstream body
+          let changes = upstreamBody
+            .replace(/^##\s+[^\n]+\n+/m, '')
+            .replace(/\n###\s+(?:Installation Options|Requirements|Documentation|Links)[\s\S]*$/i, '');
+
+          changes = changes.trim();
+
+          const whatsNewMatch = changes.match(/^###\s+What[\u0027\u2019]?s New\s*\n([\s\S]*?)(?=\n###\s+(?:Installation|Requirements|Documentation|Links)|\n##\s|$)/);
+          if (whatsNewMatch) {
+            changes = whatsNewMatch[1].trim();
           }
-          
-          // Note: ANSI escape code removal will be done in shell step instead
-          // to ensure compatibility across environments
-          
+
+          const placeholderPattern = /^\s*(?:_?No changes recorded.*?|See repository for details\.)\s*$/i;
+          const hasChanges = !!(changes && !placeholderPattern.test(changes));
+
+          if (hasChanges && changes.length > 3000) {
+            changes = changes.substring(0, 3000) + '\n\n...(truncated)';
+          }
+
           // Base64 encode to safely pass through shell without interpretation
-          // This prevents any shell expansion of $variables, backticks, etc.
           const base64Body = Buffer.from(upstreamBody).toString('base64');
-          
+          const changesB64 = Buffer.from(changes).toString('base64');
+
           core.setOutput('upstream_version', `v${versionNumber}`);
           core.setOutput('upstream_body_b64', base64Body);
+          core.setOutput('has_changes', hasChanges.toString());
+          core.setOutput('upstream_changes_b64', changesB64);
           console.log(`Fork version: ${forkVersion}`);
           console.log(`Upstream version: v${versionNumber}`);
-          console.log(`Body length: ${upstreamBody.length}, Base64 length: ${base64Body.length}`);
+          console.log(`Has upstream changes: ${hasChanges}`);
+          console.log(`Body length: ${upstreamBody.length}, Base64 length: ${base64Body.length}, Changes length: ${changes.length}`);
 
     - name: Extract Fork Features from README
       id: readme
@@ -504,26 +519,21 @@ jobs:
         TAG="${{ needs.version.outputs.tag }}"
         UPSTREAM_VER="${{ steps.upstream.outputs.upstream_version }}"
         
-        # Decode base64 upstream body
-        UPSTREAM_BODY_B64="${{ steps.upstream.outputs.upstream_body_b64 }}"
-        UPSTREAM_BODY=$(echo "$UPSTREAM_BODY_B64" | base64 -d)
-        
-        # Remove ANSI escape codes using sed
-        # Pattern matches ESC[...m, ESC[?...l/h, ESC[...D/J, etc.
-        UPSTREAM_BODY=$(echo "$UPSTREAM_BODY" | sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' -e 's/\x1b\[[0-9]*[A-Za-z]//g' -e 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g')
-        
-        # Escape backticks to prevent shell command execution
-        UPSTREAM_BODY=$(echo "$UPSTREAM_BODY" | sed 's/`/\\`/g')
+        # Decode base64 upstream changes
+        UPSTREAM_CHANGES_B64="${{ steps.upstream.outputs.upstream_changes_b64 }}"
+        UPSTREAM_CHANGES=$(echo "$UPSTREAM_CHANGES_B64" | base64 -d)
         
         # Write release notes using printf to handle special characters safely
         printf '%s\n' "## ExcelMcp $VERSION (Japanese Support Fork / 日本語対応フォーク)" > release_notes.md
         printf '\n' >> release_notes.md
         printf '%s\n' "🇯🇵 本家 [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) の日本語対応フォークです。" >> release_notes.md
         printf '\n---\n\n' >> release_notes.md
-        printf '%s\n' "## 本家変更 (Based on $UPSTREAM_VER)" >> release_notes.md
-        printf '\n' >> release_notes.md
-        printf '%s\n' "$UPSTREAM_BODY" >> release_notes.md
-        printf '\n---\n\n' >> release_notes.md
+        if [ "${{ steps.upstream.outputs.has_changes }}" = "true" ] && [ -n "$UPSTREAM_CHANGES" ]; then
+          printf '%s\n' "## 本家変更 (Based on $UPSTREAM_VER)" >> release_notes.md
+          printf '\n' >> release_notes.md
+          printf '%s\n' "$UPSTREAM_CHANGES" >> release_notes.md
+          printf '\n---\n\n' >> release_notes.md
+        fi
         printf '%s\n' "## FORK固有機能 / 日本語対応機能" >> release_notes.md
         printf '\n' >> release_notes.md
         printf '%s\n' "### 日本語化サポート" >> release_notes.md

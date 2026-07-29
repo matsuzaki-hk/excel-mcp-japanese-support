@@ -226,3 +226,11 @@ manual maintenance and cannot drift:
 - **Single source of truth** - Content pulled directly from canonical source files at build time
 - **SEO** - Better for search engine indexing
 - **Offline docs** - Works with `mkdocs serve` locally
+
+## Fork README ローカライズ管理
+
+- `README.md` は、フォークユーザー向けの日本語ローカライズ版です。
+- `docs/UPSTREAM-README-EN.md` は、最後に同期した時点での本家英語READMEのスナップショットです。
+- 本家READMEが更新されたときは、`docs/UPSTREAM-README-EN.md` と比較して新規・変更セクションを特定し、日本語版 `README.md` をそれに合わせて更新してください。
+- `README.md` の `<!-- upstream-en: ... -->` コメントはセクション対応を保つため、更新時も維持してください。
+- 更新が完了したら、`docs/UPSTREAM-README-EN.md` を最新の本家READMEで置き換えてください。

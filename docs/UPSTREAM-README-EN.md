@@ -11,50 +11,49 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/sbroenne/mcp-server-excel)
 [![Built with Copilot](https://img.shields.io/badge/Built%20with-GitHub%20Copilot-0366d6.svg)](https://copilot.github.com/)
 
-**Automate Excel with AI** — A Model Context Protocol (MCP) server for comprehensive Excel automation through conversational AI.
+**Automate Excel with AI** 窶・A Model Context Protocol (MCP) server for comprehensive Excel automation through conversational AI.
 
 **MCP Server for Excel** enables AI assistants (GitHub Copilot, Claude, ChatGPT) to automate Excel through natural language commands. Automate Power Query, DAX measures, VBA macros, PivotTables, Charts, formatting, and data transformations (26 tools with 234 operations).
 
-**⚡ Powered by the real Excel engine** — ExcelMcp drives the actual Excel application through its official COM API, so it does what file-parser tools can't: run live operations (refresh Power Query, recalculate, refresh PivotTables and the Data Model, evaluate DAX, run VBA and Python `=PY()`) and edit your existing workbooks with every formula, PivotTable, chart, macro and format left intact.
+**笞｡ Powered by the real Excel engine** 窶・ExcelMcp drives the actual Excel application through its official COM API, so it does what file-parser tools can't: run live operations (refresh Power Query, recalculate, refresh PivotTables and the Data Model, evaluate DAX, run VBA and Python `=PY()`) and edit your existing workbooks with every formula, PivotTable, chart, macro and format left intact.
 
-**💡 Interactive Development** - See results instantly in Excel. Create a query, run it, inspect the output, refine and repeat. Excel becomes your AI-powered workspace for rapid development and testing.
+**庁 Interactive Development** - See results instantly in Excel. Create a query, run it, inspect the output, refine and repeat. Excel becomes your AI-powered workspace for rapid development and testing.
 
-**🧪 LLM-Tested Quality** - Tool behavior validated with real LLM workflows using [pytest-skill-engineering](https://github.com/sbroenne/pytest-skill-engineering). We test that LLMs correctly understand and use our tools.
+**ｧｪ LLM-Tested Quality** - Tool behavior validated with real LLM workflows using [pytest-skill-engineering](https://github.com/sbroenne/pytest-skill-engineering). We test that LLMs correctly understand and use our tools.
 
 **Technical Requirements:**
-- ⚠️ **Windows Only** - COM interop is Windows-specific
-- ⚠️ **Excel Required** - Microsoft Excel 2016 or later must be installed
-- ⚠️ **Desktop Environment** - Controls actual Excel process (not for server-side processing)
+- 笞・・**Windows Only** - COM interop is Windows-specific
+- 笞・・**Excel Required** - Microsoft Excel 2016 or later must be installed
+- 笞・・**Desktop Environment** - Controls actual Excel process (not for server-side processing)
 
 > [!TIP]
-> **Also building PowerPoint decks?** Check out [PowerPoint MCP Server](https://powerpointmcpserver.dev/) —
-> the sister project, built the same way.
+> **Also building PowerPoint decks?** Check out [PowerPoint MCP Server](https://powerpointmcpserver.dev/) 窶・> the sister project, built the same way.
 
-## 🎯 What You Can Do
+## 識 What You Can Do
 
 **26 specialized tools with 234 operations:**
 
-- 🔄 **Power Query** (1 tool, 12 ops) - Atomic workflows, M code management, load destinations
-- 📊 **Data Model/DAX** (2 tools, 19 ops) - Measures, relationships, model structure
-- 🎨 **Excel Tables** (2 tools, 27 ops) - Lifecycle, filtering, sorting, structured references
-- 📈 **PivotTables** (3 tools, 30 ops) - Creation, fields, aggregations, calculated members/fields
-- 📉 **Charts** (2 tools, 29 ops) - Create, configure, series, formatting, data labels, trendlines
-- 📝 **VBA** (1 tool, 6 ops) - Modules, execution, version control
-- 📋 **Ranges** (4 tools, 46 ops) - Values, formulas, formatting, validation, protection
-- 📄 **Worksheets** (2 tools, 16 ops) - Lifecycle, colors, visibility, cross-workbook moves
-- 🔌 **Connections** (1 tool, 9 ops) - OLEDB/ODBC management and refresh
-- 🏷️ **Named Ranges** (1 tool, 6 ops) - Parameters and configuration
-- 📁 **Files** (1 tool, 6 ops) - Session management, workbook creation, IRM/AIP-protected file support
-- 🧮 **Calculation Mode** (1 tool, 3 ops) - Get/set calculation mode and trigger recalculation
-- 🎚️ **Slicers** (1 tool, 8 ops) - Interactive filtering for PivotTables and Tables
-- 🎨 **Conditional Formatting** (1 tool, 2 ops) - Rules and clearing
-- 📸 **Screenshot** (1 tool, 2 ops) - Capture ranges/sheets as PNG for LLM visual verification
-- 🪧 **Window Management** (1 tool, 9 ops) - Show/hide Excel, arrange, position, status bar feedback
+- 売 **Power Query** (1 tool, 12 ops) - Atomic workflows, M code management, load destinations
+- 投 **Data Model/DAX** (2 tools, 19 ops) - Measures, relationships, model structure
+- 耳 **Excel Tables** (2 tools, 27 ops) - Lifecycle, filtering, sorting, structured references
+- 嶋 **PivotTables** (3 tools, 30 ops) - Creation, fields, aggregations, calculated members/fields
+- 悼 **Charts** (2 tools, 29 ops) - Create, configure, series, formatting, data labels, trendlines
+- 統 **VBA** (1 tool, 6 ops) - Modules, execution, version control
+- 搭 **Ranges** (4 tools, 46 ops) - Values, formulas, formatting, validation, protection
+- 塘 **Worksheets** (2 tools, 16 ops) - Lifecycle, colors, visibility, cross-workbook moves
+- 伯 **Connections** (1 tool, 9 ops) - OLEDB/ODBC management and refresh
+- 捷・・**Named Ranges** (1 tool, 6 ops) - Parameters and configuration
+- 刀 **Files** (1 tool, 6 ops) - Session management, workbook creation, IRM/AIP-protected file support
+- ｧｮ **Calculation Mode** (1 tool, 3 ops) - Get/set calculation mode and trigger recalculation
+- 字・・**Slicers** (1 tool, 8 ops) - Interactive filtering for PivotTables and Tables
+- 耳 **Conditional Formatting** (1 tool, 4 ops) - Add, clear, and inspect rules
+- 萄 **Screenshot** (1 tool, 2 ops) - Capture ranges/sheets as PNG for LLM visual verification
+- ｪｧ **Window Management** (1 tool, 9 ops) - Show/hide Excel, arrange, position, status bar feedback
 
-📚 **[Complete Feature Reference →](FEATURES.md)** - Detailed documentation of all 234 operations
+答 **[Complete Feature Reference 竊綻(FEATURES.md)** - Detailed documentation of all 234 operations
 
 
-## 💬 Example Prompts
+## 町 Example Prompts
 
 **Create & Populate Data:**
 - *"Create a new Excel file called SalesTracker.xlsx with a table for Date, Product, Quantity, Unit Price, and Total with sample data"*
@@ -80,38 +79,38 @@ Formatting split: number display formats use the `range` tool, while visual styl
 - *"Run the UpdatePrices macro"*
 - *"Show me Excel while you work"* - watch changes in real-time
 
-**🪟 Agent Mode — Watch AI Work in Excel:**
+**ｪ・Agent Mode 窶・Watch AI Work in Excel:**
 - *"Show me Excel side-by-side while you build this dashboard"* - real-time visibility
 - *"Let me watch while you create the chart"* - AI asks your preference, then shows Excel
 - Status bar shows live progress: *"ExcelMcp: Building PivotTable from Sales data..."*
 
-## 👥 Who Should Use This?
+## 則 Who Should Use This?
 
 **Perfect for:**
-- ✅ **Data analysts** automating repetitive Excel workflows
-- ✅ **Developers** building Excel-based data solutions
-- ✅ **Business users** managing complex Excel workbooks
-- ✅ **Teams** maintaining Power Query/VBA/DAX code in Git
+- 笨・**Data analysts** automating repetitive Excel workflows
+- 笨・**Developers** building Excel-based data solutions
+- 笨・**Business users** managing complex Excel workbooks
+- 笨・**Teams** maintaining Power Query/VBA/DAX code in Git
 
 **Not suitable for:**
-- ❌ Server-side data processing (use libraries like ClosedXML, EPPlus instead)
-- ❌ Linux/macOS users (Windows + Excel installation required)
-- ❌ High-volume batch operations (consider Excel-free alternatives)
+- 笶・Server-side data processing (use libraries like ClosedXML, EPPlus instead)
+- 笶・Linux/macOS users (Windows + Excel installation required)
+- 笶・High-volume batch operations (consider Excel-free alternatives)
 
 
-## 🚀 Quick Start
+## 噫 Quick Start
 
 | Platform | Installation |
 |----------|-------------|
 | **VS Code** | [Install Extension](https://marketplace.visualstudio.com/items?itemName=sbroenne.excel-mcp) (one-click, recommended) |
 | **Claude Desktop** | Download `.mcpb` from [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest) |
 | **Any MCP Client** | Download `mcp-excel.exe` from [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest) and add to PATH |
-| **Details** | 📖 [MCP Server Installation Guide](docs/INSTALLATION-MCP-SERVER.md) |
+| **Details** | 当 [MCP Server Installation Guide](docs/INSTALLATION-MCP-SERVER.md) |
 
-**⚠️ Important:** Close all Excel files before using. The server requires exclusive access to workbooks during automation.
+**笞・・Important:** Close all Excel files before using. The server requires exclusive access to workbooks during automation.
 
 
-## 🔧 CLI vs MCP Server
+## 肌 CLI vs MCP Server
 
 This package provides both **CLI** and **MCP Server** interfaces. Choose based on your use case:
 
@@ -122,13 +121,13 @@ This package provides both **CLI** and **MCP Server** interfaces. Choose based o
 
 **Installation:**
 - **CLI via Copilot plugin** (Recommended for Copilot CLI): Install the `excel-cli` plugin for skill guidance, then install `excelcli` separately
-- **CLI Standalone**: Download ZIP from [releases](https://github.com/sbroenne/mcp-server-excel/releases/latest) or install via NuGet — see [CLI Installation Guide](docs/INSTALLATION-CLI.md)
+- **CLI Standalone**: Download ZIP from [releases](https://github.com/sbroenne/mcp-server-excel/releases/latest) or install via NuGet 窶・see [CLI Installation Guide](docs/INSTALLATION-CLI.md)
 - **Skill only**: Install the `excel-cli` skill separately when your agent already has `excelcli` available on PATH
-- **MCP Server**: Download from releases or install VS Code Extension — see [MCP Server Installation Guide](docs/INSTALLATION-MCP-SERVER.md)
+- **MCP Server**: Download from releases or install VS Code Extension 窶・see [MCP Server Installation Guide](docs/INSTALLATION-MCP-SERVER.md)
 
-**⚡ CLI Commands:** Generated automatically from Core service definitions using Roslyn source generators. All CLI commands maintain exact 1:1 parity with MCP tools through shared code generation. See [code generation docs](docs/DEVELOPMENT.md#-cli-command-code-generation) for details.
+**笞｡ CLI Commands:** Generated automatically from Core service definitions using Roslyn source generators. All CLI commands maintain exact 1:1 parity with MCP tools through shared code generation. See [code generation docs](docs/DEVELOPMENT.md#-cli-command-code-generation) for details.
 
-### 📦 GitHub Copilot Plugins
+### 逃 GitHub Copilot Plugins
 
 ExcelMcp is available as two **GitHub Copilot CLI plugins** in the Copilot plugin marketplace:
 
@@ -141,19 +140,19 @@ copilot plugin install excel-mcp@mcp-server-excel-plugins      # For conversatio
 copilot plugin install excel-cli@mcp-server-excel-plugins      # For scripting / coding agents
 ```
 
-- **`excel-mcp`** — MCP server for conversational workflows
-- **`excel-cli`** — Skill for coding agents (install `excelcli` separately if you want the CLI tool)
+- **`excel-mcp`** 窶・MCP server for conversational workflows
+- **`excel-cli`** 窶・Skill for coding agents (install `excelcli` separately if you want the CLI tool)
 
 **Note:** After each release, there may be a short delay before plugins appear in the marketplace. You may need to wait a few moments for updates to sync.
 
-📖 [Full Installation Guide →](docs/INSTALLATION.md)
+当 [Full Installation Guide 竊綻(docs/INSTALLATION.md)
 
 <details>
-<summary>📊 Benchmark Results (same task, same model)</summary>
+<summary>投 Benchmark Results (same task, same model)</summary>
 
 | Metric | CLI | MCP Server | Winner |
 |--------|-----|------------|--------|
-| **Tokens** | ~59K | ~163K | 🏆 CLI (64% fewer) |
+| **Tokens** | ~59K | ~163K | 醇 CLI (64% fewer) |
 
 **Key insight:** MCP sends 26 tool schemas to the LLM on each request (~100K+ tokens).
 
@@ -163,8 +162,8 @@ copilot plugin install excel-cli@mcp-server-excel-plugins      # For scripting /
 ```powershell
 # Primary: Download standalone executables from latest release (no .NET runtime required)
 # https://github.com/sbroenne/mcp-server-excel/releases/latest
-# - ExcelMcp-MCP-Server-{version}-windows.zip → extract mcp-excel.exe
-# - ExcelMcp-CLI-{version}-windows.zip → extract excelcli.exe (optional, for scripting)
+# - ExcelMcp-MCP-Server-{version}-windows.zip 竊・extract mcp-excel.exe
+# - ExcelMcp-CLI-{version}-windows.zip 竊・extract excelcli.exe (optional, for scripting)
 
 # Secondary: Install via .NET tool (requires .NET 10 runtime)
 dotnet tool install --global Sbroenne.ExcelMcp.McpServer
@@ -174,7 +173,7 @@ dotnet tool install --global Sbroenne.ExcelMcp.CLI
 npx add-mcp "mcp-excel" --name excel-mcp
 ```
 
-> ⚠️ **Step 2 requires [Node.js](https://nodejs.org/)** for `npx`. Install with `winget install OpenJS.NodeJS.LTS` if needed.
+> 笞・・**Step 2 requires [Node.js](https://nodejs.org/)** for `npx`. Install with `winget install OpenJS.NodeJS.LTS` if needed.
 
 ```powershell
 # Optional: Install agent skills for better AI guidance
@@ -182,48 +181,33 @@ npx skills add sbroenne/mcp-server-excel --skill excel-cli   # Coding agents
 npx skills add sbroenne/mcp-server-excel --skill excel-mcp   # Conversational AI
 ```
 
-> 💡 **Skills provide AI guidance** - The CLI skill is highly recommended (agents don't work perfectly with CLI without it). The MCP skill is recommended - it adds workflow best practices and reduces token usage.
+> 庁 **Skills provide AI guidance** - The CLI skill is highly recommended (agents don't work perfectly with CLI without it). The MCP skill is recommended - it adds workflow best practices and reduces token usage.
 
 
-## ⚙️ How It Works - COM Automation & Unified Service Architecture
+## 笞呻ｸ・How It Works - COM Automation & Unified Service Architecture
 
 **ExcelMcp uses Windows COM automation to control the actual Excel application (not just .xlsx files).**
 
-The **MCP Server** and **CLI** are two equal, first-class entry points. Each hosts its own **ExcelMCP Service** that manages Excel sessions — the MCP Server runs it **in-process** (direct calls, no pipe), while the CLI uses a **background daemon** over a named pipe so sessions persist across CLI invocations:
+The **MCP Server** and **CLI** are two equal, first-class entry points. Each hosts its own **ExcelMCP Service** that manages Excel sessions 窶・the MCP Server runs it **in-process** (direct calls, no pipe), while the CLI uses a **background daemon** over a named pipe so sessions persist across CLI invocations:
 
 ```
-┌──────────────────────┐        ┌──────────────────────┐
-│  MCP Server          │        │  CLI (excelcli)      │
-│  (AI assistants)     │        │  (coding agents)     │
-└──────────┬───────────┘        └──────────┬───────────┘
-           │ in-process                     │ named pipe →
-           │ (direct calls)                 │ background daemon
-           ▼                                ▼
-┌──────────────────────┐        ┌──────────────────────┐
-│  ExcelMCP Service    │        │  ExcelMCP Service    │
-│  (session mgmt)      │        │  (daemon; sessions   │
-│                      │        │   persist across     │
-│                      │        │   CLI invocations)   │
-└──────────┬───────────┘        └──────────┬───────────┘
-           ▼                                ▼
+笏娯楳笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏・       笏娯楳笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏・笏・ MCP Server          笏・       笏・ CLI (excelcli)      笏・笏・ (AI assistants)     笏・       笏・ (coding agents)     笏・笏披楳笏笏笏笏笏笏笏笏笏笏ｬ笏笏笏笏笏笏笏笏笏笏笏笏・       笏披楳笏笏笏笏笏笏笏笏笏笏ｬ笏笏笏笏笏笏笏笏笏笏笏笏・           笏・in-process                     笏・named pipe 竊・           笏・(direct calls)                 笏・background daemon
+           笆ｼ                                笆ｼ
+笏娯楳笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏・       笏娯楳笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏・笏・ ExcelMCP Service    笏・       笏・ ExcelMCP Service    笏・笏・ (session mgmt)      笏・       笏・ (daemon; sessions   笏・笏・                     笏・       笏・  persist across     笏・笏・                     笏・       笏・  CLI invocations)   笏・笏披楳笏笏笏笏笏笏笏笏笏笏ｬ笏笏笏笏笏笏笏笏笏笏笏笏・       笏披楳笏笏笏笏笏笏笏笏笏笏ｬ笏笏笏笏笏笏笏笏笏笏笏笏・           笆ｼ                                笆ｼ
       Core Commands                    Core Commands
-           ▼                                ▼
-┌──────────────────────┐        ┌──────────────────────┐
-│  Excel COM API       │        │  Excel COM API       │
-│  (Excel.Application) │        │  (Excel.Application) │
-└──────────────────────┘        └──────────────────────┘
-```
+           笆ｼ                                笆ｼ
+笏娯楳笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏・       笏娯楳笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏・笏・ Excel COM API       笏・       笏・ Excel COM API       笏・笏・ (Excel.Application) 笏・       笏・ (Excel.Application) 笏・笏披楳笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏・       笏披楳笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏・```
 
 Both entry points share the same Core Commands codebase, so every operation behaves identically. They are separate processes, though: each runs its own ExcelMCP Service and its own Excel instance, and they do **not** share live sessions with each other.
 
 **Key Benefits:**
-- ✅ **Two equal entry points** - Every operation works identically through the MCP Server and the CLI
-- ✅ **Persistent CLI sessions** - The CLI daemon keeps workbooks open across multiple `excelcli` calls, so scripts don't re-open files each time
-- ✅ **In-process MCP calls** - The MCP Server runs the service in-process (no pipe) for low-latency automation
-- ✅ **Real Excel automation** - Drives the actual Excel.Application via COM, not just file parsing
-- ✅ **System Tray UI** - The CLI daemon shows a tray icon to monitor and stop active sessions
+- 笨・**Two equal entry points** - Every operation works identically through the MCP Server and the CLI
+- 笨・**Persistent CLI sessions** - The CLI daemon keeps workbooks open across multiple `excelcli` calls, so scripts don't re-open files each time
+- 笨・**In-process MCP calls** - The MCP Server runs the service in-process (no pipe) for low-latency automation
+- 笨・**Real Excel automation** - Drives the actual Excel.Application via COM, not just file parsing
+- 笨・**System Tray UI** - The CLI daemon shows a tray icon to monitor and stop active sessions
 
-**💡 Tip: Watch Excel While AI Works**
+**庁 Tip: Watch Excel While AI Works**
 By default, Excel runs hidden for faster automation. To see changes in real-time, just ask:
 - *"Show me Excel while you work"*
 - *"Let me watch what you're doing"*
@@ -231,15 +215,15 @@ By default, Excel runs hidden for faster automation. To see changes in real-time
 
 The AI will display the Excel window so you can watch every operation happen live - great for learning or verifying changes!
 
-## ⭐ GitHub Star History
+## 箝・GitHub Star History
 
 [![GitHub stars over time for ExcelMcp](https://excelmcpserver.dev/assets/images/star-history.svg)](https://github.com/sbroenne/mcp-server-excel/stargazers)
 
 Updated daily from GitHub's stargazer data.
 
-## 📋 Additional Information
+## 搭 Additional Information
 
-📚 **[CLI Guide →](src/ExcelMcp.CLI/README.md)** | **[CLI Skill for Agents →](skills/excel-cli/SKILL.md)** | **[MCP Server Guide →](src/ExcelMcp.McpServer/README.md)** | **[All Agent Skills →](skills/README.md)**
+答 **[CLI Guide 竊綻(src/ExcelMcp.CLI/README.md)** | **[CLI Skill for Agents 竊綻(skills/excel-cli/SKILL.md)** | **[MCP Server Guide 竊綻(src/ExcelMcp.McpServer/README.md)** | **[All Agent Skills 竊綻(skills/README.md)**
 
 **License:** MIT License - see [LICENSE](LICENSE) file
 
@@ -257,7 +241,7 @@ Updated daily from GitHub's stargazer data.
 
 Other projects by the author:
 
-- [PowerPoint MCP Server](https://powerpointmcpserver.dev/) — AI-powered PowerPoint automation via MCP, the sister project to this one
-- [pytest-skill-engineering](https://github.com/sbroenne/pytest-skill-engineering) — LLM-powered testing framework for AI agents
-- [Windows MCP Server](https://windowsmcpserver.dev/) — AI-powered Windows automation via MCP
-- [OBS Studio MCP Server](https://github.com/sbroenne/mcp-server-obs) — AI-powered OBS Studio automation
+- [PowerPoint MCP Server](https://powerpointmcpserver.dev/) 窶・AI-powered PowerPoint automation via MCP, the sister project to this one
+- [pytest-skill-engineering](https://github.com/sbroenne/pytest-skill-engineering) 窶・LLM-powered testing framework for AI agents
+- [Windows MCP Server](https://windowsmcpserver.dev/) 窶・AI-powered Windows automation via MCP
+- [OBS Studio MCP Server](https://github.com/sbroenne/mcp-server-obs) 窶・AI-powered OBS Studio automation

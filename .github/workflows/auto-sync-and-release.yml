@@ -124,6 +124,16 @@ jobs:
       - name: Check for merge conflicts (dry-run)
         id: conflict_check
         run: |
+          # 既に同期済みのバージョンでは、fork固有のREADMEやworkflow差分を
+          # 本家との新規競合として毎日再通知しない。
+          if [ "${{ steps.check_new_version.outputs.has_new_version }}" != "true" ]; then
+            echo "Upstream version is already synchronized; skipping conflict check."
+            echo "has_conflicts=false" >> $GITHUB_OUTPUT
+            echo "can_automerge=false" >> $GITHUB_OUTPUT
+            echo "conflict_files=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           echo "Checking for conflicts between ja-localization and upstream/main..."
           
           # upstream/mainを一時ブランチにマージして競合を確認

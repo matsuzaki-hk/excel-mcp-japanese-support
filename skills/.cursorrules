@@ -1,0 +1,22 @@
+# ExcelMcp 日本語対応フォーク
+
+本リポジトリは [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) をフォークし、Excel のテーブル名・シート名・ファイルパスなどの識別子に日本語文字をサポートしたものです。
+
+## 日本語サポートの範囲
+
+- 日本語テーブル名（`[\p{L}_][\p{L}\p{N}_]*` 正規表現）
+- 日本語シート名・ワークブック名・ファイルパス
+- 日本語シナリオ名・XmlMap 名・QueryTable 名・VBA モジュール名・画像名
+
+## Project Rules (English)
+
+> The following rules are written in English so that agents can interpret them precisely.
+
+- NEVER commit directly to `main`. Use feature branches and pull requests.
+- Fix all warnings because `TreatWarningsAsErrors=true` is active.
+- Use specific exception types, validate nullables, and avoid generic catches.
+- Prefer `AsSpan()` / `[..n]` over `.AsSpan().ToString()` and `.Substring()`.
+- Preserve Unicode support for table/sheet/file names; do not reintroduce ASCII-only regexes.
+- Keep `ComUtilities` Unicode normalization (`NormalizationForm.FormC`) intact.
+- Update docs and skill files when user-facing behavior changes.
+- Use `matsuzaki-hk/excel-mcp-japanese-support` in release URLs and skill packages.

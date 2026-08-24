@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
     Copies the canonical MCP skill into the VS Code extension and stamps its package version.
+    Uses the Japanese localized skill (excel-mcp-ja) for this fork.
 #>
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$SourceDir = Join-Path $RepoRoot "skills\excel-mcp"
-$OutputDir = Join-Path $RepoRoot "vscode-extension\skills\excel-mcp"
+$SourceDir = Join-Path $RepoRoot "skills\excel-mcp-ja"
+$OutputDir = Join-Path $RepoRoot "vscode-extension\skills\excel-mcp-ja"
 $PackageJsonPath = Join-Path $RepoRoot "vscode-extension\package.json"
 
 if (-not (Test-Path $SourceDir -PathType Container)) {
@@ -26,4 +27,4 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $OutputDir) -Force | Out-
 Copy-Item -Path $SourceDir -Destination $OutputDir -Recurse -Force
 Set-Content -Path (Join-Path $OutputDir "VERSION") -Value $version.Trim() -Encoding UTF8 -NoNewline
 
-Write-Host "Copied excel-mcp skill and stamped version $($version.Trim()) at $OutputDir" -ForegroundColor Green
+Write-Host "Copied excel-mcp-ja skill and stamped version $($version.Trim()) at $OutputDir" -ForegroundColor Green

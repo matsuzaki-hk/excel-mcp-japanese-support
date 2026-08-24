@@ -169,7 +169,7 @@ Write-Host "   ✓ Copied CHANGELOG.md" -ForegroundColor Green
 # Skills are only bundled with the VS Code extension (via chatSkills contribution point).
 
 # Create mcpb file (zip with .mcpb extension)
-$McpbFileName = "excel-mcp-$Version.mcpb"
+$McpbFileName = "excel-mcp-ja-$Version.mcpb"
 $McpbPath = Join-Path $OutputDir $McpbFileName
 
 Write-Host ""

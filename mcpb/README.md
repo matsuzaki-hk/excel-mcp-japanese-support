@@ -1,6 +1,8 @@
-# Excel (Windows)
+# Excel (Windows) - Japanese Support Fork
 
 **Automate Microsoft Excel with Claude** - Control Excel through natural language conversations. Requires Windows and local Office install.
+
+This is a fork of [sbroenne/mcp-server-excel](https://github.com/sbroenne/mcp-server-excel) with added support for Japanese table names, sheet names, file paths, and other Unicode identifiers.
 
 ## What It Does
 
@@ -23,7 +25,7 @@ Excel MCP Server lets you automate Excel through conversation with Claude:
 
 ## Installation
 
-1. Download the `.mcpb` file from the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
+1. Download the `.mcpb` file from the [latest release](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/releases/latest)
 2. Double-click to install in Claude Desktop
 3. Restart Claude Desktop if prompted
 
@@ -95,7 +97,7 @@ Excel MCP Server runs **entirely on your computer**. Your Excel data:
 
 **Anonymous Telemetry:** We collect anonymous usage statistics (tool usage, performance metrics, error rates) to improve the software. No file contents, file names, or personal data are collected.
 
-See our complete [Privacy Policy](https://excelmcpserver.dev/privacy/).
+See our complete [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/PRIVACY.md).
 
 ## Troubleshooting
 
@@ -108,13 +110,12 @@ See our complete [Privacy Policy](https://excelmcpserver.dev/privacy/).
 - Ensure Excel is installed and working normally
 
 **Need help?**
-- [Report an issue](https://github.com/sbroenne/mcp-server-excel/issues)
-- [Full documentation](https://excelmcpserver.dev/)
+- [Report an issue](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/issues)
+- [Full documentation](https://github.com/matsuzaki-hk/excel-mcp-japanese-support)
 
 ## Links
 
-- [GitHub Repository](https://github.com/sbroenne/mcp-server-excel)
-- [Feature Reference](https://excelmcpserver.dev/features/)
-- [Agent Skills](https://github.com/sbroenne/mcp-server-excel/blob/main/skills/README.md) - Cross-platform AI guidance
-- [Privacy Policy](https://excelmcpserver.dev/privacy/)
-- [License (MIT)](https://github.com/sbroenne/mcp-server-excel/blob/main/LICENSE)
+- [GitHub Repository](https://github.com/matsuzaki-hk/excel-mcp-japanese-support)
+- [Agent Skills](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/skills/README-ja.md) - Cross-platform AI guidance
+- [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/PRIVACY.md)
+- [License (MIT)](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/LICENSE)

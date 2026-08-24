@@ -26,6 +26,7 @@ on:
 
 env:
   DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '22'
 
 jobs:
   # Calculate Version
@@ -317,10 +318,158 @@ jobs:
         name: cli-zip
         path: ExcelMcp-CLI-*-windows.zip
 
+  # Build VS Code Extension
+  build-vscode:
+    name: VS Code Extension
+    needs: [version]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ja-localization
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Set Version
+      run: |
+        $version = "${{ needs.version.outputs.version }}"
+        echo "VERSION=$version" >> $env:GITHUB_ENV
+      shell: pwsh
+
+    - name: Update Extension Version
+      run: |
+        $version = $env:VERSION
+        cd vscode-extension
+        npm version "$version" --no-git-tag-version
+      shell: pwsh
+
+    - name: Sync Extension Changelog
+      run: |
+        Copy-Item "CHANGELOG.md" "vscode-extension/CHANGELOG.md" -Force
+      shell: pwsh
+
+    - name: Install Dependencies
+      run: |
+        cd vscode-extension
+        npm install
+      shell: pwsh
+
+    - name: Build and Package
+      run: |
+        cd vscode-extension
+        npm run package
+      env:
+        APPINSIGHTS_CONNECTION_STRING: ""
+
+    - name: Rename VSIX
+      run: |
+        $version = $env:VERSION
+        cd vscode-extension
+        $vsix = Get-ChildItem -Filter "*.vsix" | Select-Object -First 1
+        $targetName = "excelmcp-ja-$version.vsix"
+        if ($vsix.Name -ne $targetName) {
+          Rename-Item $vsix.FullName -NewName $targetName
+        }
+      shell: pwsh
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: vscode-vsix
+        path: vscode-extension/excelmcp-ja-*.vsix
+
+  # Build MCPB (Claude Desktop Bundle)
+  build-mcpb:
+    name: MCPB Bundle
+    needs: [version]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ja-localization
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Set Version
+      run: |
+        $version = "${{ needs.version.outputs.version }}"
+        echo "VERSION=$version" >> $env:GITHUB_ENV
+      shell: pwsh
+
+    - name: Build MCPB Bundle
+      run: |
+        cd mcpb
+        .\Build-McpBundle.ps1 -Version $env:VERSION
+      shell: pwsh
+      env:
+        APPINSIGHTS_CONNECTION_STRING: ""
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: mcpb-bundle
+        path: mcpb/artifacts/excel-mcp-ja-*.mcpb
+
+  # Build Agent Skills Packages (Japanese)
+  build-agent-skills-ja:
+    name: Agent Skills (JA)
+    needs: [version]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ja-localization
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        global-json-file: global.json
+
+    - name: Set Version
+      run: |
+        $version = "${{ needs.version.outputs.version }}"
+        echo "VERSION=$version" >> $env:GITHUB_ENV
+      shell: pwsh
+
+    - name: Build Solution (generates SKILL.md and copies references)
+      run: dotnet build -c Release
+      shell: pwsh
+
+    - name: Create Skills Package
+      run: |
+        & .\scripts\Build-AgentSkills.ps1 -OutputDir "artifacts/skills" -Version $env:VERSION -Language ja
+      shell: pwsh
+
+    - name: Upload Skills Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: agent-skills-ja
+        path: artifacts/skills/excel-skills-ja-*.zip
+
   # Create Git Tag
   create-tag:
     name: Create Git Tag
-    needs: [version, build-mcp-server, build-cli]
+    needs: [version, build-mcp-server, build-cli, build-vscode, build-mcpb, build-agent-skills-ja]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -375,7 +524,7 @@ jobs:
   # Create GitHub Release
   create-release:
     name: Create GitHub Release
-    needs: [version, create-tag]
+    needs: [version, create-tag, build-vscode, build-mcpb, build-agent-skills-ja]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -554,6 +703,25 @@ jobs:
         printf '\n' >> release_notes.md
         printf '%s\n' "**MCP Server:** \`ExcelMcp-MCP-Server-$VERSION-windows.zip\` をダウンロードし、\`mcp-excel.exe\` を展開" >> release_notes.md
         printf '%s\n' "**CLI:** \`ExcelMcp-CLI-$VERSION-windows.zip\` をダウンロードし、\`excelcli.exe\` を展開" >> release_notes.md
+        printf '%s\n' "**VS Code / Devin 拡張:** \`excelmcp-ja-$VERSION.vsix\` をダウンロードし、手動インストール" >> release_notes.md
+        printf '%s\n' "**Claude Desktop:** \`excel-mcp-ja-$VERSION.mcpb\` をダウンロードし、Claude Desktop にドラッグ＆ドロップ" >> release_notes.md
+        printf '%s\n' "**Agent Skills (日本語):** \`excel-skills-ja-v$VERSION.zip\` をダウンロードし、\`npx skills add matsuzaki-hk/excel-mcp-japanese-support\`" >> release_notes.md
+        printf '\n' >> release_notes.md
+        printf '%s\n' "### Devin への手動導入" >> release_notes.md
+        printf '%s\n' "1. [Releases](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/releases) から \`ExcelMcp-MCP-Server-$VERSION-windows.zip\` をダウンロード" >> release_notes.md
+        printf '%s\n' "2. 固定パス（例: \`C:\\\\Tools\\\\ExcelMcpJa\`）に \`mcp-excel.exe\` を展開" >> release_notes.md
+        printf '%s\n' "3. \`%APPDATA%\\\\devin\\\\mcp_config.json\` に以下を追加:" >> release_notes.md
+        printf '%s\n' '```json' >> release_notes.md
+        printf '%s\n' '{' >> release_notes.md
+        printf '%s\n' '  "mcpServers": {' >> release_notes.md
+        printf '%s\n' '    "excel-mcp-ja": {' >> release_notes.md
+        printf '%s\n' '      "command": "C:\\\\Tools\\\\ExcelMcpJa\\\\mcp-excel.exe"' >> release_notes.md
+        printf '%s\n' '    }' >> release_notes.md
+        printf '%s\n' '  }' >> release_notes.md
+        printf '%s\n' '}' >> release_notes.md
+        printf '%s\n' '```' >> release_notes.md
+        printf '%s\n' "4. VSIX \`excelmcp-ja-$VERSION.vsix\` を Devin にインストールすると \`chatSkills\` として日本語 skill が利用可能になる場合があります" >> release_notes.md
+        printf '%s\n' "5. Devin Cloud（ブラウザ版）では Windows デスクトップ Excel が利用できないため、**ローカルの Devin Next IDE + Windows + Excel** が必要です" >> release_notes.md
         printf '\n' >> release_notes.md
         printf '%s\n' "### 動作環境" >> release_notes.md
         printf '%s\n' "- Windows OS" >> release_notes.md
@@ -567,6 +735,9 @@ jobs:
         ARTIFACTS=""
         for f in artifacts/mcp-server-zip/*.zip; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done
         for f in artifacts/cli-zip/*.zip; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done
+        for f in artifacts/vscode-vsix/*.vsix; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done
+        for f in artifacts/mcpb-bundle/*.mcpb; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done
+        for f in artifacts/agent-skills-ja/*.zip; do [ -f "$f" ] && ARTIFACTS="$ARTIFACTS $f"; done
 
         echo "Creating release with artifacts:$ARTIFACTS"
 

@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Creates distributable artifacts for Agent Skills:
-    - excel-skills-v{version}.zip: Combined skill package with both excel-mcp and excel-cli
+    - excel-skills-v{version}.zip: Combined skill package with both excel-mcp and excel-cli (English)
+    - excel-skills-ja-v{version}.zip: Combined skill package with excel-mcp-ja and excel-cli-ja (Japanese)
     - CLAUDE.md: Claude Code project instructions
     - .cursorrules: Cursor project rules
 
@@ -12,7 +13,8 @@
     to excel-mcp/references/ during packaging. The excel-cli skill uses its
     generated references/cli-commands.md file as the CLI-specific source of truth.
 
-    Users install with: npx skills add sbroenne/mcp-server-excel
+    Users install with: npx skills add sbroenne/mcp-server-excel (English)
+    or npx skills add matsuzaki-hk/excel-mcp-japanese-support (Japanese)
 
 .PARAMETER OutputDir
     Output directory for artifacts. Default: artifacts/skills
@@ -30,11 +32,16 @@
     ./Build-AgentSkills.ps1 -OutputDir ./dist -Version 1.2.0
 
 .EXAMPLE
+    ./Build-AgentSkills.ps1 -Version 1.2.0 -Language ja
+
+.EXAMPLE
     ./Build-AgentSkills.ps1 -PopulateReferences
 #>
 param(
     [string]$OutputDir = "artifacts/skills",
     [string]$Version = $null,
+    [ValidateSet("en", "ja")]
+    [string]$Language = "en",
     [switch]$PopulateReferences
 )
 
@@ -42,6 +49,31 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $SkillsDir = Join-Path $RepoRoot "skills"
 $SharedDir = Join-Path $SkillsDir "shared"
+
+# Determine skill names and package metadata based on language
+$McpSkillName = if ($Language -eq "ja") { "excel-mcp-ja" } else { "excel-mcp" }
+$CliSkillName = if ($Language -eq "ja") { "excel-cli-ja" } else { "excel-cli" }
+$SkillsReadmeName = if ($Language -eq "ja") { "README-ja.md" } else { "README.md" }
+$PackageName = if ($Language -eq "ja") { "excel-skills-ja" } else { "excel-skills" }
+$PackageDescription = if ($Language -eq "ja") {
+    "Excel MCP Server 日本語対応 Agent Skills for AI coding assistants"
+} else {
+    "Excel MCP Server Agent Skills for AI coding assistants"
+}
+$NpxRepo = if ($Language -eq "ja") { "matsuzaki-hk/excel-mcp-japanese-support" } else { "sbroenne/mcp-server-excel" }
+$RepositoryUrl = if ($Language -eq "ja") { "https://github.com/matsuzaki-hk/excel-mcp-japanese-support" } else { "https://github.com/sbroenne/mcp-server-excel" }
+$McpSkillTarget = if ($Language -eq "ja") { "MCP Server（日本語対応）" } else { "MCP Server" }
+$CliSkillTarget = if ($Language -eq "ja") { "CLI Tool（日本語対応）" } else { "CLI Tool" }
+$McpSkillDescription = if ($Language -eq "ja") {
+    "MCP Server skill - 会話型 AI 向け（Claude Desktop、VS Code Chat、Devin）"
+} else {
+    "MCP Server skill - for conversational AI (Claude Desktop, VS Code Chat)"
+}
+$CliSkillDescription = if ($Language -eq "ja") {
+    "CLI skill - コーディングエージェント向け（Copilot、Cursor、Windsurf）"
+} else {
+    "CLI skill - for coding agents (Copilot, Cursor, Windsurf)"
+}
 
 # Generate a complete reference from the built CLI so aliases and branch commands cannot drift.
 function Generate-CliReference {
@@ -324,15 +356,15 @@ if ($PopulateReferences) {
     Write-Host "Populating references from shared/ for local development..." -ForegroundColor Cyan
 
     # Copy to excel-mcp
-    $McpPath = Join-Path $SkillsDir "excel-mcp"
+    $McpPath = Join-Path $SkillsDir $McpSkillName
     if (Test-Path $McpPath) {
-        Copy-SharedReferences -SkillPath $McpPath -SkillName "excel-mcp"
+        Copy-SharedReferences -SkillPath $McpPath -SkillName $McpSkillName
     }
 
     # Copy to excel-cli
-    $CliPath = Join-Path $SkillsDir "excel-cli"
+    $CliPath = Join-Path $SkillsDir $CliSkillName
     if (Test-Path $CliPath) {
-        Copy-SharedReferences -SkillPath $CliPath -SkillName "excel-cli"
+        Copy-SharedReferences -SkillPath $CliPath -SkillName $CliSkillName
         # Generate CLI command reference from excelcli --help
         Generate-CliReference -SkillPath $CliPath
     }
@@ -371,35 +403,35 @@ try {
     New-Item -ItemType Directory -Path $SkillsStagingDir -Force | Out-Null
 
     # Copy excel-mcp skill
-    $McpSource = Join-Path $SkillsDir "excel-mcp"
+    $McpSource = Join-Path $SkillsDir $McpSkillName
     if (Test-Path $McpSource) {
-        Copy-Item -Path $McpSource -Destination "$SkillsStagingDir/excel-mcp" -Recurse
-        Copy-SharedReferences -SkillPath "$SkillsStagingDir/excel-mcp" -SkillName "excel-mcp"
-        Set-Content -Path "$SkillsStagingDir/excel-mcp/VERSION" -Value $Version -Encoding UTF8 -NoNewline
+        Copy-Item -Path $McpSource -Destination "$SkillsStagingDir/$McpSkillName" -Recurse
+        Copy-SharedReferences -SkillPath "$SkillsStagingDir/$McpSkillName" -SkillName $McpSkillName
+        Set-Content -Path "$SkillsStagingDir/$McpSkillName/VERSION" -Value $Version -Encoding UTF8 -NoNewline
     } else {
-        Write-Warning "excel-mcp skill not found"
+        Write-Warning "$McpSkillName skill not found"
     }
 
     # Copy excel-cli skill
-    $CliSource = Join-Path $SkillsDir "excel-cli"
+    $CliSource = Join-Path $SkillsDir $CliSkillName
     if (Test-Path $CliSource) {
-        Copy-Item -Path $CliSource -Destination "$SkillsStagingDir/excel-cli" -Recurse
-        Copy-SharedReferences -SkillPath "$SkillsStagingDir/excel-cli" -SkillName "excel-cli"
+        Copy-Item -Path $CliSource -Destination "$SkillsStagingDir/$CliSkillName" -Recurse
+        Copy-SharedReferences -SkillPath "$SkillsStagingDir/$CliSkillName" -SkillName $CliSkillName
         # Generate CLI command reference from excelcli --help
-        Generate-CliReference -SkillPath "$SkillsStagingDir/excel-cli"
-        Set-Content -Path "$SkillsStagingDir/excel-cli/VERSION" -Value $Version -Encoding UTF8 -NoNewline
+        Generate-CliReference -SkillPath "$SkillsStagingDir/$CliSkillName"
+        Set-Content -Path "$SkillsStagingDir/$CliSkillName/VERSION" -Value $Version -Encoding UTF8 -NoNewline
     } else {
-        Write-Warning "excel-cli skill not found"
+        Write-Warning "$CliSkillName skill not found"
     }
 
     # Copy skills README to root of package
-    $SkillsReadme = Join-Path $SkillsDir "README.md"
+    $SkillsReadme = Join-Path $SkillsDir $SkillsReadmeName
     if (Test-Path $SkillsReadme) {
         Copy-Item -Path $SkillsReadme -Destination $StagingDir
     }
 
     # Create ZIP archive
-    $ZipName = "excel-skills-v$Version.zip"
+    $ZipName = "$PackageName-v$Version.zip"
     $ZipPath = Join-Path $OutputPath $ZipName
 
     if (Test-Path $ZipPath) {
@@ -432,35 +464,36 @@ if (Test-Path $CursorSrc) {
 
 # Generate manifest
 $Manifest = @{
-    name = "excel-skills"
+    name = $PackageName
     version = $Version
-    description = "Excel MCP Server Agent Skills for AI coding assistants"
+    description = $PackageDescription
+    language = $Language
     platforms = @("github-copilot", "claude-code", "cursor", "windsurf", "gemini-cli", "goose", "codex", "opencode", "amp", "kilo", "roo", "trae")
     skills = @(
         @{
-            name = "excel-mcp"
-            path = "skills/excel-mcp"
-            description = "MCP Server skill - for conversational AI (Claude Desktop, VS Code Chat)"
-            target = "MCP Server"
+            name = $McpSkillName
+            path = "skills/$McpSkillName"
+            description = $McpSkillDescription
+            target = $McpSkillTarget
         }
         @{
-            name = "excel-cli"
-            path = "skills/excel-cli"
-            description = "CLI skill - for coding agents (Copilot, Cursor, Windsurf)"
-            target = "CLI Tool"
+            name = $CliSkillName
+            path = "skills/$CliSkillName"
+            description = $CliSkillDescription
+            target = $CliSkillTarget
         }
     )
     installation = @{
-        npx = "npx skills add sbroenne/mcp-server-excel"
-        selectSkill = "npx skills add sbroenne/mcp-server-excel --skill excel-cli"
-        installBoth = "npx skills add sbroenne/mcp-server-excel --skill '*'"
+        npx = "npx skills add $NpxRepo"
+        selectSkill = "npx skills add $NpxRepo --skill $CliSkillName"
+        installBoth = "npx skills add $NpxRepo --skill '*'"
     }
     files = @(
         @{ name = "CLAUDE.md"; type = "config"; description = "Claude Code project instructions" }
         @{ name = ".cursorrules"; type = "config"; description = "Cursor project rules" }
     )
-    repository = "https://github.com/sbroenne/mcp-server-excel"
-    documentation = "https://excelmcpserver.dev/"
+    repository = $RepositoryUrl
+    documentation = if ($Language -eq "ja") { $RepositoryUrl } else { "https://excelmcpserver.dev/" }
     buildDate = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
 }
 
@@ -481,5 +514,5 @@ Get-ChildItem $OutputPath | ForEach-Object {
 
 Write-Host ""
 Write-Host "Installation:" -ForegroundColor Cyan
-Write-Host "  npx skills add sbroenne/mcp-server-excel" -ForegroundColor White
-Write-Host "  (users will be prompted to select excel-cli, excel-mcp, or both)"
+Write-Host "  npx skills add $NpxRepo" -ForegroundColor White
+Write-Host "  (users will be prompted to select $CliSkillName, $McpSkillName, or both)"

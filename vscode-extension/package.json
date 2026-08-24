@@ -1,18 +1,18 @@
 {
-  "name": "excel-mcp",
-  "displayName": "Excel MCP Server",
-  "description": "Excel automation for AI assistants - manage Sheets, Power Query, DAX, VBA, PowerPivot, Tables, Ranges, Charts, Formatting, Validation & more - requires Excel to be installed",
+  "name": "excel-mcp-ja",
+  "displayName": "ExcelMcp 日本語対応フォーク",
+  "description": "ExcelMcp の日本語対応フォーク。日本語テーブル名・シート名・ファイルパスをサポートし、日本語 skill を同梱します。Excel デスクトップ版が必要です。",
   "version": "1.6.9",
-  "publisher": "sbroenne",
+  "publisher": "matsuzaki-hk",
   "icon": "icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sbroenne/mcp-server-excel"
+    "url": "https://github.com/matsuzaki-hk/excel-mcp-japanese-support"
   },
   "bugs": {
-    "url": "https://github.com/sbroenne/mcp-server-excel/issues"
+    "url": "https://github.com/matsuzaki-hk/excel-mcp-japanese-support/issues"
   },
-  "homepage": "https://excelmcpserver.dev/",
+  "homepage": "https://github.com/matsuzaki-hk/excel-mcp-japanese-support",
   "license": "MIT",
   "engines": {
     "vscode": "^1.125.0"
@@ -59,7 +59,7 @@
     ],
     "chatSkills": [
       {
-        "path": "./skills/excel-mcp/SKILL.md"
+        "path": "./skills/excel-mcp-ja/SKILL.md"
       }
     ]
   },

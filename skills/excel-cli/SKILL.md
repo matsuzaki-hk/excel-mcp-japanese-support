@@ -17,8 +17,16 @@ compatibility: Requires Windows, Microsoft Excel 2016 or later, and network acce
 
 - Windows host with Microsoft Excel installed (2016+)
 - Uses COM interop — does NOT work on macOS or Linux
-- GitHub Copilot `excel-cli` plugin auto-downloads the latest Windows runtime on first use
-- Direct skill-only installs require `excelcli.exe` on PATH
+- **Every command below invokes `excelcli` directly, so it must resolve on PATH.**
+  Installing the `excel-cli` plugin does *not* put it there — the global shim is opt-in. Run
+  `com.github.copilot\bin\install-global.ps1` from the installed plugin folder once (it writes
+  `excelcli.cmd` / `excelcli.ps1` into `~\.copilot\bin` and adds that to your user PATH), or
+  install the runtime independently via the standalone release zip or
+  `dotnet tool install --global Sbroenne.ExcelMcp.CLI`.
+  If `excelcli` is not found, report that and stop — do not guess at a path.
+- The runtime itself is downloaded and cached on first use under
+  `~\.copilot\plugin-runtime\mcp-server-excel\excel-cli`, so only the first invocation needs
+  network access
 
 ## Workflow Checklist
 
@@ -186,10 +194,10 @@ Available command groups:
 See [CLI command reference and common pitfalls](./references/cli-commands.md#common-pitfalls) for examples. Key issues:
 
 - `--values-file` expects a path to an existing file; use `--values` for inline JSON.
-- `--timeout` must be a positive integer; omit it to use the default timeout.
+- `--timeout` ranges are action-specific: session open/create accepts 10-3600; Power Query refresh/refresh-all accepts 0-2147483 (0 keeps the default); other generated timeout actions accept 1-2147483.
 - `--values` takes a 2D JSON array such as `'[["Name","Age"],["Alice",30]]'`.
 - List parameters such as `--selected-items` require JSON arrays.
-- Power Query operations can take 30+ seconds; use generous timeouts.
+- Power Query operations can take 30+ seconds; use a deliberate data-operation timeout or 0 for the default.
 
 ## Reference Documentation
 

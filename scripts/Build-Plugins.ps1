@@ -20,13 +20,10 @@
       excel-cli/     → CLI plugin (wrapper/bootstrap assets + updated version + fresh skills)
 
 .PARAMETER Version
-    Plugin version. If not specified, reads from skills/excel-mcp/VERSION file.
+    Plugin version. Required for distributable builds.
 
 .PARAMETER OutputDir
     Output directory. Default: plugins/
-
-.EXAMPLE
-    ./Build-Plugins.ps1
 
 .EXAMPLE
     ./Build-Plugins.ps1 -Version 1.2.3
@@ -43,16 +40,20 @@ $PluginSourceDir = Join-Path $RepoRoot ".github\plugins"
 $AgentPluginSchema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 $AgentPluginMcpSchema = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 
-# Resolve version
-if (-not $Version) {
-    $VersionFile = Join-Path $SkillsDir "excel-mcp\VERSION"
-    if (Test-Path $VersionFile) {
-        $Version = (Get-Content $VersionFile -Raw).Trim()
-        Write-Host "Using version from VERSION file: $Version" -ForegroundColor Cyan
-    } else {
-        Write-Error "Version not specified and VERSION file not found at $VersionFile"
-        exit 1
-    }
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    throw "Version is required. Pass -Version <version>."
+}
+$Version = $Version.Trim()
+
+$BootstrapScriptPath = Join-Path $RepoRoot "scripts\Build-BootstrapScripts.ps1"
+if (-not (Test-Path $BootstrapScriptPath)) {
+    throw "Bootstrap generator script not found: $BootstrapScriptPath"
+}
+
+Write-Host "Rendering canonical plugin bootstrap scripts from the shared template..." -ForegroundColor Cyan
+& $BootstrapScriptPath -OutputRoot $PluginSourceDir
+if ($LASTEXITCODE -ne 0) {
+    throw "Bootstrap script generation failed."
 }
 
 function Remove-PackagedRuntimePayload {
@@ -107,20 +108,38 @@ function Copy-AgentSkill {
     New-Item -ItemType Directory -Path (Split-Path -Parent $DestinationDir) -Force | Out-Null
     Copy-Item -Path $SourceDir -Destination $DestinationDir -Recurse -Force
 
+    # Write the VERSION file unconditionally. Guarding on Test-Path only *updated* a VERSION that
+    # the canonical skill already carried, so excel-cli - whose source skill has none - shipped
+    # without one while excel-mcp shipped with one.
     $skillVersionPath = Join-Path $DestinationDir "VERSION"
-    if ($Version -and (Test-Path $skillVersionPath)) {
+    if ($Version) {
         Set-Content -Path $skillVersionPath -Value $Version -Encoding UTF8 -NoNewline
     }
 }
 
 function Assert-AgentSkill {
     param(
-        [string]$SkillDir
+        [string]$SkillDir,
+        [string]$ExpectedVersion
     )
 
     $skillPath = Join-Path $SkillDir "SKILL.md"
     if (-not (Test-Path $skillPath -PathType Leaf)) {
         throw "Agent Skill is missing SKILL.md: $SkillDir"
+    }
+
+    # Every packaged skill must carry a VERSION stamped with the version the plugin was built at.
+    # excel-cli previously shipped with no VERSION at all, and nothing failed the build.
+    if ($ExpectedVersion) {
+        $versionPath = Join-Path $SkillDir "VERSION"
+        if (-not (Test-Path $versionPath -PathType Leaf)) {
+            throw "Agent Skill is missing VERSION: $SkillDir"
+        }
+
+        $skillVersion = (Get-Content $versionPath -Raw).Trim()
+        if ($skillVersion -ne $ExpectedVersion) {
+            throw "$versionPath has version '$skillVersion' but expected '$ExpectedVersion'."
+        }
     }
 
     $lines = @(Get-Content $skillPath)
@@ -227,7 +246,7 @@ function Assert-AgentPluginPackage {
     $skillsRoot = Join-Path $PluginDir "skills"
     if (Test-Path $skillsRoot) {
         Get-ChildItem -Path $skillsRoot -Directory | ForEach-Object {
-            Assert-AgentSkill -SkillDir $_.FullName
+            Assert-AgentSkill -SkillDir $_.FullName -ExpectedVersion $ExpectedVersion
         }
     }
 
@@ -340,7 +359,7 @@ Set-Content -Path (Join-Path $OutputCli "version.txt") -Value $Version -Encoding
 Write-Host "  Synchronizing complete excel-cli skill directory..." -ForegroundColor Cyan
 $SourceSkillCli = Join-Path $SkillsDir "excel-cli"
 $DestSkillCli = Join-Path $OutputCli "skills\excel-cli"
-Copy-AgentSkill -SourceDir $SourceSkillCli -DestinationDir $DestSkillCli
+Copy-AgentSkill -SourceDir $SourceSkillCli -DestinationDir $DestSkillCli -Version $Version
 
 Assert-AgentPluginPackage -PluginName "excel-cli" -PluginDir $OutputCli -ExpectedVersion $Version
 Write-Host "✅ excel-cli plugin built" -ForegroundColor Green

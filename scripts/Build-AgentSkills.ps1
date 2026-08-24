@@ -18,13 +18,13 @@
     Output directory for artifacts. Default: artifacts/skills
 
 .PARAMETER Version
-    Override version from skills/excel-mcp/VERSION
+    Package version. Required unless PopulateReferences is used.
 
 .PARAMETER PopulateReferences
     Copy MCP shared references and regenerate CLI command reference files for local development (without packaging).
 
 .EXAMPLE
-    ./Build-AgentSkills.ps1
+    ./Build-AgentSkills.ps1 -Version 1.2.0
 
 .EXAMPLE
     ./Build-AgentSkills.ps1 -OutputDir ./dist -Version 1.2.0
@@ -272,10 +272,10 @@ function Generate-CliReference {
     $content.Add("## Common Pitfalls")
     $content.Add("")
     $content.Add("- ``--values-file`` requires an existing JSON or CSV file; use ``--values`` for inline JSON.")
-    $content.Add("- ``--timeout`` must be greater than zero; omit it to use the command default.")
+    $content.Add("- ``--timeout`` ranges are action-specific: session open/create accepts 10-3600; Power Query refresh/refresh-all accepts 0-2147483 (0 keeps the default); other generated timeout actions accept 1-2147483.")
     $content.Add("- ``pythoninexcel get-result --max-wait-seconds`` must be at least 1 and shorter than the session operation timeout.")
     $content.Add("- ``--values`` and list parameters use JSON arrays; range values use a two-dimensional array.")
-    $content.Add("- Power Query operations may take 30 seconds or longer; use a generous positive timeout.")
+    $content.Add("- Power Query operations may take 30 seconds or longer; use a deliberate data-operation timeout or 0 for the default.")
     $content.Add("")
 
     $refsDir = Join-Path $SkillPath "references"
@@ -342,15 +342,10 @@ if ($PopulateReferences) {
     exit 0
 }
 
-# Get version
-if (-not $Version) {
-    $VersionFile = Join-Path $SkillsDir "excel-mcp/VERSION"
-    if (Test-Path $VersionFile) {
-        $Version = (Get-Content $VersionFile -Raw).Trim()
-    } else {
-        $Version = "0.0.0"
-    }
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    throw "Version is required. Pass -Version <version>."
 }
+$Version = $Version.Trim()
 
 Write-Host "Building Agent Skills package v$Version" -ForegroundColor Cyan
 Write-Host "Source: $SkillsDir"
@@ -380,6 +375,7 @@ try {
     if (Test-Path $McpSource) {
         Copy-Item -Path $McpSource -Destination "$SkillsStagingDir/excel-mcp" -Recurse
         Copy-SharedReferences -SkillPath "$SkillsStagingDir/excel-mcp" -SkillName "excel-mcp"
+        Set-Content -Path "$SkillsStagingDir/excel-mcp/VERSION" -Value $Version -Encoding UTF8 -NoNewline
     } else {
         Write-Warning "excel-mcp skill not found"
     }
@@ -391,6 +387,7 @@ try {
         Copy-SharedReferences -SkillPath "$SkillsStagingDir/excel-cli" -SkillName "excel-cli"
         # Generate CLI command reference from excelcli --help
         Generate-CliReference -SkillPath "$SkillsStagingDir/excel-cli"
+        Set-Content -Path "$SkillsStagingDir/excel-cli/VERSION" -Value $Version -Encoding UTF8 -NoNewline
     } else {
         Write-Warning "excel-cli skill not found"
     }

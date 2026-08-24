@@ -11,6 +11,182 @@ This changelog covers all components:
 
 Entries are short and end-user-facing. Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses [Semantic Versioning](https://semver.org/). Starting with this file, entries are compiled automatically from [changesets](.changeset/README.md) at release time — see [Release Strategy](docs/RELEASE-STRATEGY.md#changelog-generation) for how to add one.
 
+## [2.0.0] - 2026-08-21
+
+### Major Changes
+
+- [#807](https://github.com/sbroenne/mcp-server-excel/pull/807) [`f9a25d1`](https://github.com/sbroenne/mcp-server-excel/commit/f9a25d155f3e9ebc27e2e9a62b35b15a66ada3e9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Canonical file lifecycle** ([#798](https://github.com/sbroenne/mcp-server-excel/issues/798), [#799](https://github.com/sbroenne/mcp-server-excel/issues/799)): CLI and MCP now expose the same
+  list/open/create/close/test workflow. Standalone CLI save and the MCP
+  `close-workbook` no-op are removed; file testing shares one result model with
+  openability and deterministic IRM/AIP read-only requirements. IRM detection now
+  requires the rights-management data-space marker, so ordinary password-encrypted
+  OOXML files are not incorrectly forced into read-only mode.
+
+- [#807](https://github.com/sbroenne/mcp-server-excel/pull/807) [`f9a25d1`](https://github.com/sbroenne/mcp-server-excel/commit/f9a25d155f3e9ebc27e2e9a62b35b15a66ada3e9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Compact, truthful Power Query reads** ([#787](https://github.com/sbroenne/mcp-server-excel/issues/787), [#800](https://github.com/sbroenne/mcp-server-excel/issues/800)): `powerquery list` now
+  returns bounded M previews and exact worksheet/Data Model load state without
+  serializing full formulas. Use `powerquery view` for full M code. List inspection
+  errors now fail explicitly instead of silently omitting queries. The public
+  `PowerQueryInfo.Formula` getter and setter remain available for source and binary
+  compatibility, but are obsolete and excluded from list JSON.
+
+### Patch Changes
+
+- [#807](https://github.com/sbroenne/mcp-server-excel/pull/807) [`f9a25d1`](https://github.com/sbroenne/mcp-server-excel/commit/f9a25d155f3e9ebc27e2e9a62b35b15a66ada3e9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Canonical public inputs** ([#782](https://github.com/sbroenne/mcp-server-excel/issues/782), [#783](https://github.com/sbroenne/mcp-server-excel/issues/783), [#784](https://github.com/sbroenne/mcp-server-excel/issues/784), [#801](https://github.com/sbroenne/mcp-server-excel/issues/801)): CLI, batch JSON, and MCP
+  now use integer seconds for timeouts, validate the same supported ranges, and
+  resolve inline-or-file content aliases once at shared dispatch. Manual session
+  open/create now enforces its documented 10-3600 second operation timeout.
+
+- [#807](https://github.com/sbroenne/mcp-server-excel/pull/807) [`f9a25d1`](https://github.com/sbroenne/mcp-server-excel/commit/f9a25d155f3e9ebc27e2e9a62b35b15a66ada3e9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Exact Power Query and connection cleanup** ([#786](https://github.com/sbroenne/mcp-server-excel/issues/786), [#796](https://github.com/sbroenne/mcp-server-excel/issues/796), [#797](https://github.com/sbroenne/mcp-server-excel/issues/797)): Power Query
+  load detection, refresh, unload, delete, Data Model lookup, and evaluate cleanup
+  now use exact case-insensitive mashup `Location` identity instead of substring or
+  display-name matching. Connection delete/load-to removes only QueryTables owned
+  by the exact WorkbookConnection, preserving similarly named and unrelated
+  workbook objects. Queries loaded to both a worksheet and the Data Model now
+  refresh both destinations instead of leaving model data stale. Evaluate removes
+  Excel-generated `Connection`/`Connection1` artifacts before save and returns an
+  actionable error if cleanup fails.
+
+- [#803](https://github.com/sbroenne/mcp-server-excel/pull/803) [`4e67044`](https://github.com/sbroenne/mcp-server-excel/commit/4e670445f7ad8993ba26f7e344131177f3843194) Thanks [@sbroenne](https://github.com/sbroenne)! - **Accurate skill versions in every distribution** ([#791](https://github.com/sbroenne/mcp-server-excel/issues/791)): plugin, Agent Skills ZIP,
+  and VS Code extension builds now stamp their resolved package version into generated
+  skill metadata instead of copying a stale source `VERSION` file. Manual distributable
+  builds must pass `-Version`, preventing silently mislabeled packages.
+
+- [#807](https://github.com/sbroenne/mcp-server-excel/pull/807) [`f9a25d1`](https://github.com/sbroenne/mcp-server-excel/commit/f9a25d155f3e9ebc27e2e9a62b35b15a66ada3e9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Safer CLI cleanup** ([#789](https://github.com/sbroenne/mcp-server-excel/issues/789)): builds and test workflows now stop only the CLI daemon and Excel processes owned by their selected pipe, preserving unrelated Excel sessions. Daemon lifecycle locks use disjoint, case-insensitive hashed pipe identities so case variants, suffixes, special characters, and long names cannot collide. When cleanup sources are newer than the installed build output, pre-build cleanup uses an isolated current client so the owned daemon cannot lock the rebuild.
+
+- [#807](https://github.com/sbroenne/mcp-server-excel/pull/807) [`f9a25d1`](https://github.com/sbroenne/mcp-server-excel/commit/f9a25d155f3e9ebc27e2e9a62b35b15a66ada3e9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Strict generated action contracts** ([#781](https://github.com/sbroenne/mcp-server-excel/issues/781), [#788](https://github.com/sbroenne/mcp-server-excel/issues/788)): CLI direct commands, CLI batch,
+  and MCP now reject unknown enum values and parameters that do not apply to the
+  selected action. Power Query load destinations accept the documented
+  `worksheet`, `data-model`, and `both` aliases without falling back to an
+  unintended load mode.
+
+- [#807](https://github.com/sbroenne/mcp-server-excel/pull/807) [`f9a25d1`](https://github.com/sbroenne/mcp-server-excel/commit/f9a25d155f3e9ebc27e2e9a62b35b15a66ada3e9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Truthful CLI daemon status** ([#785](https://github.com/sbroenne/mcp-server-excel/issues/785)): `service status` now distinguishes
+  stopped, running, and unresponsive daemons, while `session list` returns an empty
+  list only for confirmed empty states. Both commands probe the configured service
+  before consulting daemon mutex state, so externally hosted services remain
+  visible. Shared control-command and startup readiness timeouts tolerate slow
+  daemon startup without converting transport failures into successful stopped or
+  empty results.
+
+## [1.10.9] - 2026-08-20
+
+### Patch Changes
+
+- [#779](https://github.com/sbroenne/mcp-server-excel/pull/779) [`f3f80ac`](https://github.com/sbroenne/mcp-server-excel/commit/f3f80acbf2b708cff798d8df2be41f982c070de9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Copilot plugins: arguments with quotes now survive, and a cached runtime keeps
+  working offline.** Two defects made the published `excel-cli` and `excel-mcp`
+  plugins fail in normal use.
+
+  Every documented inline JSON example — `--values '[["Name","Amount"]]'` — was
+  silently corrupted to `[[Name,Amount]]` when invoked through the plugin's own
+  wrapper or the generated `excelcli` PATH shim, because Windows PowerShell rebuilds
+  the command line for native executables and drops embedded double quotes. The
+  wrapper now builds the command line itself using the standard MSVCRT quoting rules
+  and hands it to the process verbatim, and the `.cmd` shim resolves the executable
+  first so `%*` is passed through untouched.
+
+  Separately, the bootstrap aborted whenever the GitHub release API was unreachable —
+  even with the correct runtime already downloaded and extracted — so a rate limit or
+  an offline machine stopped the MCP server from starting at all. A failed update
+  check now falls back to the cached runtime and warns on stderr, and an
+  already-extracted runtime is resolved before any download is considered, so
+  reclaiming the cached `.zip` no longer requires the network. With nothing usable
+  cached, the failure stays loud.
+
+- [#790](https://github.com/sbroenne/mcp-server-excel/pull/790) [`3aa557c`](https://github.com/sbroenne/mcp-server-excel/commit/3aa557cd7f1bb688b6eb203d59c2123a6585062d) Thanks [@sbroenne](https://github.com/sbroenne)! - Harden the plugin runtime bootstrap against corrupt caches, concurrent installs, and rate limits.
+
+  Follow-up to the offline-fallback fix. `download.ps1` for both `excel-cli` and `excel-mcp` now:
+
+  - **Validates the cached archive instead of merely testing for its presence.** A truncated
+    download used to wedge the plugin permanently: the release tag still matched, so no download was
+    attempted, yet extraction failed on every subsequent run. Recovery required manually deleting
+    the cache. The archive is now opened and checked before it is trusted.
+  - **Downloads to a temp file and renames into place**, so an interrupted transfer can never leave
+    a partial archive that a later run mistakes for a complete one.
+  - **Extracts into a staging directory and swaps it in**, rather than deleting the release
+    directory first. This also fixes a destructive failure mode: `Remove-Item -Recurse` deletes every
+    sibling file before it reaches a locked executable and fails, leaving a half-destroyed install.
+    The executable is now probed for a lock _before_ anything is removed, and a runtime that is
+    currently in use is kept rather than partially overwritten.
+  - **Retries once with a fresh download** if an install fails, instead of failing permanently.
+  - **Serializes installs with a named mutex**, so concurrent sessions cannot race on the same
+    archive and release directory.
+  - **Verifies the resolved runtime's version** from the version stamped into the file. Running the
+    runtime with `--version` was deliberately avoided: it performs its own network update check,
+    which is exactly wrong inside a bootstrap that must work offline.
+  - **Sends `GITHUB_TOKEN` / `GH_TOKEN` as a bearer token** when present. Unauthenticated GitHub API
+    access is 60 requests/hour per source IP, a budget shared by everyone behind a corporate NAT and
+    routinely exhausted — the most common cause of release metadata being unreachable.
+  - **Re-checks for updates on a time window for non-Copilot installs.** Outside a Copilot session
+    the session id is the constant `"standalone"`, so it always equalled the previously recorded one
+    and the freshness check never fired again. PATH and shim installs were pinned forever to
+    whatever they first downloaded, despite the docs promising the newest runtime.
+
+- [#794](https://github.com/sbroenne/mcp-server-excel/pull/794) [`f05294f`](https://github.com/sbroenne/mcp-server-excel/commit/f05294fd2538f808c33f5bcd69984d3657b4ebfc) Thanks [@sbroenne](https://github.com/sbroenne)! - The `excel-cli` and `excel-mcp` plugin bootstraps now come from one shared template, so they stay in sync without hand-maintained drift.
+
+- [#780](https://github.com/sbroenne/mcp-server-excel/pull/780) [`368dd52`](https://github.com/sbroenne/mcp-server-excel/commit/368dd52592eff870f63ed9e7e7c911a576b1a86e) Thanks [@sbroenne](https://github.com/sbroenne)! - **Accurate plugin documentation and a VERSION file for the CLI plugin.** The MCP
+  server's `--help` banner claimed "22 tools with 195+ operations" while the server
+  actually registers 31 tools with 326 operations. The repo already derives those
+  numbers from code and enforces them across 16 documents on every commit; the banner
+  was simply not one of them, so it drifted unnoticed.
+
+  Rather than correcting the literal, the banner now _derives_ both numbers by
+  reflecting over the live `[McpServerTool]` registration, so it can no longer disagree
+  with the server's own `tools/list` response. The doc-count guard was extended to fail
+  if anyone reintroduces a hard-coded count there — including a count that happens to be
+  correct on the day it is written.
+
+  The `excel-cli` plugin shipped without the `VERSION` file its `excel-mcp` counterpart
+  carries, because the build never passed a version through for the CLI skill and only
+  rewrote a `VERSION` that already existed instead of creating one. Both plugins now
+  get a stamped `VERSION`, and the build fails if any packaged skill is missing one or
+  carries the wrong version.
+
+  Two skill instructions were misleading in ways that produce visibly wrong output. The
+  number-format table showed rendered results as though separators were fixed, but
+  Excel renders them per the user's Windows regional settings — `$#,##0.00` shows
+  `$1.234,56` on a German machine — so the skill now explains that format codes are
+  written in US notation while the rendering is locale-dependent, and warns against
+  "fixing" the code. The formatting workflow also stopped at applying a number format,
+  which leaves date and currency columns showing `#####` because formatted values are
+  wider than the raw ones; auto-fitting columns is now a required step.
+
+  Finally, the CLI skill assumed `excelcli` was on PATH while the plugin's global shim
+  is explicitly opt-in, so an agent following the skill hit command-not-found. The
+  preconditions now state the requirement plainly and give the ways to satisfy it.
+
+- [#793](https://github.com/sbroenne/mcp-server-excel/pull/793) [`c6e5561`](https://github.com/sbroenne/mcp-server-excel/commit/c6e55610f4ad879111c2b9534c9e44ad0b005abf) Thanks [@sbroenne](https://github.com/sbroenne)! - **Screenshots no longer include a strip of Excel window chrome** ([#777](https://github.com/sbroenne/mcp-server-excel/issues/777)): captured images picked up a
+  few pixels of the scroll bar and sheet tab strip along the bottom of every tile, which showed up as a
+  grey band at each seam of a stitched screenshot of a tall or wide range. The capture now measures the
+  actual worksheet grid area instead of Excel's reported workspace size, and sizes tiles so they line
+  up seamlessly.
+
+## [1.10.8] - 2026-08-19
+
+### Patch Changes
+
+- [#773](https://github.com/sbroenne/mcp-server-excel/pull/773) [`e60c600`](https://github.com/sbroenne/mcp-server-excel/commit/e60c600d43c651dae7530c6ed94010e04e7e2b07) Thanks [@sbroenne](https://github.com/sbroenne)! - **Fixed broken documentation links on NuGet.org** — the MCP Server and CLI package pages linked to the installation guides, feature reference, and privacy policy using relative paths. NuGet.org resolves those against the package itself rather than the repository, so every one of them returned a 404 for anyone reading the package page. They now point at absolute repository URLs and work from NuGet.org, GitHub, and inside the shipped skill packages alike.
+
+  The documentation site is unaffected: those links still resolve to the site's own pages, and a new audit check fails the build if a published page ever starts sending readers to GitHub for content the site hosts itself.
+
+- [#776](https://github.com/sbroenne/mcp-server-excel/pull/776) [`b2eab4c`](https://github.com/sbroenne/mcp-server-excel/commit/b2eab4ca91cb0dcbed670f741e527081e654d3a4) Thanks [@sbroenne](https://github.com/sbroenne)! - **Portable Agent Plugins:** Published Excel MCP and CLI plugins now conform to Agent Plugins 1.0, use standard skill discovery, and use portable root `mcp.json` configuration.
+
+- [#774](https://github.com/sbroenne/mcp-server-excel/pull/774) [`3f51870`](https://github.com/sbroenne/mcp-server-excel/commit/3f51870d4029734df4f9893a4bb0aeb0f15f0df9) Thanks [@sbroenne](https://github.com/sbroenne)! - **Accurate documentation-site dates and accessibility fixes**: the sitemap now
+  reports each page's real last-changed date instead of the date the site was
+  built, so search engines no longer see all 52 pages change on every deploy. The
+  site logo also gained the alt text and image dimensions it was missing, the
+  loading indicator and search box gained accessible names, and the build now
+  fails if any of those regress.
+
+- [#778](https://github.com/sbroenne/mcp-server-excel/pull/778) [`3a7abdc`](https://github.com/sbroenne/mcp-server-excel/commit/3a7abdc916157e2bfa2734dd0096efc3447b6eb6) Thanks [@sbroenne](https://github.com/sbroenne)! - **Screenshots now photograph the live Excel window** ([#777](https://github.com/sbroenne/mcp-server-excel/issues/777)) — `screenshot capture` and `capture-sheet` used to render the image inside Excel by inserting a temporary chart into the worksheet. On a protected sheet Excel refuses that insert, so capture failed with a bare `COMException 0x800A03EC`. Capture now takes a real picture of the Excel window instead.
+
+  What this changes for you:
+
+  - Protected sheets can be captured.
+  - Your clipboard is no longer overwritten, and the workbook is never modified or dirtied by taking a screenshot.
+  - Captures are faster, since the old chart create/paste/export retry ladder is gone.
+  - Ranges larger than the Excel window are zoomed to fit and, if still too large, captured in several passes and stitched together; extremely large ranges are truncated to their top-left portion and the result message says so.
+
+  Capture now requires an interactive desktop session — it will fail on a locked desktop or a disconnected Remote Desktop session.
+
 ## [1.10.7] - 2026-08-15
 
 ### Minor Changes

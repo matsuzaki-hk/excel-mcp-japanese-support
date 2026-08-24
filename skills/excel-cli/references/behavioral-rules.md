@@ -107,8 +107,8 @@ Always apply number formats after setting values. Without formatting:
 
 **Common format codes (US locale, auto-translated):**
 
-| Data Type | Format Code | Result |
-|-----------|-------------|--------|
+| Data Type | Format Code | Result (en-US) |
+|-----------|-------------|----------------|
 | USD | `$#,##0.00` | $1,234.56 |
 | EUR | `€#,##0.00` | €1,234.56 |
 | Number | `#,##0.00` | 1,234.56 |
@@ -116,11 +116,18 @@ Always apply number formats after setting values. Without formatting:
 | Date (ISO) | `yyyy-mm-dd` | 2025-01-22 |
 | Date (US) | `mm/dd/yyyy` | 01/22/2025 |
 
+**Rendered output is locale-dependent.** The `Result` column assumes en-US regional settings. Excel
+interprets `,` and `.` in a format code according to the user's locale, so `$#,##0.00` displays as
+`$1,234.56` on en-US but `$1.234,56` on de-DE — same code, different separators. Always write the US
+form (it is auto-translated), never promise a literal rendering, and never "correct" a format code
+because a screenshot shows swapped separators.
+
 **Workflow:**
 ```
 1. range set-values (data is now in cells)
 2. range set-number-format (apply format to range)
-3. range_format auto-fit-columns (when content would clip at default width)
+3. range_format auto-fit-columns (widen columns to fit — formatted dates and
+   long numbers render as ##### at the default column width)
 ```
 
 ### Format Tabular Data as Excel Tables
@@ -166,6 +173,12 @@ After completing operations, report:
 **Why**: Users and automation expect a text confirmation. A silent tool call or command with no follow-up text is an incomplete response.
 
 ### Session Lifecycle
+
+Use `file(action: 'test')` or `excelcli -q session test <path>` before opening
+when access or information protection is uncertain. The shared result reports
+`canOpen`, `isIrmProtected`, `willOpenReadOnly`, and `requiresVisibleSession`.
+IRM/AIP files report `canOpen:false` until the required interactive Excel
+authentication occurs; open them with a visible session.
 
 Always close sessions when done:
 
@@ -263,10 +276,35 @@ Choose load destination based on workflow:
 
 | Destination | When to Use |
 |-------------|-------------|
-| `worksheet` | View data, simple analysis |
-| `data-model` | DAX measures, PivotTables, relationships |
-| `both` | View data AND use in DAX |
+| `worksheet` / `load-to-table` | View data, simple analysis |
+| `data-model` / `load-to-data-model` | DAX measures, PivotTables, relationships |
+| `both` / `load-to-both` | View data AND use in DAX |
 | `connection-only` | Data staging, intermediate queries |
+
+Values are case-insensitive. Unknown enum values and parameters that do not
+belong to the selected action are rejected instead of being defaulted or ignored.
+
+### Canonical Public Inputs
+
+- Public timeouts are integer seconds: MCP uses `timeout_seconds`, CLI uses
+  `--timeout`, and batch JSON uses `timeout`. Do not send TimeSpan strings or
+  numeric strings.
+- Session open/create accepts 10-3600 seconds. Its operation timeout controls
+  workbook startup and operations that do not provide a dedicated data-operation
+  timeout.
+- Power Query refresh/refresh-all accepts 0-2147483; omitted or `0` uses the
+  30-minute data-operation default. Connection, Data Model, PivotTable, and VBA
+  timeouts accept 1-2147483.
+- Power Query refresh/refresh-all use their data-operation timeout instead of
+  layering the session operation timeout. `load-to` has no caller timeout and
+  uses the fixed 30-minute data-operation timeout; create/update/evaluate use the
+  session operation timeout.
+- For required generated inline/file pairs, supply exactly one form. Optional
+  pairs may omit both, but inline and file forms are always mutually exclusive.
+  Batch aliases are
+  `mCodeFile`, `vbaCodeFile`, `daxFormulaFile`, `daxQueryFile`, `dmvQueryFile`,
+  `schemaFile`, and `xmlDataFile`; MCP uses snake_case and CLI uses kebab-case.
+  The file must exist and be readable.
 
 ### Refresh After Create
 

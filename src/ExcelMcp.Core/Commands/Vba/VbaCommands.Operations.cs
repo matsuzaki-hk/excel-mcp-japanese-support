@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
@@ -170,6 +171,7 @@ public partial class VbaCommands
     }
 
     /// <inheritdoc />
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Interface implementation requires instance method")]
     public VbaExportResult Export(IExcelBatch batch, string[]? moduleNames, string? outputDirectory, bool overwrite = false)
     {
         var (isValid, validationError) = ValidateVbaFile(batch.WorkbookPath);

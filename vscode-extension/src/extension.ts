@@ -19,7 +19,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Register MCP server definition provider
 	context.subscriptions.push(
-		vscode.lm.registerMcpServerDefinitionProvider('excel-mcp', {
+		vscode.lm.registerMcpServerDefinitionProvider('excel-mcp-ja', {
 			provideMcpServerDefinitions: async () => {
 				// Return the MCP server definition for ExcelMcp
 				const extensionPath = context.extensionPath;
@@ -27,7 +27,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 				return [
 					new vscode.McpStdioServerDefinition(
-						'excel-mcp',
+						'excel-mcp-ja',
 						mcpServerPath,
 						[],
 						{
@@ -53,7 +53,7 @@ function showWelcomeMessage() {
 
 	vscode.window.showInformationMessage(message, learnMore).then(selection => {
 		if (selection === learnMore) {
-			vscode.env.openExternal(vscode.Uri.parse('https://github.com/sbroenne/mcp-server-excel'));
+			vscode.env.openExternal(vscode.Uri.parse('https://github.com/matsuzaki-hk/excel-mcp-japanese-support'));
 		}
 	});
 }

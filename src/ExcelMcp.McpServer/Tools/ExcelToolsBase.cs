@@ -233,6 +233,21 @@ public static class ExcelToolsBase
         string actionName,
         string? path,
         Func<string> operation,
+        Func<Exception, string?>? customHandler = null) =>
+        ExecuteToolAction(
+            toolName,
+            actionName,
+            path,
+            operation,
+            ExcelMcpTelemetry.TrackToolInvocation,
+            customHandler);
+
+    internal static string ExecuteToolAction(
+        string toolName,
+        string actionName,
+        string? path,
+        Func<string> operation,
+        Action<string, string, long, bool, string?> trackInvocation,
         Func<Exception, string?>? customHandler = null)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -241,7 +256,7 @@ public static class ExcelToolsBase
         try
         {
             var result = operation();
-            success = true;
+            success = IsSuccessfulToolResponse(result);
             return result;
         }
         catch (Exception ex)
@@ -274,7 +289,22 @@ public static class ExcelToolsBase
         finally
         {
             stopwatch.Stop();
-            ExcelMcpTelemetry.TrackToolInvocation(toolName, actionName, stopwatch.ElapsedMilliseconds, success, path);
+            trackInvocation(toolName, actionName, stopwatch.ElapsedMilliseconds, success, path);
+        }
+    }
+
+    private static bool IsSuccessfulToolResponse(string response)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(response);
+            return document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("success", out var success)
+                || success.ValueKind != JsonValueKind.False;
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 
@@ -401,6 +431,3 @@ public static class ExcelToolsBase
         }, JsonOptions);
     }
 }
-
-
-

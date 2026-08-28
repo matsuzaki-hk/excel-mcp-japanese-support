@@ -234,9 +234,9 @@ jobs:
               labels: ['conflict', 'upstream-sync', 'help wanted']
             });
 
-  # ステップ3: 競合がない場合は自動リベース
-  auto-rebase:
-    name: Auto Rebase ja-localization
+  # ステップ3: 競合がない場合は自動マージ
+  auto-merge:
+    name: Auto Merge ja-localization
     needs: check-conflicts
     if: needs.check-conflicts.outputs.has_conflicts == 'false' && needs.check-conflicts.outputs.has_new_version == 'true' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
@@ -255,29 +255,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Rebase ja-localization
+      - name: Merge upstream/main into ja-localization
         run: |
           git remote add upstream https://github.com/sbroenne/mcp-server-excel.git
           git fetch upstream main
 
           # fork側のworkflowファイルを退避（GITHUB_TOKENではworkflowファイルを
-          # pushできないため、rebase後に元に戻す）
+          # pushできないため、マージ後に元に戻す）
           mkdir -p /tmp/fork-workflows
           cp -a .github/workflows/. /tmp/fork-workflows/
 
-          # ja-localizationをupstream/mainにリベース
-          git rebase upstream/main
+          # ja-localization に upstream/main をマージ（チェック済みの競合を解決済み）
+          git merge upstream/main --no-ff -m "merge: integrate upstream v${{ needs.check-conflicts.outputs.upstream_version }} and preserve Japanese support"
 
-          # workflowファイルをrebase前の状態に戻す
+          # workflowファイルをマージ前の状態に戻す
           cp -a /tmp/fork-workflows/. .github/workflows/
           git add .github/workflows/
           if ! git diff --cached --quiet; then
-            git commit -m "chore: preserve fork workflow files during upstream rebase"
+            git commit -m "chore: preserve fork workflow files during upstream merge"
           fi
 
-          git push origin ja-localization --force-with-lease
+          git push origin ja-localization
 
-          echo "✅ Rebase completed successfully"
+          echo "✅ Merge completed successfully"
 
       - name: Save upstream version
         run: |
@@ -289,7 +289,7 @@ jobs:
   # ステップ4: リリースワークフローをトリガー
   trigger-release:
     name: Trigger Release Build
-    needs: [check-conflicts, auto-rebase]
+    needs: [check-conflicts, auto-merge]
     if: needs.check-conflicts.outputs.has_conflicts == 'false' && needs.check-conflicts.outputs.has_new_version == 'true' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
@@ -314,7 +314,7 @@ jobs:
   # ステップ5: 成功通知（オプション）
   notify-success:
     name: Notify Success
-    needs: [check-conflicts, auto-rebase, trigger-release]
+    needs: [check-conflicts, auto-merge, trigger-release]
     if: needs.check-conflicts.outputs.has_conflicts == 'false' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:

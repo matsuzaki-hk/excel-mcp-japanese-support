@@ -41,7 +41,7 @@
 ### Documentation
 
 - Update README, skill files, and upstream snapshot docs when user-facing behavior changes.
-- Keep tool/operation counts consistent (31 tools / 326 operations as of v2.0.4).
+- Keep tool/operation counts consistent (31 tools / 325 operations as of v2.0.4).
 
 ### Japanese Fork Specifics
 

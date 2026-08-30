@@ -22,7 +22,7 @@
 
 ファイルパーサーツールとは異なり、ExcelMcpは公式COM APIを通じて**実際のExcelアプリケーション**を駆動します。Power Queryの更新、数式の再計算、DAXの評価、VBAとPython `=PY()` の実行、そしてピボットテーブル、グラフ、マクロ、データモデル、ブックの書式を保持できます。
 
-**31の専門ツール、326の操作**で、Excel自動化の端到端をカバーします。
+**31の専門ツール、325の操作**で、Excel自動化の端到端をカバーします。
 
 > [!IMPORTANT]
 > **Windows**、**Microsoft Excel 2016以降**、および対話型デスクトップが必要です。Linux、macOS、またはサーバー側のバッチ処理を目的としていません。
@@ -65,7 +65,7 @@
 - **[グラフとビジュアル](https://excelmcpserver.dev/features/charts-visuals/):** グラフ、スライサー、条件付き書式、スクリーンショット、描画、スパークライン
 - **[自動化と高度な機能](https://excelmcpserver.dev/features/automation-advanced/):** VBA、Excel Python、Goal Seek、シナリオ、データテーブル、ウィンドウ、XML Maps
 
-[326の操作の完全なリファレンス →](FEATURES.md)
+[325の操作の完全なリファレンス →](FEATURES.md)
 
 ## 💬 プロンプト例
 

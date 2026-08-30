@@ -13,7 +13,7 @@ compatibility: Requires Windows, Microsoft Excel 2016 or later, and network acce
 
 # Excel MCP Server Skill（日本語対応フォーク）
 
-Model Context Protocol（MCP）を介して、Windows 上の Excel を自動化する 326 種類の操作を提供します。MCP Server は ExcelMCP サービスを同一プロセス内でホストし、低レイテンシーで Excel 操作を実行します。ツールは自動検出されます。本ドキュメントでは、日本語環境特有の注意点、推奨ワークフロー、よくある落とし穴をまとめています。
+Model Context Protocol（MCP）を介して、Windows 上の Excel を自動化する 325 種類の操作を提供します。MCP Server は ExcelMCP サービスを同一プロセス内でホストし、低レイテンシーで Excel 操作を実行します。ツールは自動検出されます。本ドキュメントでは、日本語環境特有の注意点、推奨ワークフロー、よくある落とし穴をまとめています。
 
 ## ワークフローチェックリスト
 

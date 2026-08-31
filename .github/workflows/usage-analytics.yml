@@ -38,7 +38,7 @@ jobs:
 
   collect:
     name: Collect sanitized aggregates
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != ''
     needs: test
     permissions:
       contents: read
@@ -88,6 +88,7 @@ jobs:
 
   interpret:
     name: Interpret and validate report
+    if: vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != ''
     needs: collect
     permissions:
       contents: read
@@ -140,7 +141,7 @@ jobs:
 
   publish:
     name: Publish validated report
-    if: github.event_name == 'schedule' || inputs.publish == true
+    if: (github.event_name == 'schedule' || inputs.publish == true) && vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != ''
     needs: interpret
     permissions:
       contents: write

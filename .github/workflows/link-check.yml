@@ -47,6 +47,10 @@ jobs:
         working-directory: gh-pages
         run: mkdocs build --strict --clean
 
+      - name: Mirror site under the GitHub Pages path prefix for lychee
+        working-directory: gh-pages
+        run: ln -s . "_site/excel-mcp-japanese-support"
+
       - name: Check links
         id: lychee
         uses: lycheeverse/lychee-action@v2

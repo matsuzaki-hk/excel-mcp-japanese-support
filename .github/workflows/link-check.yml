@@ -49,7 +49,11 @@ jobs:
 
       - name: Mirror site under the GitHub Pages path prefix for lychee
         working-directory: gh-pages
-        run: ln -s . "_site/excel-mcp-japanese-support"
+        run: |
+          cp -r _site _site-mirror
+          mkdir -p _site/excel-mcp-japanese-support
+          cp -r _site-mirror/* _site/excel-mcp-japanese-support/
+          rm -rf _site-mirror
 
       - name: Check links
         id: lychee

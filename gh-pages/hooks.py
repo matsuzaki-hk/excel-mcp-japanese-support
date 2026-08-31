@@ -95,7 +95,7 @@ SITE_PAGE_MAP = {
 
 _MD_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)\)")
 
-SITE_URL = "https://excelmcpserver.dev/"
+SITE_URL = "https://matsuzaki-hk.github.io/excel-mcp-japanese-support/"
 
 # Raw Markdown of every built page, captured in on_page_markdown with --8<--
 # includes resolved, and emitted in on_post_build as /llms-full.txt plus one

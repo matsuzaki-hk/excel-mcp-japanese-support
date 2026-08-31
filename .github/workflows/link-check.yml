@@ -54,7 +54,7 @@ jobs:
           # --base lets root-relative hrefs resolve against the built output, so
           # internal and external links are both covered.
           args: >-
-            --base ${{ github.workspace }}/gh-pages/_site
+            --base https://excelmcpserver.dev/
             --no-progress
             --max-concurrency 4
             --accept 200,206,429

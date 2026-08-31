@@ -51,16 +51,19 @@ jobs:
         id: lychee
         uses: lycheeverse/lychee-action@v2
         with:
-          # --base lets root-relative hrefs resolve against the built output, so
-          # internal and external links are both covered.
+          # --base lets root-relative hrefs resolve against the fork's GitHub
+          # Pages deployment so internal directory-style URLs are checked live.
           args: >-
-            --base https://excelmcpserver.dev/
+            --base https://matsuzaki-hk.github.io/excel-mcp-japanese-support/
             --no-progress
             --max-concurrency 4
             --accept 200,206,429
+            --timeout 60
             --exclude '^https?://localhost'
             --exclude '^https?://127\.0\.0\.1'
             --exclude 'example\.com'
+            --exclude 'powerbi\.microsoft\.com'
+            --exclude 'powerqueryformatter\.com'
             'gh-pages/_site/**/*.html'
           fail: true
           output: lychee-report.md
@@ -69,7 +72,7 @@ jobs:
         if: failure() && steps.lychee.outcome == 'failure'
         uses: peter-evans/create-issue-from-file@v6
         with:
-          title: "Broken links on excelmcpserver.dev"
+          title: "Broken links on matsuzaki-hk.github.io/excel-mcp-japanese-support"
           content-filepath: lychee-report.md
           # Only labels that actually exist in this repo - the API rejects
           # unknown label names.

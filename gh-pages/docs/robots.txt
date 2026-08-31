@@ -1,5 +1,5 @@
 # robots.txt for Excel MCP Server documentation
-# https://excelmcpserver.dev/
+# https://matsuzaki-hk.github.io/excel-mcp-japanese-support/
 
 User-agent: *
 Allow: /
@@ -8,8 +8,8 @@ Allow: /
 # accurately by an assistant is a goal of this documentation.
 #
 # Machine-readable entry points:
-#   https://excelmcpserver.dev/llms.txt       - index of every page
-#   https://excelmcpserver.dev/llms-full.txt  - full documentation corpus
+#   https://matsuzaki-hk.github.io/excel-mcp-japanese-support/llms.txt       - index of every page
+#   https://matsuzaki-hk.github.io/excel-mcp-japanese-support/llms-full.txt  - full documentation corpus
 # Any page is also available as Markdown by appending index.md to its URL.
 
 # OpenAI
@@ -67,4 +67,4 @@ User-agent: MistralAI-User
 Allow: /
 
 # Sitemap location
-Sitemap: https://excelmcpserver.dev/sitemap.xml
+Sitemap: https://matsuzaki-hk.github.io/excel-mcp-japanese-support/sitemap.xml

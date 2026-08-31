@@ -1,6 +1,6 @@
 # Docs Site (MkDocs)
 
-Source for [excelmcpserver.dev](https://excelmcpserver.dev/), built with MkDocs Material.
+Source for [matsuzaki-hk.github.io/excel-mcp-japanese-support](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/), built with MkDocs Material.
 Most pages under `docs/` are thin wrappers that include canonical content from elsewhere in
 the repo (root `README.md`, `FEATURES.md`, `docs/features/`, package READMEs,
 `CHANGELOG.md`, etc.) so there is a single source of truth for documentation content.

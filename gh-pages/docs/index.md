@@ -49,7 +49,7 @@ hide:
   "publisher": {
     "@type": "Organization",
     "name": "Excel MCP Server",
-    "url": "https://excelmcpserver.dev/"
+    "url": "https://matsuzaki-hk.github.io/excel-mcp-japanese-support/"
   }
 }
 </script>
@@ -203,7 +203,7 @@ workflow:
 
 ## GitHub star history
 
-![GitHub stars over time for ExcelMcp](https://excelmcpserver.dev/assets/images/star-history.svg){ width="900" height="480" loading=lazy }
+![GitHub stars over time for ExcelMcp](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/assets/images/star-history.svg){ width="900" height="480" loading=lazy }
 
 Updated daily on the deployed site from exact aggregate snapshots; no stargazer
 identities are stored.

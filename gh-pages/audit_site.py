@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 SITE_DIR = Path(__file__).resolve().parent / "_site"
 MKDOCS_YML = Path(__file__).resolve().parent / "mkdocs.yml"
-SITE_URL = "https://excelmcpserver.dev/"
+SITE_URL = "https://matsuzaki-hk.github.io/excel-mcp-japanese-support/"
 
 # Imported rather than duplicated: this is the same mapping hooks.py uses to
 # rewrite links, so the audit cannot drift away from what the build produces.
@@ -209,7 +209,7 @@ def audit_offsite_links(html_files: list[Path]) -> None:
     """
     # Quotes are optional: the minify plugin strips them from attribute values.
     pattern = re.compile(
-        r'href=["\']?https://github\.com/sbroenne/mcp-server-excel/(?:blob|tree)/main/([^"\'\s>#]+)'
+        r'href=["\']?https://github\.com/matsuzaki-hk/excel-mcp-japanese-support/(?:blob|tree)/ja-localization/([^"\'\s>#]+)'
     )
     for path in html_files:
         html = path.read_text(encoding="utf-8", errors="replace")

@@ -40,7 +40,7 @@ log = logging.getLogger("mkdocs.hooks.generate")
 # video-sitemap <video:video> block into the home page's <url> entry. Keep these
 # fields in sync with the VideoObject JSON-LD in docs/index.md.
 VIDEO = {
-    "page_url": "https://excelmcpserver.dev/",
+    "page_url": "https://matsuzaki-hk.github.io/excel-mcp-japanese-support/",
     "thumbnail": "https://i.ytimg.com/vi/B6eIQ5BIbNc/maxresdefault.jpg",
     "title": "Introducing MCP Server for Excel - AI Coding for Excel",
     "description": (
@@ -61,8 +61,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # includes in the wrapper pages resolve here unchanged.
 GEN_DIR = Path(__file__).resolve().parent / "_generated"
 
-GITHUB_BLOB = "https://github.com/sbroenne/mcp-server-excel/blob/main/"
-GITHUB_TREE = "https://github.com/sbroenne/mcp-server-excel/tree/main/"
+GITHUB_BLOB = "https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/ja-localization/"
+GITHUB_TREE = "https://github.com/matsuzaki-hk/excel-mcp-japanese-support/tree/ja-localization/"
 
 # Repo-relative paths that have a dedicated site page: rewrite links to them so
 # they resolve on the website instead of 404-ing.
@@ -869,10 +869,10 @@ def _render_usage_analytics() -> str:
             "or account details. Read the full [privacy policy](/privacy/).",
             "",
             "You can inspect exactly how the report is built in "
-            "[`Update-UsageAnalytics.ps1`](https://github.com/sbroenne/"
-            "mcp-server-excel/blob/main/scripts/Update-UsageAnalytics.ps1) and "
-            "[`usage-analytics.yml`](https://github.com/sbroenne/mcp-server-excel/"
-            "blob/main/.github/workflows/usage-analytics.yml).",
+            "[`Update-UsageAnalytics.ps1`](https://github.com/matsuzaki-hk/"
+            "excel-mcp-japanese-support/blob/ja-localization/scripts/Update-UsageAnalytics.ps1) and "
+            "[`usage-analytics.yml`](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/"
+            "blob/ja-localization/.github/workflows/usage-analytics.yml).",
         ]
     )
     return "\n".join(sections) + "\n"

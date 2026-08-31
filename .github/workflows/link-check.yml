@@ -73,6 +73,10 @@ jobs:
             --exclude 'example\.com'
             --exclude 'powerbi\.microsoft\.com'
             --exclude 'powerqueryformatter\.com'
+            --exclude 'registry\.modelcontextprotocol\.io'
+            --exclude '^https?://github\.com/github-actions'
+            --exclude '^https?://github\.com/sbroenne/pytest-aitest'
+            --exclude '^https?://docs\.microsoft\.com'
             'gh-pages/_site/**/*.html'
           fail: true
           output: lychee-report.md

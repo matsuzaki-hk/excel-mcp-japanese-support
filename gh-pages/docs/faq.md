@@ -1,4 +1,4 @@
----
+﻿---
 title: Frequently Asked Questions
 description: >-
   Answers to common questions about Excel MCP Server - Windows and Excel
@@ -31,7 +31,7 @@ possible - you don't need to memorize it.
 
 ### CLI or MCP Server - which should I install?
 
-Both expose the **same 325 operations**. Use the **MCP Server** for
+Both expose the **same 326 operations**. Use the **MCP Server** for
 conversational AI (Claude Desktop, VS Code Chat); use the **CLI** (`excelcli`)
 for coding agents and scripting, where it uses ~64% fewer tokens. You can
 install both. See [Installation](installation.md).
@@ -78,7 +78,7 @@ Python in Excel, which runs in Microsoft's cloud). See
 
 ### Where do I report a bug or ask for a feature?
 
-On [GitHub Issues](https://github.com/sbroenne/mcp-server-excel/issues). If
+On [GitHub Issues](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/issues). If
 something is failing rather than missing, check
 [Troubleshooting](troubleshooting.md) first - most first-time failures are one
 of a handful of known setup issues.

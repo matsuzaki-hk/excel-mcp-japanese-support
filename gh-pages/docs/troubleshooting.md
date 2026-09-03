@@ -1,4 +1,4 @@
----
+﻿---
 title: Troubleshooting
 description: >-
   Fixes for the most common Excel MCP Server issues - Excel must be closed,
@@ -11,7 +11,7 @@ keywords: "Excel MCP troubleshooting, VBA trust, MSOLAP DAX, workbook locked, mc
 Hitting a snag? Most first-time issues fall into one of the cases below. For
 general questions about what the tool is and what it needs, see the
 [FAQ](faq.md). If none of these help, open a
-[GitHub issue](https://github.com/sbroenne/mcp-server-excel/issues).
+[GitHub issue](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/issues).
 
 ## Common issues
 
@@ -96,4 +96,4 @@ winget install OpenJS.NodeJS.LTS
 - **Task guides:** [Refresh Power Query](guides/refresh-power-query.md) · [PivotTables](guides/automate-pivottables.md) · [DAX & the Data Model](guides/query-data-model-with-dax.md) · [VBA macros](guides/run-vba-macros.md)
 - **Installation details:** [MCP Server](installation-mcp-server.md) · [CLI](installation-cli.md)
 - **How it works:** [Architecture](architecture.md)
-- **Report a bug or ask a question:** [GitHub Issues](https://github.com/sbroenne/mcp-server-excel/issues)
+- **Report a bug or ask a question:** [GitHub Issues](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/issues)

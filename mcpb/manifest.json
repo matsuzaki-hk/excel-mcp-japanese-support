@@ -1,10 +1,10 @@
-{
+﻿{
   "manifest_version": "0.3",
   "name": "excel-mcp-ja",
   "display_name": "Excel (Windows) - 日本語対応フォーク",
-  "version": "2.0.5",
+  "version": "2.0.7",
   "description": "ExcelMcp の日本語対応フォーク。日本語テーブル名・シート名・ファイルパスを含む識別子をサポート。Excel デスクトップ版が必要です。",
-  "long_description": "Automate the real Microsoft Excel application from Claude. 31 specialized tools with 325 operations for Power Query, DAX and the Data Model, VBA, PivotTables, Charts, Conditional Formatting, and more. Unlike file-parser libraries, it drives Excel through its official COM API, so PivotTables, macros, charts, the Data Model and workbook formatting are preserved. This fork adds support for Japanese table names, sheet names, file paths and other Unicode identifiers. Windows-only, requires Microsoft Excel desktop application (2016 or later)."
+  "long_description": "Automate the real Microsoft Excel application from Claude. 31 specialized tools with 326 operations for Power Query, DAX and the Data Model, VBA, PivotTables, Charts, Conditional Formatting, and more. Unlike file-parser libraries, it drives Excel through its official COM API, so PivotTables, macros, charts, the Data Model and workbook formatting are preserved. This fork adds support for Japanese table names, sheet names, file paths and other Unicode identifiers. Windows-only, requires Microsoft Excel desktop application (2016 or later)."
   "author": {
     "name": "matsuzaki-hk",
     "url": "https://github.com/matsuzaki-hk"

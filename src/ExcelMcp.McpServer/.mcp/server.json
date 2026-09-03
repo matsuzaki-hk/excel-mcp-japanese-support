@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.sbroenne/mcp-server-excel",
+  "name": "io.github.matsuzaki-hk/excel-mcp-japanese-support",
   "title": "MCP Server for Excel",
   "description": "Excel automation for AI - Sheets, Power Query, DAX, VBA, Tables, Ranges and more. Windows only.",
   "version": "2.0.7",
-  "websiteUrl": "https://excelmcpserver.dev/",
+  "websiteUrl": "https://matsuzaki-hk.github.io/excel-mcp-japanese-support/",
   "packages": [
     {
       "registryType": "nuget",
@@ -18,7 +18,7 @@
     }
   ],
   "repository": {
-    "url": "https://github.com/sbroenne/mcp-server-excel",
+    "url": "https://github.com/matsuzaki-hk/excel-mcp-japanese-support",
     "source": "github"
   }
 }

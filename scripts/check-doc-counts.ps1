@@ -253,12 +253,12 @@ if (-not (Test-Path $helpBannerPath)) {
 # ---------------------------------------------------------------------------
 # Package/registry listing pages are the highest-authority inbound links we control.
 # They must point at the canonical docs site, not straight at the GitHub repo.
-$siteUrl = 'https://excelmcpserver.dev/'
+$siteUrl = 'https://matsuzaki-hk.github.io/excel-mcp-japanese-support/'
 $siteLinkChecks = @(
-    @{ File = "Directory.Build.props";                  Pattern = '<PackageProjectUrl>https://excelmcpserver\.dev/</PackageProjectUrl>';  What = "PackageProjectUrl (NuGet package pages)" }
-    @{ File = "src\ExcelMcp.McpServer\.mcp\server.json"; Pattern = '"websiteUrl"\s*:\s*"https://excelmcpserver\.dev/"';                    What = "websiteUrl (MCP registry listing)" }
-    @{ File = "mcpb\manifest.json";                     Pattern = '"homepage"\s*:\s*"https://excelmcpserver\.dev/"';                      What = "homepage (Claude Desktop bundle)" }
-    @{ File = "vscode-extension\package.json";          Pattern = '"homepage"\s*:\s*"https://excelmcpserver\.dev/"';                      What = "homepage (VS Code Marketplace)" }
+    @{ File = "Directory.Build.props";                  Pattern = '<PackageProjectUrl>https://matsuzaki-hk\.github\.io/excel-mcp-japanese-support/</PackageProjectUrl>';  What = "PackageProjectUrl (NuGet package pages)" }
+    @{ File = "src\ExcelMcp.McpServer\.mcp\server.json"; Pattern = '"websiteUrl"\s*:\s*"https://matsuzaki-hk\.github\.io/excel-mcp-japanese-support/"';                    What = "websiteUrl (MCP registry listing)" }
+    @{ File = "mcpb\manifest.json";                     Pattern = '"homepage"\s*:\s*"https://matsuzaki-hk\.github\.io/excel-mcp-japanese-support/"';                      What = "homepage (Claude Desktop bundle)" }
+    @{ File = "vscode-extension\package.json";          Pattern = '"homepage"\s*:\s*"https://matsuzaki-hk\.github\.io/excel-mcp-japanese-support/"';                      What = "homepage (VS Code Marketplace)" }
 )
 
 foreach ($check in $siteLinkChecks) {

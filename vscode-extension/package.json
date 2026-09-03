@@ -12,7 +12,7 @@
   "bugs": {
     "url": "https://github.com/matsuzaki-hk/excel-mcp-japanese-support/issues"
   },
-  "homepage": "https://github.com/matsuzaki-hk/excel-mcp-japanese-support",
+  "homepage": "https://matsuzaki-hk.github.io/excel-mcp-japanese-support/",
   "license": "MIT",
   "engines": {
     "vscode": "^1.125.0"

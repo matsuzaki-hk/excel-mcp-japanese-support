@@ -76,3 +76,26 @@ silently overriding it.
 - ローカルの .NET SDK が `global.json` の要求バージョンを満たさない場合、
   完全なビルドは GitHub Actions (CI Gate) で確認する。
 - Excel 依存テストはローカルのみ可能。GitHub-hosted runner に Excel はない。
+
+### upstream 更新・競合報告時の対応手順
+
+ユーザーが本家更新や競合を報告した場合、以下の順で対応する。
+
+1. `gh run list` / `gh run view --log` でワークフロー実行履歴とログを
+   確認し、発生している事象に対応する。
+2. 修正を `ja-localization` に push し、CI Gate
+   (`gh workflow run ci.yml --ref ja-localization`) と Link Check /
+   Deploy GitHub Pages で検証する。
+3. 処置完了後、`gh workflow run release-fork.yml --ref ja-localization`
+   でリリースビルドを作成する (バージョンは自動で `X.Y.Z-ja.N`)。
+4. リリース完了後、`ExcelMcp-MCP-Server-{version}-ja.{N}-windows.zip` を
+   `C:\work\ExcelMcp-MCP-Server` へダウンロードする:
+
+   ```powershell
+   gh release download "vX.Y.Z-ja.N" --repo matsuzaki-hk/excel-mcp-japanese-support `
+     -p "ExcelMcp-MCP-Server-*-windows.zip" -D "C:\work\ExcelMcp-MCP-Server" --clobber
+   ```
+
+5. 完了後、ユーザーへ「Devin を閉じて exe を差し替えて MCP を更新して
+   ほしい」旨を通知する (実行中セッションの MCP は旧 exe のままなので、
+   ユーザー側で Devin 終了 → exe 差し替え → 再起動が必要)。

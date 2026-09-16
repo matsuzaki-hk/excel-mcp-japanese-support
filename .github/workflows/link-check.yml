@@ -59,9 +59,9 @@ jobs:
         id: lychee
         uses: lycheeverse/lychee-action@v2
         with:
-          # --root-dir lets lychee resolve root-relative and relative links
-          # against the built files, while external URLs are still checked
-          # over the network.
+          # --root-dir lets root-relative hrefs resolve against the built
+          # output, so internal and external links are both covered. It must be
+          # an absolute path - lychee rejects relative values.
           args: >-
             --root-dir ${{ github.workspace }}/gh-pages/_site
             --no-progress

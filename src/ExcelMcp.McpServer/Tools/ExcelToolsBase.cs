@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Encodings.Web;
 using System.Text.Json.Serialization;
+using Sbroenne.ExcelMcp.Core.Utilities;
 using Sbroenne.ExcelMcp.McpServer.Telemetry;
 
 #pragma warning disable IL2070 // 'this' argument does not satisfy 'DynamicallyAccessedMembersAttribute' requirements
@@ -371,9 +372,9 @@ public static class ExcelToolsBase
         errorCategory switch
         {
             "InvalidInput" or "SessionNotFound" or "SessionUnavailable"
-                or "NotFound" or "Conflict" or "Syntax" or "Expression"
+                or "NotFound" or "Conflict" or "Syntax" or "Expression" or "Prerequisite"
                 => ToolFailureClass.InputState,
-            "Privacy" or "Authentication" or "Connectivity" or "Permissions"
+            "Privacy" or "Authentication" or "Connectivity" or "Permissions" or "DependencyUnavailable"
                 => ToolFailureClass.ExternalDependency,
             "Timeout" or "Cancelled" or "SessionInvalidated"
                 => ToolFailureClass.TimeoutCancellation,
@@ -449,16 +450,9 @@ public static class ExcelToolsBase
 
         // Add detailed COM exception info for diagnostics
         string? exceptionType = ex.GetType().Name;
-        string? hresult = null;
+        string? hresult = OperationFailureClassifier.GetComHResult(ex);
         string? innerError = null;
-        var errorCategory = ex switch
-        {
-            ArgumentException => "InvalidInput",
-            TimeoutException => "Timeout",
-            OperationCanceledException => "Cancelled",
-            System.Runtime.InteropServices.COMException => "ComInterop",
-            _ => null
-        };
+        var errorCategory = OperationFailureClassifier.Classify(ex);
 
         if (ex is System.Runtime.InteropServices.COMException comEx)
         {

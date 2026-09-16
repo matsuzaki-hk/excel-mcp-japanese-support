@@ -11,6 +11,20 @@ This changelog covers all components:
 
 Entries are short and end-user-facing. Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses [Semantic Versioning](https://semver.org/). Starting with this file, entries are compiled automatically from [changesets](.changeset/README.md) at release time — see [Release Strategy](docs/RELEASE-STRATEGY.md#changelog-generation) for how to add one.
 
+## [2.0.8] - 2026-09-12
+
+### Patch Changes
+
+- [#872](https://github.com/sbroenne/mcp-server-excel/pull/872) [`9c4f400`](https://github.com/sbroenne/mcp-server-excel/commit/9c4f400028de8b0596326aecb09372e9a573710b) Thanks [@sbroenne](https://github.com/sbroenne)! - MCP session-bound tools now defensively accept a top-level `sessionId` from client bridges that rewrite the canonical `session_id` argument. The published schema still uses `session_id`, and conflicting or malformed identity values return a privacy-safe input error.
+
+- [#868](https://github.com/sbroenne/mcp-server-excel/pull/868) [`b7f23af`](https://github.com/sbroenne/mcp-server-excel/commit/b7f23af1d083b3da1e5094f95cc9d0e0b1a41b6b) Thanks [@sbroenne](https://github.com/sbroenne)! - MCP calls missing a required session ID now explain where to supply `session_id` instead of returning a generic tool error. File close and session-based worksheet errors use the same public parameter name, including when the supplied ID is not a string. This improves diagnosis but does not repair client bridges that drop arguments.
+
+- [#870](https://github.com/sbroenne/mcp-server-excel/pull/870) [`160edf1`](https://github.com/sbroenne/mcp-server-excel/commit/160edf1bbbaf3cd34dad348fe9263487c79bce31) Thanks [@sbroenne](https://github.com/sbroenne)! - CLI and MCP now preserve categories for wrapped Excel errors and known VBA and Data Model prerequisites without guessing the cause of unknown failures. Empty macro procedure names are rejected before execution, and Power Query evaluation retains the existing query error categories after cleaning up its temporary objects.
+
+  DAX execution errors now identify the failing operation while preserving the underlying Excel error, including when Excel returns only an error code.
+
+- [#869](https://github.com/sbroenne/mcp-server-excel/pull/869) [`4f46abb`](https://github.com/sbroenne/mcp-server-excel/commit/4f46abb46883f10fe1b496c6ff21c89890159928) Thanks [@sbroenne](https://github.com/sbroenne)! - **Older Excel formula compatibility** ([#750](https://github.com/sbroenne/mcp-server-excel/issues/750)): Formula reads and writes now use the legacy API when Excel does not support modern formulas, in both CLI and MCP. Modern Excel keeps dynamic arrays; older Excel retains its single-value implicit-intersection behavior. Invalid formulas and protected-cell errors are not retried.
+
 ## [2.0.6] - 2026-09-02
 
 ### Minor Changes
@@ -326,7 +340,7 @@ Entries are short and end-user-facing. Format follows [Keep a Changelog](https:/
 
 - [#740](https://github.com/sbroenne/mcp-server-excel/pull/740) [`59ebf29`](https://github.com/sbroenne/mcp-server-excel/commit/59ebf29b15d61a0c6bbce714c50338b4db4c82b3) Thanks [@sbroenne](https://github.com/sbroenne)! - **Fix `conditionalformat add` throwing on `borderStyle`/`borderColor`** (#737). Writing border formatting on a conditional-format rule threw `COMException: Unable to set the LineStyle property of the Border class`. Root cause: `FormatCondition.Borders` is a 4-item collection indexed 1-4 (left/top/bottom/right), unlike `Range.Borders` which uses the `xlEdgeLeft`/`Top`/`Bottom`/`Right` constants (7-10) — writing (and reading) via those out-of-range indices silently returned an unbound placeholder that threw on write and reported blank values on read. Both the write path (`add`) and the read path (`list-rules`/`list-worksheet-rules`) now use the correct 1-4 indices, so border style and color round-trip correctly.
 
-- [`352b1da`](https://github.com/sbroenne/mcp-server-excel/commit/352b1da895b84c66d9565e013576ab198ffd50ea) Thanks [@github-actions[bot]](https://github.com/github-actions%5Bbot%5D)! - **Release automation: reliably commit the changelog back to `main`.** The post-release step now pushes the compiled `CHANGELOG.md` update directly to `main` using an admin `RELEASE_PAT`, instead of opening a `chore/changelog-vX` PR. On this user-owned repo the GitHub Actions bot can't be a branch-protection bypass actor, so that PR could never satisfy the required status checks and piled up open — leaving several releases with a stale/missing CHANGELOG on `main`. The direct push (as a ruleset bypass actor) removes the stuck-PR failure mode entirely.
+- [`352b1da`](https://github.com/sbroenne/mcp-server-excel/commit/352b1da895b84c66d9565e013576ab198ffd50ea) Thanks [@github-actions](https://github.com/apps/github-actions)! - **Release automation: reliably commit the changelog back to `main`.** The post-release step now pushes the compiled `CHANGELOG.md` update directly to `main` using an admin `RELEASE_PAT`, instead of opening a `chore/changelog-vX` PR. On this user-owned repo the GitHub Actions bot can't be a branch-protection bypass actor, so that PR could never satisfy the required status checks and piled up open — leaving several releases with a stale/missing CHANGELOG on `main`. The direct push (as a ruleset bypass actor) removes the stuck-PR failure mode entirely.
 
 ## [1.10.0] - 2026-07-23
 
@@ -902,7 +916,7 @@ LLMs pick up these changes automatically via `tools/list` (MCP) and `--help` (CL
 
 ### Added
 
-- **LLM Integration Testing** (#341): Real AI agent testing using [pytest-aitest](https://github.com/sbroenne/pytest-aitest)
+- **LLM Integration Testing** (#341): Real AI agent testing using `pytest-aitest`
 
 ### Changed
 

@@ -17,6 +17,7 @@ public partial class VbaCommands
     /// <inheritdoc />
     public OperationResult Run(IExcelBatch batch, string procedureName, TimeSpan? timeout, params string[] parameters)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(procedureName);
         parameters ??= [];
 
         var (isValid, validationError) = ValidateVbaFile(batch.WorkbookPath);
@@ -108,13 +109,13 @@ public partial class VbaCommands
         var (isValid, validationError) = ValidateVbaFile(batch.WorkbookPath);
         if (!isValid)
         {
-            throw new InvalidOperationException(validationError);
+            throw new OperationFailureException(OperationFailureCategory.InvalidInput, validationError);
         }
 
         // Check VBA trust BEFORE attempting operation
         if (!IsVbaTrustEnabled())
         {
-            throw new InvalidOperationException(VbaTrustErrorMessage);
+            throw new OperationFailureException(OperationFailureCategory.Permissions, VbaTrustErrorMessage);
         }
 
         return batch.Execute((ctx, ct) =>
@@ -153,7 +154,7 @@ public partial class VbaCommands
 
                 if (targetComponent == null)
                 {
-                    throw new InvalidOperationException($"Module '{moduleName}' not found.");
+                    throw new OperationFailureException(OperationFailureCategory.NotFound, $"Module '{moduleName}' not found.");
                 }
 
                 vbComponents.Remove(targetComponent);
@@ -162,7 +163,7 @@ public partial class VbaCommands
             }
             catch (COMException comEx) when (IsVbaTrustError(comEx))
             {
-                throw new InvalidOperationException(VbaTrustErrorMessage, comEx);
+                throw new OperationFailureException(OperationFailureCategory.Permissions, VbaTrustErrorMessage, comEx);
             }
             catch (COMException comEx) when (comEx.ErrorCode == GenericOfficeAutomationError)
             {
@@ -373,5 +374,4 @@ public partial class VbaCommands
         });
     }
 }
-
 

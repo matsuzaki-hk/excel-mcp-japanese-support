@@ -12,11 +12,11 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/sbroenne/mcp-server-excel)
 [![Fork Status](https://img.shields.io/badge/Fork-Japanese%20Support-green.svg)](https://github.com/matsuzaki-hk/excel-mcp-japanese-support)
 
-[**Webサイト**](https://excelmcpserver.dev/) ・
-[**インストール**](https://excelmcpserver.dev/installation/) ・
-[**機能**](https://excelmcpserver.dev/features/) ・
-[**トラブルシューティング**](https://excelmcpserver.dev/troubleshooting/) ・
-[**1分デモ**](https://youtu.be/B6eIQ5BIbNc)
+[**Webサイト**](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/) ・
+[**インストール**](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/installation/) ・
+[**機能**](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/features/) ・
+[**トラブルシューティング**](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/troubleshooting/) ・
+[**2分デモ**](https://youtu.be/wbw3-hPcE2o)
 
 **AIで実際のMicrosoft Excelを自動化。** ExcelMcpは、GitHub Copilot、Claude、ChatGPTなどのAIアシスタントが自然言語のリクエストでExcelを制御できるMCPサーバーです。MCPまたはトークン効率の高いCLIのいずれかを使用します。
 

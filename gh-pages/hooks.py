@@ -41,15 +41,16 @@ log = logging.getLogger("mkdocs.hooks.generate")
 # fields in sync with the VideoObject JSON-LD in docs/index.md.
 VIDEO = {
     "page_url": "https://matsuzaki-hk.github.io/excel-mcp-japanese-support/",
-    "thumbnail": "https://i.ytimg.com/vi/B6eIQ5BIbNc/maxresdefault.jpg",
-    "title": "Introducing MCP Server for Excel - AI Coding for Excel",
+    "thumbnail": "https://i.ytimg.com/vi/wbw3-hPcE2o/maxresdefault.jpg",
+    "title": "Excel MCP Server: Real Excel Automation for AI Agents",
     "description": (
-        "See Excel MCP Server drive the real Microsoft Excel application from an "
-        "AI assistant - Power Query, DAX, VBA, PivotTables and more."
+        "Learn what Excel MCP Server is, when to use it, and how AI agents automate "
+        "Power Query, DAX, PivotTables, VBA, Python, and calculations through real "
+        "Microsoft Excel."
     ),
-    "player_loc": "https://www.youtube.com/embed/B6eIQ5BIbNc",
-    "duration": "62",
-    "publication_date": "2025-11-23T08:33:40-08:00",
+    "player_loc": "https://www.youtube.com/embed/wbw3-hPcE2o",
+    "duration": "121",
+    "publication_date": "2026-09-12T07:07:06-07:00",
 }
 
 # gh-pages/hooks.py -> gh-pages/ -> repo root
@@ -1265,6 +1266,12 @@ def on_pre_build(config, **kwargs):  # noqa: D401 - MkDocs hook signature
         "usage-analytics.md",
         ".github/usage-analytics.json",
         _render_usage_analytics(),
+    )
+
+    _write(
+        "features.md",
+        "FEATURES.md",
+        _strip_header(_read("FEATURES.md"), end_on_blank=True),
     )
 
     # Canonical feature references -> focused website pages. The wrappers add

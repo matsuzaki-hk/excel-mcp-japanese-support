@@ -96,6 +96,24 @@ silently overriding it.
      -p "ExcelMcp-MCP-Server-*-windows.zip" -D "C:\work\ExcelMcp-MCP-Server" --clobber
    ```
 
-5. 完了後、ユーザーへ「Devin を閉じて exe を差し替えて MCP を更新して
+5. リリースに `excel-skills-ja-*.zip` があり配布用スキルの更新があれば、
+   `C:\Users\avalo\.codeium\windsurf-next\skills\excel-mcp` を差し替える。
+   zip 内の `skills/excel-mcp-ja/` の中身を `excel-mcp` 名で配置し、旧版は
+   `excel-mcp-backup-v{旧VERSION}` にリネームして退避する:
+
+   ```powershell
+   gh release download "vX.Y.Z-ja.N" --repo matsuzaki-hk/excel-mcp-japanese-support `
+     -p "excel-skills-ja-*.zip" -D "C:\work\ExcelMcp-MCP-Server" --clobber
+   Expand-Archive "C:\work\ExcelMcp-MCP-Server\excel-skills-ja-vX.Y.Z-ja.N.zip" `
+     -DestinationPath "C:\work\ExcelMcp-MCP-Server\excel-skills-ja-vX.Y.Z-ja.N" -Force
+   $skills = "C:\Users\avalo\.codeium\windsurf-next\skills"
+   $oldVer = Get-Content "$skills\excel-mcp\VERSION"
+   Rename-Item "$skills\excel-mcp" "excel-mcp-backup-v$oldVer"
+   Copy-Item "C:\work\ExcelMcp-MCP-Server\excel-skills-ja-vX.Y.Z-ja.N\skills\excel-mcp-ja" `
+     "$skills\excel-mcp" -Recurse
+   ```
+
+6. 完了後、ユーザーへ「Devin を閉じて exe を差し替えて MCP を更新して
    ほしい」旨を通知する (実行中セッションの MCP は旧 exe のままなので、
-   ユーザー側で Devin 終了 → exe 差し替え → 再起動が必要)。
+   ユーザー側で Devin 終了 → exe 差し替え → 再起動が必要。スキルは
+   差し替え済みなので次のセッションから新版が読み込まれる)。

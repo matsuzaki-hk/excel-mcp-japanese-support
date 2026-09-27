@@ -8,6 +8,7 @@ on:
     paths:
       - 'gh-pages/**'
       - 'FEATURES.md'
+      - 'doc-counts.json'
       - 'docs/features/**'
       - 'docs/guides/**'
       - 'skills/shared/**'

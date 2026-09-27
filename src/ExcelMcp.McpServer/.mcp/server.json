@@ -3,13 +3,23 @@
   "name": "io.github.matsuzaki-hk/excel-mcp-japanese-support",
   "title": "MCP Server for Excel",
   "description": "Excel automation for AI - Sheets, Power Query, DAX, VBA, Tables, Ranges and more. Windows only.",
-  "version": "2.0.8",
+  "version": "2.0.11",
   "websiteUrl": "https://matsuzaki-hk.github.io/excel-mcp-japanese-support/",
   "packages": [
     {
       "registryType": "nuget",
       "identifier": "Sbroenne.ExcelMcp.McpServer",
-      "version": "2.0.8",
+      "version": "2.0.11",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [],
+      "environmentVariables": []
+    },
+    {
+      "registryType": "npm",
+      "identifier": "@sbroenne/mcp-server-excel",
+      "version": "2.0.11",
       "transport": {
         "type": "stdio"
       },

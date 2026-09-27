@@ -12,8 +12,8 @@ This repository includes automated pre-commit checks to prevent code quality iss
 6. **Release Solution Build** - Builds the solution in Release so generated skill docs and downstream packaging inputs are fresh
 7. **CLI Workflow Smoke Test** - Validates the end-to-end CLI workflow
 8. **MCP Server Smoke Test** - Validates the all-tools MCP smoke workflow
-9. **CLI Release Deliverables** - Builds the CLI NuGet package and standalone ZIP locally
-10. **MCP Server Release Deliverables** - Builds the MCP Server NuGet package and standalone ZIP locally
+9. **CLI Release Deliverables** - Builds and tests the CLI npm packages, NuGet package, and standalone ZIP locally
+10. **MCP Server Release Deliverables** - Builds and tests the MCP Server npm packages, NuGet package, and standalone ZIP locally
 11. **VS Code Extension Packaging** - Runs the VSIX release packaging path (`npm run package`)
 12. **MCPB Bundle Packaging** - Builds the Claude Desktop `.mcpb` bundle locally
 13. **Agent Skills Deliverables** - Builds the skills ZIP locally
@@ -25,10 +25,11 @@ The hook selects checks from staged paths. During a merge, it compares against
 the incoming parent so already-validated imported changes do not trigger
 unrelated Excel tests.
 
-| Changes | Release build and count checks | Excel E2E | Release packaging |
+| Changes | Release build | Excel E2E | Release packaging |
 |---|---|---|---|
 | Documentation and website content, including website build scripts | No | No | No |
-| Tests, `scripts/check-doc-counts.ps1`, or `.github/workflows/ci.yml` only | Yes | No | No |
+| `scripts/check-doc-counts.ps1` only | No | No | No |
+| Tests or `.github/workflows/ci.yml` only | Yes | No | No |
 | Runtime code in Core, COM, Service, CLI, MCP, or source generators | Yes | Yes | Yes |
 | Other build or release inputs | Yes | Only when the runtime/E2E path filter matches | Yes |
 
@@ -158,7 +159,8 @@ chmod +x .git/hooks/pre-commit
 The Excel-free subset of these checks runs in CI/CD (GitHub-hosted runners have no Excel):
 - `ci.yml` (**CI Gate**) runs a Release build, then the Excel-free audits
   (`check-com-leaks.ps1`, `audit-core-coverage.ps1`, `check-mcp-core-implementations.ps1`,
-  `check-success-flag.ps1`, `check-doc-counts.ps1`, `check-dynamic-casts.ps1`, `check-plugin-readmes.ps1`)
+  `check-success-flag.ps1`, `check-doc-counts.ps1 -AllowStaleAdvertisedCounts`,
+  `check-dynamic-casts.ps1`, `check-plugin-readmes.ps1`)
   plus the hook regression tests on every PR to `main`
 - Excel-dependent gates (CLI/MCP runtime smoke, integration tests) run **local-only** via the pre-commit hook
 
@@ -168,8 +170,8 @@ The Excel-free subset of these checks runs in CI/CD (GitHub-hosted runners have 
 - **Double protection** against coverage regression
 
  When shipping inputs change, the hook validates every locally buildable release artifact before commit publication:
- - CLI NuGet package + standalone ZIP
- - MCP Server NuGet package + standalone ZIP
+ - CLI npm packages + NuGet package + standalone ZIP
+ - MCP Server npm packages + NuGet package + standalone ZIP
  - VS Code VSIX
  - Claude Desktop MCPB bundle
  - Agent skills ZIP

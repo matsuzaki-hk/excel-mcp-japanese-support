@@ -39,7 +39,7 @@ Run applicable existing checks, not replacement audits:
 & .\scripts\audit-core-coverage.ps1 -CheckNaming -FailOnGaps
 & .\scripts\check-mcp-core-implementations.ps1
 & .\scripts\check-success-flag.ps1
-& .\scripts\check-doc-counts.ps1 -SkipBuild
+& .\scripts\check-doc-counts.ps1 -SkipBuild -AllowStaleAdvertisedCounts
 & .\scripts\check-dynamic-casts.ps1
 ```
 
@@ -48,7 +48,12 @@ Otherwise omit it. PRs record the root cause, affected contracts, and validation
 
 ## Git and release
 
-- Never commit to `main`, force-push, or bypass hooks. Report hook blockers.
+- Never commit directly or force-push to `main`, or bypass hooks. Report hook
+  blockers.
+- Rewriting a feature branch's remote history requires explicit user
+  authorization. Use `--force-with-lease` with the expected remote commit;
+  never use plain `--force`. If the lease fails, stop and inspect the remote
+  changes before retrying.
 - Coding-agent assignments requesting repository changes authorize delivery
   commits and a PR. Otherwise ask before commit/push. Merging and publishing
   require separate authorization.

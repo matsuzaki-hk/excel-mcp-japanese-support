@@ -75,6 +75,7 @@ jobs:
             --exclude 'powerbi\.microsoft\.com'
             --exclude 'powerqueryformatter\.com'
             --exclude 'registry\.modelcontextprotocol\.io'
+            --exclude 'npmjs\.com'
             --exclude '^https?://github\.com/github-actions'
             --exclude '^https?://github\.com/sbroenne/pytest-aitest'
             --exclude '^https?://docs\.microsoft\.com'

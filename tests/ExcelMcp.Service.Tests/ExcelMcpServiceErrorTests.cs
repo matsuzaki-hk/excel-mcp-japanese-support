@@ -157,7 +157,7 @@ public sealed class ExcelMcpServiceErrorTests
 
         Assert.False(response.Success);
         Assert.Equal("InvalidInput", response.ErrorCategory);
-        Assert.Contains("sessionId", response.ErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("session_id", response.ErrorMessage, StringComparison.Ordinal);
     }
 
     [Fact]

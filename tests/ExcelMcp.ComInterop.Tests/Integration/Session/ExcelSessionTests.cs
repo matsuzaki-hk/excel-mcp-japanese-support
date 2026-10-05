@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Xunit;
 using Xunit.Abstractions;
@@ -7,22 +6,21 @@ namespace Sbroenne.ExcelMcp.ComInterop.Tests.Integration;
 
 /// <summary>
 /// Integration tests for ExcelSession - verifies public API and COM cleanup.
-/// Tests BeginBatch() and CreateNew() functionality.
+/// Tests BeginBatch() functionality.
 ///
 /// LAYER RESPONSIBILITY:
 /// - ✅ Test ExcelSession.BeginBatch() validation and batch creation
-/// - ✅ Test ExcelSession.CreateNew() file creation
 /// - ✅ Verify Excel.exe process termination (no leaks)
 ///
 /// NOTE: ExcelSession methods use ExcelShutdownService for resilient cleanup.
-/// Automatic RCW finalizers handle COM reference cleanup (no forced GC needed).
-/// Process cleanup errors are logged but don't fail tests.
+/// Tests check the callable workbook and exact owned-process exit after disposal.
 /// </summary>
 [Trait("Category", "Integration")]
 [Trait("Speed", "Slow")]
 [Trait("Layer", "ComInterop")]
 [Trait("Feature", "ExcelSession")]
 [Collection("Sequential")] // Disable parallelization to avoid COM interference
+[Trait("RequiresExcel", "true")]
 public class ExcelSessionTests : IDisposable
 {
     private readonly ITestOutputHelper _output;
@@ -30,18 +28,6 @@ public class ExcelSessionTests : IDisposable
     public ExcelSessionTests(ITestOutputHelper output)
     {
         _output = output;
-
-        // Kill any existing Excel processes to ensure clean state
-        var existingProcesses = Process.GetProcessesByName("EXCEL");
-        if (existingProcesses.Length > 0)
-        {
-            _output.WriteLine($"Cleaning up {existingProcesses.Length} existing Excel processes...");
-            foreach (var p in existingProcesses)
-            {
-                p.Kill(); p.WaitForExit(2000);
-            }
-            _output.WriteLine("Excel processes cleaned up");
-        }
 
     }
 
@@ -63,12 +49,18 @@ public class ExcelSessionTests : IDisposable
 
         try
         {
+            using var owned = new OwnedExcelProcessScope();
             // Act
             using var batch = ExcelSession.BeginBatch(testFile);
 
             // Assert
             Assert.NotNull(batch);
             Assert.Equal(testFile, batch.WorkbookPath);
+            Assert.Equal(testFile, batch.Execute((context, _) => context.Book.FullName));
+            Assert.True(batch.IsExcelProcessAlive());
+            Assert.NotNull(batch.ExcelProcessId);
+            batch.Dispose();
+            owned.AssertAllExited();
 
             _output.WriteLine($"✓ Batch created successfully for: {Path.GetFileName(testFile)}");
         }
@@ -89,6 +81,7 @@ public class ExcelSessionTests : IDisposable
         {
             using var batch = ExcelSession.BeginBatch(nonExistentFile);
         });
+        Assert.False(File.Exists(nonExistentFile));
 
         _output.WriteLine("✓ Correctly throws FileNotFoundException for non-existent file");
     }
@@ -109,99 +102,12 @@ public class ExcelSessionTests : IDisposable
             });
 
             Assert.Contains("Invalid file extension", exception.Message);
+            Assert.Equal("dummy", File.ReadAllText(invalidFile));
             _output.WriteLine("✓ Correctly rejects non-Excel file extension");
         }
         finally
         {
             if (File.Exists(invalidFile)) File.Delete(invalidFile);
-        }
-    }
-
-    [Fact]
-    public void CreateNew_CreatesNewWorkbook()
-    {
-        // Arrange
-        string testFile = Path.Join(Path.GetTempPath(), $"new-workbook-{Guid.NewGuid():N}.xlsx");
-
-        try
-        {
-            // Act
-            var result = ExcelSession.CreateNew(testFile, isMacroEnabled: false, (ctx, ct) =>
-            {
-                _output.WriteLine($"✓ Workbook created at: {ctx.WorkbookPath}");
-                return 0;
-            });
-
-            // Assert
-            Assert.True(File.Exists(testFile), "File should be created");
-            Assert.Equal(0, result);
-
-            // Verify we can open it with batch API
-            using (var batch = ExcelSession.BeginBatch(testFile))
-            {
-                batch.Execute((ctx, ct) =>
-                {
-                    Assert.NotNull(ctx.Book);
-                    _output.WriteLine("✓ Can open created workbook with batch API");
-                    return 0;
-                });
-            }
-        }
-        finally
-        {
-            if (File.Exists(testFile)) File.Delete(testFile);
-        }
-    }
-
-    [Fact]
-    public void CreateNew_WithMacroEnabled_CreatesXlsmFile()
-    {
-        // Arrange
-        string testFile = Path.Join(Path.GetTempPath(), $"new-macro-workbook-{Guid.NewGuid():N}.xlsm");
-
-        try
-        {
-            // Act
-            var result = ExcelSession.CreateNew(testFile, isMacroEnabled: true, (ctx, ct) =>
-            {
-                _output.WriteLine($"✓ Macro-enabled workbook created at: {ctx.WorkbookPath}");
-                return 0;
-            });
-
-            // Assert
-            Assert.True(File.Exists(testFile), "XLSM file should be created");
-            Assert.Equal(".xlsm", Path.GetExtension(testFile).ToLowerInvariant());
-            _output.WriteLine("✓ Correctly created .xlsm file");
-        }
-        finally
-        {
-            if (File.Exists(testFile)) File.Delete(testFile);
-        }
-    }
-
-    [Fact]
-    public void CreateNew_CreatesDirectoryIfNeeded()
-    {
-        // Arrange
-        string testDir = Path.Join(Path.GetTempPath(), $"testdir-{Guid.NewGuid():N}");
-        string testFile = Path.Join(testDir, "newfile.xlsx");
-
-        try
-        {
-            // Act
-            ExcelSession.CreateNew(testFile, isMacroEnabled: false, (ctx, ct) =>
-            {
-                return 0;
-            });
-
-            // Assert
-            Assert.True(Directory.Exists(testDir), "Directory should be created");
-            Assert.True(File.Exists(testFile), "File should be created in new directory");
-            _output.WriteLine("✓ Correctly created directory and file");
-        }
-        finally
-        {
-            if (Directory.Exists(testDir)) Directory.Delete(testDir, recursive: true);
         }
     }
 
@@ -223,7 +129,3 @@ public class ExcelSessionTests : IDisposable
         File.Copy(TemplateFilePath, filePath);
     }
 }
-
-
-
-

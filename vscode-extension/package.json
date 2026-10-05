@@ -2,7 +2,7 @@
   "name": "excel-mcp-ja",
   "displayName": "ExcelMcp 日本語対応フォーク",
   "description": "ExcelMcp の日本語対応フォーク。日本語テーブル名・シート名・ファイルパスをサポートし、日本語 skill を同梱します。Excel デスクトップ版が必要です。",
-  "version": "2.0.11",
+  "version": "2.2.1",
   "publisher": "matsuzaki-hk",
   "icon": "icon.png",
   "repository": {
@@ -19,6 +19,9 @@
   },
   "os": [
     "win32"
+  ],
+  "extensionKind": [
+    "ui"
   ],
   "categories": [
     "AI",
@@ -44,7 +47,12 @@
     "copilot",
     "ai",
     "github copilot",
-    "data analysis"
+    "data analysis",
+    "excel automation",
+    "pivot tables",
+    "charts",
+    "python in excel",
+    "m code"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -62,28 +70,31 @@
         "name": "excel-mcp-ja",
         "description": "ExcelMcp 日本語対応フォークの skill。Windows 版 Excel 操作を支援します。",
         "path": "./skills/excel-mcp-ja/SKILL.md"
+      },
+      {
+        "name": "excel-mcp-report-formatting",
+        "description": "Optional presentation conventions for requested Excel reports.",
+        "path": "./skills/excel-mcp-report-formatting/SKILL.md"
       }
     ]
   },
   "scripts": {
-    "clean": "cd .. && dotnet build-server shutdown && dotnet clean src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj -c Release -nodeReuse:false",
-    "clean:bin": "node -e \"const fs=require('fs'); try{fs.rmSync('bin',{recursive:true,force:true})}catch{}\"",
-    "copy:skills": "pwsh -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\Copy-VscodeSkills.ps1",
-    "build:mcp-server": "npm run clean && npm run clean:bin && cd .. && dotnet publish src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -p:PublishReadyToRun=false -p:NuGetAudit=false -nodeReuse:false -o vscode-extension/bin --verbosity minimal",
-    "copy:changelog": "node -e \"const fs=require('fs'); fs.copyFileSync('../CHANGELOG.md','CHANGELOG.md');\"",
-    "vscode:prepublish": "npm run build:mcp-server && npm run copy:skills && npm run copy:changelog && npm run compile",
+    "vscode:prepublish": "npm run compile",
     "validate:features": "node scripts/validate-feature-metadata.mjs",
     "compile": "npm run validate:features && tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package",
-    "lint": "oxlint src -D correctness -D suspicious -D perf --deny-warnings"
+    "package": "pwsh -NoProfile -File ..\\scripts\\Build-ReleasePackages.ps1 -Components Extension",
+    "lint": "oxlint src tests -D correctness -D suspicious -D perf --deny-warnings",
+    "test": "vitest run",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
     "@types/vscode": "^1.125.0",
-    "@vscode/vsce": "^3.9.2",
+    "@vscode/vsce": "^4.0.0",
     "oxlint": "^1.77.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
   },
   "overrides": {
     "uuid": "^14.0.1"

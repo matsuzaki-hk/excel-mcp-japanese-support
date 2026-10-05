@@ -1,6 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Sbroenne.ExcelMcp.ComInterop.Session;
+using Sbroenne.ExcelMcp.Core.Attributes;
 using Sbroenne.ExcelMcp.Core.Commands;
 using Sbroenne.ExcelMcp.Core.Commands.Analysis;
 using Sbroenne.ExcelMcp.Core.Commands.Calculation;
@@ -21,6 +24,109 @@ namespace Sbroenne.ExcelMcp.Core.Tests.Unit;
 [Trait("RequiresExcel", "false")]
 public sealed class GeneratedActionContractTests
 {
+    [Theory]
+    [InlineData("rename", "oldName", "")]
+    [InlineData("rename", "oldName", "   ")]
+    [InlineData("copy", "sourceName", "")]
+    [InlineData("copy", "sourceName", "   ")]
+    [InlineData("copy-to-file", "sourceSheet", "")]
+    [InlineData("copy-to-file", "sourceSheet", "   ")]
+    [InlineData("move-to-file", "sourceSheet", "")]
+    [InlineData("move-to-file", "sourceSheet", "   ")]
+    public void SheetDispatch_RejectsBlankSourceBeforeCoreDispatch(
+        string action, string parameter, string value)
+    {
+        var (commands, proxy) = CreateProxy<ISheetCommands>();
+        Assert.True(ServiceRegistry.Sheet.TryParseAction(action, out var parsedAction));
+        var arguments = new Dictionary<string, string> { [parameter] = value };
+        switch (action)
+        {
+            case "rename":
+                arguments["newName"] = "Destination";
+                break;
+            case "copy":
+                arguments["targetName"] = "Destination";
+                break;
+            default:
+                arguments["sourceFile"] = @"C:\source.xlsx";
+                arguments["targetFile"] = @"C:\target.xlsx";
+                break;
+        }
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            ServiceRegistry.Sheet.DispatchToCore(
+                commands, parsedAction, null!, JsonSerializer.Serialize(arguments)));
+
+        Assert.Contains(parameter, exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, proxy.CallCount);
+    }
+
+    [Fact]
+    public void VisibilityForward_RequiredEnumAndBooleanHaveNoOptionalSignatureDefaults()
+    {
+        var method = typeof(ServiceRegistry.RangeFormat)
+            .GetMethod(nameof(ServiceRegistry.RangeFormat.ForwardSetVisibility));
+        Assert.NotNull(method);
+        Assert.False(Assert.Single(method.GetParameters(), parameter => parameter.Name == "axis").IsOptional);
+        Assert.False(Assert.Single(method.GetParameters(), parameter => parameter.Name == "hidden").IsOptional);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("rows", null)]
+    public void VisibilityForward_MissingRequiredValuesDoNotDispatch(string? axis, bool? hidden)
+    {
+        bool dispatched = false;
+        Assert.Throws<ArgumentException>(() =>
+            ServiceRegistry.RangeFormat.ForwardSetVisibility<object?>(
+                "session-1", (_, _, _) => { dispatched = true; return null; },
+                sheetName: "Sheet1", rangeAddress: "A1", axis: axis, hidden: hidden));
+        Assert.False(dispatched);
+    }
+
+    [Fact]
+    public void AnnotatedCategories_MatchGeneratedServiceAndCliActions()
+    {
+        var contracts = typeof(IPowerQueryCommands).Assembly.GetTypes()
+            .Where(type => type.IsInterface && type.GetCustomAttribute<ServiceCategoryAttribute>() != null)
+            .ToArray();
+        Assert.NotEmpty(contracts);
+        var generated = typeof(ServiceRegistry).GetNestedTypes(BindingFlags.Public)
+            .Where(type => type.GetField("ValidActions") != null).ToArray();
+        Assert.Equal(contracts.Length, generated.Length);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var contract in contracts)
+        {
+            var category = contract.GetCustomAttribute<ServiceCategoryAttribute>()!;
+            var name = category.PascalName ?? char.ToUpperInvariant(category.Category[0]) + category.Category[1..];
+            Assert.True(names.Add(name), $"Duplicate generated category: {name}");
+            var registry = Assert.Single(generated, type => type.Name == name);
+            var expected = contract.GetMethods().Select(method =>
+                method.GetCustomAttribute<ServiceActionAttribute>()?.Action ??
+                Regex.Replace(method.Name, "(?<!^)[A-Z]", "-$0").ToLowerInvariant()).ToArray();
+            Assert.NotEmpty(expected);
+            Assert.Equal(expected.Length, expected.Distinct(StringComparer.Ordinal).Count());
+            var actual = Assert.IsType<string[]>(registry.GetField("ValidActions")!.GetValue(null));
+            Assert.Equal(expected.Order(StringComparer.Ordinal), actual.Order(StringComparer.Ordinal));
+            var cliName = Assert.IsType<string>(registry.GetField("CliCommandName")!.GetRawConstantValue());
+            Assert.True(_CliCategoryMetadata.ValidActionsByCommand.TryGetValue(cliName, out var cliActions), cliName);
+            Assert.Equal(expected.Order(StringComparer.Ordinal), cliActions.Order(StringComparer.Ordinal));
+            var enumType = contract.Assembly.GetType($"Sbroenne.ExcelMcp.Generated.{name}Action");
+            Assert.NotNull(enumType);
+            var enumActions = enumType.GetFields(BindingFlags.Public | BindingFlags.Static)
+                .Select(field => field.GetCustomAttribute<JsonStringEnumMemberNameAttribute>()?.Name).ToArray();
+            Assert.Equal(expected.Order(StringComparer.Ordinal), enumActions.Order(StringComparer.Ordinal));
+            var mapping = registry.GetMethod("ToActionString", BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(mapping);
+            foreach (var field in enumType.GetFields(BindingFlags.Public | BindingFlags.Static))
+            {
+                var mapped = Assert.IsType<string>(mapping.Invoke(null, [field.GetValue(null)]));
+                Assert.True(mapped == field.GetCustomAttribute<JsonStringEnumMemberNameAttribute>()?.Name,
+                    $"{name}.{field.Name} maps to '{mapped}'.");
+            }
+        }
+    }
+
     [Theory]
     [InlineData("worksheet", PowerQueryLoadMode.LoadToTable)]
     [InlineData("TABLE", PowerQueryLoadMode.LoadToTable)]
@@ -78,7 +184,7 @@ public sealed class GeneratedActionContractTests
     }
 
     [Theory]
-    [InlineData("set-mode", """{"mode":"not-a-mode"}""")]
+    [InlineData("set-settings", """{"mode":"not-a-mode"}""")]
     [InlineData("calculate", """{"scope":"not-a-scope"}""")]
     public void CalculationDispatch_RejectsUnknownEnumsBeforeCoreDispatch(string action, string argsJson)
     {
@@ -138,7 +244,7 @@ public sealed class GeneratedActionContractTests
 
     [Theory]
     [InlineData("calculate", "mode", "manual")]
-    [InlineData("get-mode", "mode", "manual")]
+    [InlineData("get-settings", "mode", "manual")]
     public void CalculationCliRoute_RejectsParametersFromOtherActions(
         string action,
         string parameterName,

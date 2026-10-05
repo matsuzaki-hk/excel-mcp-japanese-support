@@ -46,8 +46,10 @@ ExcelMcp aims to be the go-to command-line tool for coding agents to interact wi
 2. **Make changes**: Code, tests, documentation
 3. **Run the pre-commit hook**: follow the
    [pre-commit setup guide](PRE-COMMIT-SETUP.md), then let it run on every
-   commit. It checks COM cleanup, MCP/CLI parity, the Release build, packaging,
-   smoke tests, and other required gates. Never bypass it with `--no-verify`.
+   commit. Changed paths select the Release build, source-pattern guards,
+   contract tests, and required local Excel checks. The hook never builds or
+   installs distributable packages; PR CI owns package validation.
+   Never bypass it with `--no-verify`.
 4. **Push branch**: `git push origin feature/your-feature`
 5. **Create PR**: Use GitHub's PR template
 6. **Address review**: Investigate human and automated comments, fix verified defects, and explain why an incorrect or inapplicable suggestion was not applied. Do not make unrelated style changes simply because a bot suggested them.
@@ -110,6 +112,9 @@ Report an unavailable configured feed instead.
 
 NuGet publishing commands intentionally name the public publishing destination.
 That `dotnet nuget push --source` setting is not a restore-source override.
+Package-installation smoke checks use an isolated local-only feed to prove they
+installed the just-built artifact, not an existing public package. This does not
+change the user's NuGet configuration or solution restore sources.
 
 ### Code Style
 
@@ -190,7 +195,7 @@ context. Do not replace that context with a second generic error result.
 - **Input validation** - Check file existence and argument validity early
 - **Performance** - reuse sessions and bulk range operations instead of per-cell COM calls
 
-See the [COM pitfalls](../.github/instructions/excel-com-interop.instructions.md)
+See the [COM pitfalls](agents/rules/excel-com-interop.md)
 for application-state, refresh, numeric conversion, and shutdown constraints.
 
 ### Testing
@@ -224,7 +229,29 @@ New operations are added to the **Core** interface/implementation; CLI commands 
 2. **Implement it** in the corresponding partial class (e.g. `SheetCommands.Lifecycle.cs`), following the batch-API pattern above.
 3. **Build the solution** - the source generators (`ExcelMcp.Generators`, `ExcelMcp.Generators.CLI`) produce the CLI verb and MCP tool automatically from the interface.
 4. **Add integration tests** for the new operation (TDD: write them first).
-5. **Update the appropriate `docs/features/*.md` file** with the new operation and its section count. Do not hand-edit repeated headline totals; release automation refreshes those advertised claims from code.
+5. **Update the appropriate `docs/features/*.md` file** with the new operation and its section count. Run `scripts\check-doc-counts.ps1 -Update` and review its generated headline changes; it checks but does not rewrite feature-section totals.
+
+### Capability boundaries
+
+Expand practical Excel desktop automation, not every historical COM member.
+New operations must work reliably through both entry points, be verified in real
+Excel, and not weaken Office security or block on interactive prompts.
+
+| Area | Boundary |
+|------|----------|
+| Printing and dialogs | Use PDF/XPS export for unattended reports; do not add physical printer output, print preview, or blocking dialogs. |
+| Application/workbook events | Add callbacks only when their lifetime and cleanup are deterministic across MCP and CLI calls. |
+| Host UI customization | Exclude deprecated command bars and Ribbon customization unrelated to workbook automation. |
+| Mail and collaboration | Exclude mail APIs requiring Outlook profiles or security prompts, and cloud collaboration not exposed through local Excel COM. |
+| Executable controls and add-ins | Do not add ActiveX creation or code injection, assume optional add-ins are installed, or enable them by changing macro security. Solver remains excluded. |
+| Office security | Never enable VBA trust, lower macro security, bypass Protected View, or change Trust Center settings. |
+| Version-specific APIs | Detect availability and return a clear failure when unavailable. Prove a PIA gap with a compile probe and runtime behavior in Excel before using late binding. |
+
+PIA member presence alone does not prove reliable behavior or persistence.
+Advanced Data Model structural changes need separate real Excel feasibility
+and persistence checks. Distinguish implemented behavior, missing capabilities,
+partial support, and exclusions; an untested draft or unavailable prerequisite
+does not establish support.
 
 ### Tracing a bug or contract change
 
@@ -237,7 +264,7 @@ For changed actions or parameters, compare the Core contract, generated Service
 arguments, CLI options and batch JSON, MCP schema and manual exceptions, tests,
 and shared guidance. Names, defaults, validation, results, and timeout behavior
 must agree. A successful build does not establish that every operation is exposed;
-run the applicable [repository audits](../.github/copilot-instructions.md#build-and-validation).
+run the applicable [repository audits](../AGENTS.md#build-and-validation).
 
 Reproduce the bug in a focused test, observe the failure, fix the owning layer,
 then rerun that test and the smallest related group. Coverage should follow the
@@ -247,17 +274,23 @@ risk, not a fixed number of tests or documentation edits.
 
 Keep entry READMEs focused on their audience: repository acquisition and quick
 start, component installation/use, or Marketplace benefits. Put detailed feature
-behavior in `docs/features/` and shared agent workflows in `skills/shared/`.
+behavior in `docs/features/` and shared agent workflows in `docs/reference/`.
 There is no fixed README length or requirement to edit every README.
 
 Before shortening or moving a page, identify where each substantive caveat,
 example, installation option, and workflow will remain. Update that destination
 first, then replace duplicate material with a link. Permanent guides belong in
-`docs/`, decisions in `docs/ADR-*.md`, and feature requirements in `specs/`.
-Temporary investigations belong in issue/PR discussions, not SUMMARY/FIX files.
+`docs/`; the [decision index](DECISIONS.md) explains when to add or update an
+ADR. Shared agent instructions and native Copilot/Claude Code/Codex discovery
+are covered in [agent development](agents/development.md). Track proposed feature requirements and
+temporary investigations in GitHub issues or PR discussions, not separate
+specification or SUMMARY/FIX files. Core contracts and implementations define
+operation behavior; keep the feature guides and shared guidance aligned with them.
 
 Use current declared action names and verify operation tables and category
-counts. Advertised totals are generated from code during the release.
+counts. After a Release build and explicit skill generation, run
+`scripts\check-doc-counts.ps1 -SkipBuild -Update` and include the reviewed count
+changes in the same PR. CI requires exact agreement.
 See the [website authoring guide](../gh-pages/README.md#publishing-canonical-documentation)
 for source maps, wrappers, navigation, and machine-readable outputs.
 
@@ -269,7 +302,7 @@ for source maps, wrappers, navigation, and machine-readable outputs.
 - [ ] Feature-scoped tests pass (`dotnet test --filter "Feature=<name>&RunType!=OnDemand"`)
 - [ ] Excel processes clean up properly
 - [ ] Added appropriate error handling (no suppressed exceptions)
-- [ ] Updated `docs/features/*.md` if category operations or behaviors changed (release automation refreshes advertised totals)
+- [ ] Updated `docs/features/*.md` and generated advertised counts if operations or behaviors changed
 - [ ] Pre-commit hook passes locally
 
 ### PR Description Template

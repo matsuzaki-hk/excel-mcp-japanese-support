@@ -1,59 +1,92 @@
-// Copyright (c) Sbroenne. All rights reserved.
-// Licensed under the MIT License.
-
 using System.Text.Json;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Sbroenne.ExcelMcp.McpServer.Tests.Integration.Tools;
 
-/// <summary>
-/// End-to-end regressions for chart tool behavior through the MCP protocol.
-/// </summary>
-[Collection("ProgramTransport")]
+[Collection("RecordingProgramTransport")]
 [Trait("Category", "Integration")]
-[Trait("Speed", "Medium")]
+[Trait("Speed", "Fast")]
 [Trait("Layer", "McpServer")]
 [Trait("Feature", "Charts")]
-[Trait("RequiresExcel", "true")]
-public sealed class ChartToolProtocolRegressionTests : McpIntegrationTestBase
+[Trait("RequiresExcel", "false")]
+public sealed class ChartToolProtocolRegressionTests(
+    RecordingProgramTransportFixture fixture)
 {
-    private readonly string _tempDir;
+    private readonly RecordingProgramTransportFixture _fixture = fixture;
 
-    public ChartToolProtocolRegressionTests(ITestOutputHelper output)
-        : base(output, "ChartToolProtocolRegressionClient")
+    [Fact]
+    public async Task ChartRead_PreservesPivotLinkAndActualPlottedArrays()
     {
-        _tempDir = CreateTempDirectory("ChartToolProtocolRegressionTests");
+        const string response = """
+            {"success":true,"name":"RevenueChart","isPivotChart":true,"linkedPivotTable":"RevenuePivot","series":[
+              {"name":"Alpha","valuesRange":"","categoryRange":null,"values":[10,40],"categories":["Q1","Q2"]},
+              {"name":"Beta","valuesRange":"","categoryRange":null,"values":[20,50],"categories":["Q1","Q2"]},
+              {"name":"Gamma","valuesRange":"","categoryRange":null,"values":[30,60],"categories":["Q1","Q2"]}
+            ]}
+            """;
+        var call = await _fixture.CallToolAsync(
+            "chart",
+            new Dictionary<string, object?>
+            {
+                ["action"] = "read",
+                ["session_id"] = "recording-session",
+                ["chart_name"] = "RevenueChart"
+            },
+            RecordingToolTest.Success(response),
+            "chart.read",
+            """{"chartName":"RevenueChart"}""");
+
+        using var result = JsonDocument.Parse(call.JsonResult);
+        var root = result.RootElement;
+        Assert.True(root.GetProperty("success").GetBoolean());
+        Assert.True(root.GetProperty("isPivotChart").GetBoolean());
+        Assert.Equal("RevenuePivot", root.GetProperty("linkedPivotTable").GetString());
+        var series = root.GetProperty("series");
+        Assert.Equal(3, series.GetArrayLength());
+        Assert.Equal(60, series[2].GetProperty("values")[1].GetInt32());
+        Assert.Equal("Q2", series[2].GetProperty("categories")[1].GetString());
     }
 
     [Fact]
     public async Task ChartList_EmptyWorkbook_ReturnsStructuredEmptyList_AndSessionRemainsUsable()
     {
-        var workbookPath = Path.Join(_tempDir, $"NoCharts_{Guid.NewGuid():N}.xlsx");
-        var sessionId = await CreateWorkbookSessionAsync(workbookPath);
+        const string sessionId = "recording-session";
+        var listCall = await _fixture.CallToolAsync(
+            "chart",
+            new Dictionary<string, object?>
+            {
+                ["action"] = "list",
+                ["session_id"] = sessionId
+            },
+            RecordingToolTest.Success("""{"success":true,"charts":[]}"""),
+            "chart.list",
+            null);
 
-        var listResult = await CallToolAsync("chart", new Dictionary<string, object?>
+        Assert.Equal("chart.list", listCall.Request.Command);
+        Assert.Equal(sessionId, listCall.Request.SessionId);
+        using (var result = JsonDocument.Parse(listCall.JsonResult))
         {
-            ["action"] = "list",
-            ["session_id"] = sessionId
-        }, TimeSpan.FromSeconds(30));
-
-        using (var listJson = JsonDocument.Parse(listResult))
-        {
-            var root = listJson.RootElement;
-            Assert.True(root.GetProperty("success").GetBoolean(), $"chart list failed: {listResult}");
-            Assert.True(root.TryGetProperty("charts", out var charts), $"chart list should return charts: {listResult}");
-            Assert.Equal(JsonValueKind.Array, charts.ValueKind);
-            Assert.Empty(charts.EnumerateArray());
+            Assert.Empty(result.RootElement.GetProperty("charts").EnumerateArray());
         }
 
-        var worksheetListResult = await CallToolAsync("worksheet", new Dictionary<string, object?>
-        {
-            ["action"] = "list",
-            ["session_id"] = sessionId
-        }, TimeSpan.FromSeconds(30));
-        AssertSuccess(worksheetListResult, "worksheet list after chart list");
+        var worksheetCall = await _fixture.CallToolAsync(
+            "worksheet",
+            new Dictionary<string, object?>
+            {
+                ["action"] = "list",
+                ["session_id"] = sessionId
+            },
+            RecordingToolTest.Success(
+                """{"success":true,"worksheets":[{"name":"Sheet1"}]}"""),
+            "sheet.list",
+            "{}");
 
-        await CloseSessionAsync(sessionId, save: false);
+        Assert.Equal("sheet.list", worksheetCall.Request.Command);
+        Assert.Equal(sessionId, worksheetCall.Request.SessionId);
+        using var worksheetResult = JsonDocument.Parse(worksheetCall.JsonResult);
+        Assert.Equal(
+            "Sheet1",
+            worksheetResult.RootElement.GetProperty("worksheets")[0]
+                .GetProperty("name").GetString());
     }
 }

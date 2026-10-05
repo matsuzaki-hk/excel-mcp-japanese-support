@@ -99,6 +99,7 @@ public static class ServiceInfoExtractor
                     method.Name,
                     actionName,
                     TypeNameHelper.GetTypeName(method.ReturnType),
+                    method.ReturnType,
                     methodMcpTool ?? category,
                     parameters,
                     xmlDoc?.Summary,
@@ -262,6 +263,20 @@ public static class ServiceInfoExtractor
             paramDescription = desc;
         }
 
+        if (enumTypeSymbol != null)
+        {
+            var acceptedNames = enumTypeSymbol.GetMembers()
+                .OfType<IFieldSymbol>()
+                .Where(field => field.HasConstantValue)
+                .Select(field => field.Name)
+                .Concat(enumAliases.Select(alias => alias.Alias))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+            var acceptedValues = $"Accepted values (case-insensitive): {string.Join(", ", acceptedNames)}.";
+            paramDescription = string.IsNullOrWhiteSpace(paramDescription)
+                ? acceptedValues
+                : $"{paramDescription} {acceptedValues}";
+        }
+
         return new ParameterInfo(
             param.Name,
             TypeNameHelper.GetTypeName(param.Type, param.NullableAnnotation),
@@ -277,7 +292,9 @@ public static class ServiceInfoExtractor
             enumTypeName,
             enumAliases,
             param.IsParams,
-            allowsEmptyString);
+            allowsEmptyString,
+            isJsonObject: param.Type.TypeKind == TypeKind.Class &&
+                          param.Type.SpecialType == SpecialType.None);
     }
 
     private static XmlDocumentation? ExtractXmlDocumentation(IMethodSymbol method)

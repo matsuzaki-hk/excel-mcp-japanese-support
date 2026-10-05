@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.ComInterop;
+using Excel = Microsoft.Office.Interop.Excel;
 
 namespace Sbroenne.ExcelMcp.Core.Commands.Chart;
 
@@ -179,50 +180,31 @@ public class RegularChartStrategy : IChartStrategy
         }
 
         // Get source range
+        dynamic? chartArea = null;
+        dynamic? chartParent = null;
+        dynamic? sourceSeriesCollection = null;
+        dynamic? sourceSeries = null;
         try
         {
-            dynamic sourceData = chart.ChartArea.Parent.SeriesCollection(1).Formula;
-            info.SourceRange = sourceData?.ToString() ?? string.Empty;
+            chartArea = chart.ChartArea;
+            chartParent = chartArea.Parent;
+            sourceSeriesCollection = chartParent.SeriesCollection();
+            sourceSeries = sourceSeriesCollection.Item(1);
+            info.SourceRange = sourceSeries.Formula?.ToString() ?? string.Empty;
         }
         catch (COMException)
         {
             // No source range or no series - optional COM property, safe to ignore
         }
-
-        // Get series
-        dynamic? seriesCollection = null;
-        try
-        {
-            seriesCollection = chart.SeriesCollection();
-            int seriesCount = Convert.ToInt32(seriesCollection.Count);
-
-            for (int i = 1; i <= seriesCount; i++)
-            {
-                dynamic? series = null;
-                try
-                {
-                    series = seriesCollection.Item(i);
-                    var seriesInfo = new SeriesInfo
-                    {
-                        Name = series.Name?.ToString() ?? string.Empty,
-                        ValuesRange = series.Values?.ToString() ?? string.Empty,
-                        CategoryRange = series.XValues?.ToString() ?? string.Empty
-                    };
-                    info.Series.Add(seriesInfo);
-                }
-                finally
-                {
-                    if (series != null)
-                    {
-                        ComUtilities.Release(ref series!);
-                    }
-                }
-            }
-        }
         finally
         {
-            ComUtilities.Release(ref seriesCollection!);
+            ComUtilities.Release(ref sourceSeries);
+            ComUtilities.Release(ref sourceSeriesCollection);
+            ComUtilities.Release(ref chartParent);
+            ComUtilities.Release(ref chartArea);
         }
+
+        info.Series = ChartSeriesReader.Read(chart);
 
         return info;
     }
@@ -230,41 +212,49 @@ public class RegularChartStrategy : IChartStrategy
     /// <inheritdoc />
     public void SetSourceRange(dynamic chart, string sourceRange)
     {
+        dynamic? app = null;
         dynamic? sourceRangeObj = null;
         try
         {
-            // Get workbook from chart
-            dynamic workbook = chart.Parent.Parent.Parent;
-
-            // Get the range object from the address string
-            sourceRangeObj = workbook.Application.Range(sourceRange);
+            app = chart.Application;
+            sourceRangeObj = app.Range(sourceRange);
             chart.SetSourceData(sourceRangeObj);
         }
         finally
         {
-            if (sourceRangeObj != null)
-            {
-                ComUtilities.Release(ref sourceRangeObj!);
-            }
+            ComUtilities.Release(ref sourceRangeObj);
+            ComUtilities.Release(ref app);
         }
     }
 
     /// <inheritdoc />
     public SeriesInfo AddSeries(dynamic chart, string seriesName, string valuesRange, string? categoryRange)
     {
-        dynamic? seriesCollection = null;
-        dynamic? newSeries = null;
+        Excel.ChartObject? chartObject = null;
+        Excel.Worksheet? chartSheet = null;
+        Excel.Range? valuesSource = null;
+        Excel.Range? categorySource = null;
+        Excel.SeriesCollection? seriesCollection = null;
+        Excel.Series? newSeries = null;
 
         try
         {
-            seriesCollection = chart.SeriesCollection();
-            newSeries = seriesCollection.NewSeries();
-            newSeries.Name = seriesName;
-            newSeries.Values = valuesRange;
-
+            chartObject = (Excel.ChartObject)chart.Parent;
+            chartSheet = (Excel.Worksheet)chartObject.Parent;
+            valuesSource = ResolveSeriesRange(chartSheet, valuesRange);
             if (!string.IsNullOrWhiteSpace(categoryRange))
             {
-                newSeries.XValues = categoryRange;
+                categorySource = ResolveSeriesRange(chartSheet, categoryRange);
+            }
+
+            seriesCollection = (Excel.SeriesCollection)chart.SeriesCollection();
+            newSeries = seriesCollection.NewSeries();
+            newSeries.Name = seriesName;
+            newSeries.Values = valuesSource;
+
+            if (categorySource != null)
+            {
+                newSeries.XValues = categorySource;
             }
 
             return new SeriesInfo
@@ -276,14 +266,44 @@ public class RegularChartStrategy : IChartStrategy
         }
         finally
         {
-            if (newSeries != null)
-            {
-                ComUtilities.Release(ref newSeries!);
-            }
-            if (seriesCollection != null)
-            {
-                ComUtilities.Release(ref seriesCollection!);
-            }
+            ComUtilities.Release(ref newSeries);
+            ComUtilities.Release(ref seriesCollection);
+            ComUtilities.Release(ref categorySource);
+            ComUtilities.Release(ref valuesSource);
+            ComUtilities.Release(ref chartSheet);
+            ComUtilities.Release(ref chartObject);
+        }
+    }
+
+    private static Excel.Range ResolveSeriesRange(Excel.Worksheet chartSheet, string reference)
+    {
+        var separator = reference.LastIndexOf('!');
+        if (separator < 0)
+        {
+            return chartSheet.Range[reference];
+        }
+
+        var sheetName = reference[..separator].Trim();
+        if (sheetName.Length >= 2 && sheetName[0] == '\'' && sheetName[^1] == '\'')
+        {
+            sheetName = sheetName[1..^1].Replace("''", "'", StringComparison.Ordinal);
+        }
+
+        Excel.Workbook? book = null;
+        Excel.Sheets? sheets = null;
+        Excel.Worksheet? sourceSheet = null;
+        try
+        {
+            book = (Excel.Workbook)chartSheet.Parent;
+            sheets = book.Worksheets;
+            sourceSheet = (Excel.Worksheet)sheets[sheetName];
+            return sourceSheet.Range[reference[(separator + 1)..]];
+        }
+        finally
+        {
+            ComUtilities.Release(ref sourceSheet);
+            ComUtilities.Release(ref sheets);
+            ComUtilities.Release(ref book);
         }
     }
 
@@ -312,5 +332,3 @@ public class RegularChartStrategy : IChartStrategy
         }
     }
 }
-
-

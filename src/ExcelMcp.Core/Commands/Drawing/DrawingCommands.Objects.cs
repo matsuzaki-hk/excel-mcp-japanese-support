@@ -31,7 +31,8 @@ public sealed partial class DrawingCommands
                     try
                     {
                         shape = shapes.Item(index);
-                        result.DrawingObjects.Add(ReadDrawingObject(shape, sheetName));
+                        ct.ThrowIfCancellationRequested();
+                        result.DrawingObjects.Add(ReadDrawingObject(shape, sheetName, ct));
                     }
                     finally
                     {
@@ -61,9 +62,9 @@ public sealed partial class DrawingCommands
             {
                 sheet = GetSheet(ctx.Book, sheetName);
                 shapes = sheet.Shapes;
-                shape = FindShape(shapes, objectName)
+                shape = FindShape(shapes, objectName, ct)
                     ?? throw new InvalidOperationException($"Drawing object '{objectName}' not found on sheet '{sheetName}'.");
-                return CreateDrawingObjectResult(batch.WorkbookPath, ReadDrawingObject(shape, sheetName));
+                return CreateDrawingObjectResult(batch.WorkbookPath, ReadDrawingObject(shape, sheetName, ct));
             }
             finally
             {
@@ -142,6 +143,7 @@ public sealed partial class DrawingCommands
         double? lineWeight = null)
     {
         ValidateGeometry(width, height);
+        ValidateColors(null, fillColor, lineColor);
         return batch.Execute((ctx, ct) =>
         {
             Excel.Worksheet? sheet = null;
@@ -190,6 +192,7 @@ public sealed partial class DrawingCommands
         string? lineColor = null)
     {
         ValidateGeometry(width, height);
+        ValidateColors(fontColor, fillColor, lineColor);
         return batch.Execute((ctx, ct) =>
         {
             Excel.Worksheet? sheet = null;
@@ -235,6 +238,7 @@ public sealed partial class DrawingCommands
         string? lineColor = null,
         double? lineWeight = null)
     {
+        ValidateColors(null, null, lineColor);
         return batch.Execute((ctx, ct) =>
         {
             Excel.Worksheet? sheet = null;
@@ -282,6 +286,7 @@ public sealed partial class DrawingCommands
         string? inputRange = null)
     {
         ValidateGeometry(width, height);
+        ValidateFormControlBindings(controlType, linkedCell, inputRange);
         return batch.Execute((ctx, ct) =>
         {
             Excel.Worksheet? sheet = null;
@@ -370,6 +375,7 @@ public sealed partial class DrawingCommands
             throw new ArgumentOutOfRangeException(nameof(placement), "Placement must be 1, 2, or 3.");
         }
 
+        ValidateColors(fontColor, fillColor, lineColor);
         return batch.Execute((ctx, ct) =>
         {
             Excel.Worksheet? sheet = null;
@@ -382,6 +388,15 @@ public sealed partial class DrawingCommands
                 shapes = sheet.Shapes;
                 shape = FindShape(shapes, objectName)
                     ?? throw new InvalidOperationException($"Drawing object '{objectName}' not found on sheet '{sheetName}'.");
+
+                if ((linkedCell != null || inputRange != null) && ReadKind(shape) != DrawingObjectKind.FormControl)
+                {
+                    throw new InvalidOperationException("linkedCell and inputRange apply only to worksheet Forms controls.");
+                }
+                if (linkedCell != null || inputRange != null)
+                {
+                    ValidateFormControlBindings((DrawingFormControlType)shape.FormControlType, linkedCell, inputRange);
+                }
 
                 if (newName != null) shape.Name = newName;
                 if (left.HasValue) shape.Left = Convert.ToSingle(left.Value);
@@ -398,11 +413,6 @@ public sealed partial class DrawingCommands
 
                 if (linkedCell != null || inputRange != null)
                 {
-                    if (ReadKind(shape) != DrawingObjectKind.FormControl)
-                    {
-                        throw new InvalidOperationException("linkedCell and inputRange apply only to worksheet Forms controls.");
-                    }
-
                     controlFormat = shape.ControlFormat;
                     if (linkedCell != null) controlFormat.LinkedCell = linkedCell;
                     if (inputRange != null) controlFormat.ListFillRange = inputRange;
@@ -467,10 +477,11 @@ public sealed partial class DrawingCommands
             ?? throw new InvalidOperationException($"Sheet '{sheetName}' not found.");
     }
 
-    private static Excel.Shape? FindShape(Excel.Shapes shapes, string objectName)
+    private static Excel.Shape? FindShape(Excel.Shapes shapes, string objectName, CancellationToken ct = default)
     {
         for (var index = 1; index <= shapes.Count; index++)
         {
+            ct.ThrowIfCancellationRequested();
             Excel.Shape? shape = null;
             try
             {
@@ -491,7 +502,7 @@ public sealed partial class DrawingCommands
         return null;
     }
 
-    private static DrawingObjectInfo ReadDrawingObject(Excel.Shape shape, string sheetName)
+    private static DrawingObjectInfo ReadDrawingObject(Excel.Shape shape, string sheetName, CancellationToken ct = default)
     {
         var kind = ReadKind(shape);
         var result = new DrawingObjectInfo
@@ -504,6 +515,7 @@ public sealed partial class DrawingCommands
             Width = shape.Width,
             Height = shape.Height,
             Rotation = shape.Rotation,
+            ZOrderPosition = shape.ZOrderPosition,
             Visible = ReadVisible(shape),
             Locked = shape.Locked,
             Placement = Convert.ToInt32(shape.Placement, System.Globalization.CultureInfo.InvariantCulture),
@@ -528,7 +540,36 @@ public sealed partial class DrawingCommands
             ReadControlProperties(shape, controlType, result);
         }
 
-        ReadTextProperties(shape, result);
+        if (kind == DrawingObjectKind.Group)
+        {
+            Excel.GroupShapes? members = null;
+            try
+            {
+                members = shape.GroupItems;
+                for (var i = 1; i <= members.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Excel.Shape? child = null;
+                    try
+                    {
+                        child = members.Item(i);
+                        result.Children.Add(ReadDrawingObject(child, sheetName, ct));
+                    }
+                    finally
+                    {
+                        ComUtilities.Release(ref child);
+                    }
+                }
+            }
+            finally
+            {
+                ComUtilities.Release(ref members);
+            }
+        }
+        else
+        {
+            ReadTextProperties(shape, result);
+        }
         return result;
     }
 
@@ -545,6 +586,7 @@ public sealed partial class DrawingCommands
         return shapeType switch
         {
             1 => DrawingObjectKind.AutoShape,
+            6 => DrawingObjectKind.Group,
             8 => DrawingObjectKind.FormControl,
             11 or 13 => DrawingObjectKind.Image,
             17 => DrawingObjectKind.TextBox,
@@ -708,6 +750,19 @@ public sealed partial class DrawingCommands
             DrawingFormControlType.OptionButton or
             DrawingFormControlType.ScrollBar or
             DrawingFormControlType.Spinner;
+    }
+
+    private static void ValidateFormControlBindings(
+        DrawingFormControlType controlType, string? linkedCell, string? inputRange)
+    {
+        if (linkedCell != null && !SupportsLinkedCell(controlType))
+        {
+            throw new InvalidOperationException($"linkedCell is not supported for {controlType} worksheet Forms controls.");
+        }
+        if (inputRange != null && !SupportsInputRange(controlType))
+        {
+            throw new InvalidOperationException($"inputRange is not supported for {controlType} worksheet Forms controls.");
+        }
     }
 
     private static bool SupportsInputRange(DrawingFormControlType controlType)
@@ -881,6 +936,13 @@ public sealed partial class DrawingCommands
         var green = (rgb >> 8) & 0xFF;
         var blue = rgb & 0xFF;
         return red | (green << 8) | (blue << 16);
+    }
+
+    private static void ValidateColors(string? fontColor, string? fillColor, string? lineColor)
+    {
+        if (fontColor != null) _ = ParseColor(fontColor);
+        if (fillColor != null) _ = ParseColor(fillColor);
+        if (lineColor != null) _ = ParseColor(lineColor);
     }
 
     private static string FormatColor(int oleColor)

@@ -14,7 +14,7 @@ namespace Sbroenne.ExcelMcp.Core.Commands.Chart;
 ///
 /// COLLISION DETECTION: All create/move/fit-to-range operations automatically check for overlaps
 /// with data and other charts. Warnings are returned in the result message if collisions are detected.
-/// Always verify layout with screenshot(capture) and an explicit range that includes the chart.
+/// Inspect bounds and warnings; verify visually when an interactive desktop is available.
 ///
 /// CHART TYPES: 70+ types available including Column, Line, Pie, Bar, Area, XY Scatter.
 ///
@@ -27,9 +27,19 @@ namespace Sbroenne.ExcelMcp.Core.Commands.Chart;
 /// </summary>
 [ServiceCategory("chart", "Chart")]
 [McpTool("chart", Title = "Chart Operations", Destructive = true, Category = "analysis",
-    Description = "Chart lifecycle - create, read, move, and delete embedded charts. POSITIONING: targetRange='F2:K15' (PREFERRED, cell-relative) or left/top (points, 72pts=1in) or OMIT BOTH for auto-positioning below content. COLLISION DETECTION: Automatically warns if chart overlaps data or other charts. CHART TYPES: 70+ types (ColumnClustered, Line, Pie, Bar, Area, XYScatter, etc.). CREATE: create-from-range (cell range), create-from-table (Excel Table), create-from-pivottable (verified live PivotChart; fails rather than returning a static chart). Use chart_config for series, titles, legends, and styling.")]
+    Description = "Chart lifecycle - create, read, move, and delete embedded charts. POSITIONING: targetRange='F2:K15' (PREFERRED, cell-relative) or left/top (points, 72pts=1in) or OMIT BOTH for auto-positioning below content. COLLISION DETECTION: Automatically warns if chart overlaps data or other charts. CREATE: create-from-range (cell range), create-from-table (Excel Table), create-from-pivottable (verified live PivotChart; fails rather than returning a static chart). List counts plotted series, not PivotTable value fields. Read returns plotted series names, values, and categories for both regular charts and PivotCharts; value arrays are not cell addresses. Verify PivotChart scope through linkedPivotTable and its fields/filters. Use chart_config for series, titles, legends, and styling.")]
 public interface IChartCommands
 {
+    /// <summary>Exports an embedded regular or PivotChart through Excel's native image filter. Returns success only for a nonempty image; existing files require overwrite.</summary>
+    /// <param name="batch">Excel batch session</param>
+    /// <param name="chartName">Existing embedded chart name</param>
+    /// <param name="targetPath">Output image path in an existing directory; extension must match the requested image format</param>
+    /// <param name="imageFormat">Png (default), Jpeg or Gif; available filters depend on installed Excel</param>
+    /// <param name="overwrite">Explicit permission to replace an existing output image; default false</param>
+    [ServiceAction("export-image")]
+    OperationResult ExportImage(IExcelBatch batch, [RequiredParameter] string chartName,
+        [RequiredParameter] string targetPath, [FromString] ChartImageFormat imageFormat = ChartImageFormat.Png, bool overwrite = false);
+
     // === LIFECYCLE OPERATIONS ===
 
     /// <summary>
@@ -41,7 +51,8 @@ public interface IChartCommands
     ChartListResult List(IExcelBatch batch);
 
     /// <summary>
-    /// Gets complete chart configuration.
+    /// Gets chart configuration and currently plotted series names, values, and categories.
+    /// PivotChart data follows the linked PivotTable's fields and filters.
     /// </summary>
     /// <param name="batch">Excel batch session</param>
     /// <param name="chartName">Name of the chart (or shape name)</param>

@@ -207,9 +207,10 @@ public partial class DataModelCommands
     {
         ValidateMeasureFormatType(formatType);
 
-        string daxToSave = formatDax
+        string formattedDax = formatDax
             ? DaxFormatter.FormatAsync(daxFormula).GetAwaiter().GetResult()
             : daxFormula;
+        string daxToSave = PrepareDaxForExcel(formattedDax, out string? adjustmentMessage);
 
         return ExecuteWithRetry(() =>
         {
@@ -245,12 +246,6 @@ public partial class DataModelCommands
                         throw new InvalidOperationException($"Measure '{measureName}' already exists in the Data Model");
                     }
 
-                    // Translate DAX formula separators from US format (comma) to locale-specific format
-                    // This fixes issues on European locales where semicolon is the list separator
-                    // Example: DATEADD(Date[Date], -1, MONTH) → DATEADD(Date[Date]; -1; MONTH) on German Excel
-                    var daxTranslator = new DaxFormulaTranslator(ctx.App);
-                    string localizedFormula = daxTranslator.TranslateToLocale(daxToSave);
-
                     // Get ModelMeasures collection from MODEL (not from table!)
                     // Reference: https://learn.microsoft.com/en-us/office/vba/api/excel.model.modelmeasures
                     measures = model!.ModelMeasures;
@@ -264,12 +259,8 @@ public partial class DataModelCommands
                     // FIXED: FormatInformation is REQUIRED (not optional as docs state)
                     // See: docs/KNOWN-ISSUES.md for details
                     newMeasure = measures.Add(
-                        measureName,                                        // MeasureName (required)
-                        table!,                                             // AssociatedTable (required)
-                        localizedFormula,                                   // Formula (required) - must be valid DAX and translated for locale
-                        formatObject!,                                      // FormatInformation (required) - NEVER null/Type.Missing
-                        string.IsNullOrEmpty(description) ? Type.Missing : description  // Description (optional)
-                    );
+                        measureName, table!, daxToSave, formatObject!,
+                        string.IsNullOrEmpty(description) ? Type.Missing : description);
                 }
                 finally
                 {
@@ -281,7 +272,7 @@ public partial class DataModelCommands
                     ComUtilities.Release(ref model);
                 }
 
-                return new OperationResult { Success = true, FilePath = batch.WorkbookPath };
+                return new OperationResult { Success = true, FilePath = batch.WorkbookPath, Message = adjustmentMessage };
             });
         });
     }
@@ -294,11 +285,13 @@ public partial class DataModelCommands
         ValidateMeasureFormatType(formatType);
 
         string? daxToSave = null;
+        string? adjustmentMessage = null;
         if (!string.IsNullOrEmpty(daxFormula))
         {
-            daxToSave = formatDax
+            string formattedDax = formatDax
                 ? DaxFormatter.FormatAsync(daxFormula).GetAwaiter().GetResult()
                 : daxFormula;
+            daxToSave = PrepareDaxForExcel(formattedDax, out adjustmentMessage);
         }
 
         return ExecuteWithRetry(() =>
@@ -327,27 +320,24 @@ public partial class DataModelCommands
 
                     var updates = new List<string>();
 
+                    if (!string.IsNullOrEmpty(formatType))
+                    {
+                        formatObject = GetFormatObject(model!, formatType);
+                    }
+
                     // Update formula if provided
                     // Reference: https://learn.microsoft.com/en-us/office/vba/api/excel.modelmeasure (Formula property is Read/Write)
                     if (!string.IsNullOrEmpty(daxToSave))
                     {
-                        // Translate DAX formula separators from US format (comma) to locale-specific format
-                        // This fixes issues on European locales where semicolon is the list separator
-                        var daxTranslator = new DaxFormulaTranslator(ctx.App);
-                        string localizedFormula = daxTranslator.TranslateToLocale(daxToSave);
-                        measure.Formula = localizedFormula;
+                        measure.Formula = daxToSave;
                         updates.Add("Formula updated");
                     }
 
                     // Update format if provided
-                    if (!string.IsNullOrEmpty(formatType))
+                    if (formatObject != null)
                     {
-                        formatObject = GetFormatObject(model!, formatType);
-                        if (formatObject != null)
-                        {
-                            measure.FormatInformation = formatObject;
-                            updates.Add($"Format changed to {formatType}");
-                        }
+                        measure.FormatInformation = formatObject;
+                        updates.Add($"Format changed to {formatType}");
                     }
 
                     // Update description if provided
@@ -371,9 +361,29 @@ public partial class DataModelCommands
                     ComUtilities.Release(ref model);
                 }
 
-                return new OperationResult { Success = true, FilePath = batch.WorkbookPath };
+                return new OperationResult { Success = true, FilePath = batch.WorkbookPath, Message = adjustmentMessage };
             });
         });
+    }
+
+    /// <summary>
+    /// Adds the decimal-comma spacing Excel's measure formula property needs (#978).
+    /// </summary>
+    private static string PrepareDaxForExcel(string dax, out string? adjustmentMessage)
+    {
+        adjustmentMessage = null;
+        if (!DaxNumericCommaSpacer.IsNeededOnThisComputer())
+        {
+            return dax;
+        }
+
+        string spaced = DaxNumericCommaSpacer.AddSpaces(dax);
+        if (!string.Equals(spaced, dax, StringComparison.Ordinal))
+        {
+            adjustmentMessage = DaxNumericCommaSpacer.AdjustmentMessage;
+        }
+
+        return spaced;
     }
 
     /// <inheritdoc />

@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sbroenne.ExcelMcp.CLI.Infrastructure;
+using Sbroenne.ExcelMcp.CLI.Telemetry;
 using Sbroenne.ExcelMcp.Generated;
 using Sbroenne.ExcelMcp.Service;
 using Spectre.Console.Cli;
@@ -70,13 +72,19 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
             var argsJson = cmd.Args.HasValue && cmd.Args.Value.ValueKind != JsonValueKind.Undefined
                 ? cmd.Args.Value.GetRawText()
                 : null;
+            var validationStopwatch = Stopwatch.StartNew();
             try
             {
                 ServiceRegistry.ValidateCommandArguments(cmd.Command, argsJson);
             }
             catch (Exception ex) when (ex is ArgumentException or JsonException or IOException or UnauthorizedAccessException)
             {
+                validationStopwatch.Stop();
                 validationErrors[i] = ex.Message;
+                CliTelemetry.TrackLocalFailure(
+                    cmd.Command,
+                    validationStopwatch.ElapsedMilliseconds,
+                    "InvalidInput");
             }
         }
 
@@ -95,7 +103,7 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
         }
 
         // Connect to daemon (auto-starts if needed)
-        using var client = await DaemonAutoStart.EnsureAndConnectAsync(cancellationToken);
+        using var client = await CliCommandRuntime.Current.ClientFactory.ConnectAsync(cancellationToken);
 
         string? activeSession = settings.SessionId;
         bool hasErrors = false;
@@ -131,7 +139,9 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
             ServiceResponse response;
             try
             {
-                response = await client.SendAsync(request, cancellationToken);
+                response = await CliTelemetry.TrackCommandAsync(
+                    request,
+                    () => client.SendAsync(request, cancellationToken));
             }
             catch (Exception ex)
             {
@@ -164,7 +174,7 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
                 Error = response.ErrorMessage
             };
 
-            Console.WriteLine(JsonSerializer.Serialize(output, BatchJsonOptions));
+            CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(output, BatchJsonOptions));
 
             if (!response.Success)
             {
@@ -178,7 +188,7 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
 
     private static void WriteValidationError(int index, string command, string error)
     {
-        Console.WriteLine(JsonSerializer.Serialize(new BatchResult
+        CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(new BatchResult
         {
             Index = index,
             Command = command,
@@ -198,7 +208,7 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
         if (string.IsNullOrEmpty(inputFile) || inputFile == "-")
         {
             // Read from stdin
-            content = await Console.In.ReadToEndAsync(cancellationToken);
+            content = await CliCommandRuntime.Current.Input.ReadToEndAsync(cancellationToken);
         }
         else
         {
@@ -286,7 +296,8 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
 
     private static void WriteError(string message)
     {
-        Console.Error.WriteLine(JsonSerializer.Serialize(new { success = false, error = message }, ServiceProtocol.JsonOptions));
+        CliCommandRuntime.Current.Error.WriteLine(
+            JsonSerializer.Serialize(new { success = false, error = message }, ServiceProtocol.JsonOptions));
     }
 
     // JSON options for batch I/O — camelCase, skip nulls for clean output

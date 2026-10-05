@@ -7,9 +7,8 @@
     source-owned root overlay content, writes the canonical marketplace manifest to
     .github/plugin/marketplace.json, and removes the legacy root marketplace.json.
 
-    The published repo is wrapper/bootstrap-only. Self-contained Windows runtimes
-    remain in the main repo GitHub Releases and are acquired by plugin-local
-    bootstrap logic on first invocation.
+    The published repo contains npx launch configuration, an argument-safe CLI
+    wrapper, and skills. Self-contained Windows runtimes remain outside the plugin.
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -29,6 +28,15 @@ $RootOverlayDir = Join-Path $RepoRoot ".github\plugins\marketplace-repo"
 $PublishedRepoDir = (Resolve-Path $PublishedRepoDir).Path
 $BuiltPluginsDir = (Resolve-Path $BuiltPluginsDir).Path
 $AgentPluginSchema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+. (Join-Path $PSScriptRoot 'PackageHelpers.ps1')
+Assert-PackageOutputPath -Path $PublishedRepoDir -RepoRoot $RepoRoot -Inputs @($BuiltPluginsDir)
+if (-not (Test-Path -LiteralPath $RootOverlayDir -PathType Container)) { throw "Published-repository overlay is missing: $RootOverlayDir" }
+foreach ($tree in @($PublishedRepoDir, $BuiltPluginsDir, $RootOverlayDir)) {
+    if (((Get-Item -LiteralPath $tree -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        @(Get-ChildItem -LiteralPath $tree -Recurse -Force | Where-Object {
+        $_.Attributes -band [IO.FileAttributes]::ReparsePoint
+    }).Count) { throw "Publication paths must not contain links: $tree" }
+}
 
 function Copy-DirectoryFiles {
     param(
@@ -143,9 +151,29 @@ foreach ($pluginName in $builtPluginNames) {
         throw "$pluginJsonPath resolved version '$($pluginJson.version)' but expected '$Version'."
     }
 
-    $legacyCopilotHelper = Join-Path $sourcePluginDir "bin\install-global.ps1"
-    if (Test-Path $legacyCopilotHelper) {
-        throw "Copilot-only files must be placed under com.github.copilot/: $legacyCopilotHelper"
+    $requiredFiles = @(
+        'README.md',
+        'version.txt',
+        "skills\$pluginName-report-formatting\SKILL.md",
+        "skills\$pluginName-report-formatting\VERSION",
+        "skills\$pluginName-report-formatting\references\report-formatting.md"
+    )
+    if ($pluginName -eq 'excel-cli') {
+        $requiredFiles += 'bin\start-cli.ps1'
+    } else {
+        $requiredFiles += 'mcp.json'
+    }
+    foreach ($required in $requiredFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $sourcePluginDir $required) -PathType Leaf)) {
+            throw "Incomplete plugin payload: $pluginName is missing $required."
+        }
+    }
+    $skillVersion = (Get-Content -LiteralPath (Join-Path $sourcePluginDir "skills\$pluginName-report-formatting\VERSION") -Raw).Trim()
+    if ($skillVersion -ne $Version) { throw "Prepared $pluginName skill version must match $Version." }
+
+    $globalHelpers = @(Get-ChildItem -LiteralPath $sourcePluginDir -Recurse -Force -File -Filter "install-global.ps1")
+    if ($globalHelpers.Count) {
+        throw "Global installation helpers are retired; use npx instead: $($globalHelpers.FullName -join ', ')"
     }
 
     $legacyMcpPath = Join-Path $sourcePluginDir ".mcp.json"
@@ -184,11 +212,8 @@ foreach ($pluginName in $builtPluginNames) {
     $sourcePluginDir = Join-Path $BuiltPluginsDir $pluginName
     $destinationPluginDir = Join-Path $PublishedRepoDir "plugins\$pluginName"
 
-    if (Test-Path $destinationPluginDir) {
-        Remove-Item -Path $destinationPluginDir -Recurse -Force
-    }
-
-    Copy-Item -Path $sourcePluginDir -Destination $destinationPluginDir -Recurse -Force
+    New-Item -ItemType Directory -Path (Split-Path $destinationPluginDir -Parent) -Force | Out-Null
+    Install-PackageOutput -Source $sourcePluginDir -Destination $destinationPluginDir
 }
 
 $canonicalManifestPath = Join-Path $PublishedRepoDir ".github\plugin\marketplace.json"
@@ -209,6 +234,36 @@ $canonicalManifest = [ordered]@{
 
 Write-Host "Writing canonical marketplace manifest..." -ForegroundColor Cyan
 Write-Utf8NoBomJson -Path $canonicalManifestPath -Object $canonicalManifest
+
+# Claude Code reads .claude-plugin/marketplace.json. Plugin directories carry no
+# .claude-plugin/plugin.json, so each entry is the manifest and declares the MCP server inline.
+$claudeEntries = @(foreach ($entry in $pluginMetadata) {
+    $claudeEntry = [ordered]@{
+        name = $entry.name
+        source = $entry.source
+        description = $entry.description
+        version = $entry.version
+        author = $entry.author
+        homepage = $entry.homepage
+        repository = $entry.repository
+        license = $entry.license
+        keywords = $entry.keywords
+    }
+    $mcpConfigPath = Join-Path $BuiltPluginsDir "$($entry.name)\mcp.json"
+    if (Test-Path -LiteralPath $mcpConfigPath -PathType Leaf) {
+        $claudeEntry.mcpServers = (Get-Content -LiteralPath $mcpConfigPath -Raw | ConvertFrom-Json).mcpServers
+    }
+    $claudeEntry
+})
+$claudeManifest = [ordered]@{
+    name = "mcp-server-excel-plugins"
+    description = "Windows-only Claude Code plugins for Excel automation with ExcelMcp."
+    owner = $canonicalManifest.owner
+    plugins = $claudeEntries
+}
+
+Write-Host "Writing Claude Code marketplace manifest..." -ForegroundColor Cyan
+Write-Utf8NoBomJson -Path (Join-Path $PublishedRepoDir ".claude-plugin\marketplace.json") -Object $claudeManifest
 
 if (Test-Path $legacyManifestPath) {
     Write-Host "Removing legacy root marketplace manifest..." -ForegroundColor Cyan

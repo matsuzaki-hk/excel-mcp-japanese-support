@@ -10,6 +10,15 @@ hide:
   - toc
 ---
 
+## Get started with Excel MCP Server or CLI
+
+ExcelMcp requires Windows and installed desktop Microsoft Excel. Choose the
+setup instructions for your assistant or command-line workflow:
+
+- [Set up Excel in GitHub Copilot for VS Code](installation-mcp-server.md#vs-code-extension-easiest-one-click-setup)
+- [Connect Claude Desktop to Excel](guides/claude-desktop.md)
+- [Install excelcli for coding agents and scripts](installation-cli.md)
+
 !!! success "Powered by the real Excel engine"
     Excel MCP Server automates the **actual Excel application** through its
     official COM API — the same engine Excel itself uses. That unlocks what
@@ -19,9 +28,9 @@ hide:
       fresh data, recalculate with Excel's own engine, refresh PivotTables and
       the Data Model, evaluate DAX, and run VBA or Python `=PY()` — the real,
       *computed results* land right in your workbook.
-    - **Edits your existing files safely.** Excel opens and saves the workbook
-      itself, so every formula, PivotTable, chart, macro, the Data Model and all
-      your formatting stay exactly as they were.
+    - **Excel opens and saves your workbook.** Excel opens and saves your
+      workbook itself, rather than a file-parser library rewriting it. Requested
+      edits can still change the workbook's data, formatting, or features.
 
     Other tools (openpyxl-based MCP servers and Agent Skills, including
     Anthropic's `xlsx` skill) read and rewrite the `.xlsx` file directly — which
@@ -54,6 +63,19 @@ hide:
 }
 </script>
 
+## See what AI can build in Excel
+
+**AI-Built Excel Dashboards | ExcelMCP in Action** shows a working workbook
+created by GPT-6 Astra through ExcelMCP. Excel runs the connected data,
+calculations and interactive dashboards.
+
+<div class="mcp-video" markdown>
+[![Watch AI-Built Excel Dashboards: built by AI, run by Excel](https://img.youtube.com/vi/47HJPZbcta4/maxresdefault.jpg){ width="1920" height="1080" loading="lazy" }](https://youtu.be/47HJPZbcta4)
+
+[Watch the dashboard demo (2:33)](https://youtu.be/47HJPZbcta4){ .md-button .md-button--primary }
+[Get the workbook and ask your agent to adapt it](samples/world-in-motion.md){ .md-button }
+</div>
+
 !!! tip "Also building PowerPoint decks?"
     Check out [PowerPoint MCP Server](https://powerpointmcpserver.dev/) — the
     sister project, built the same way.
@@ -73,19 +95,25 @@ hide:
     Create, edit and optimize M code. Import from files, databases and APIs.
     Refresh queries and manage load destinations.
 
+    [Refresh Power Query with an AI assistant :material-arrow-right:](guides/refresh-power-query.md)
+
 -   :material-calculator-variant:{ .lg .middle } __Power Pivot &amp; DAX__
 
     ---
 
-    Build Data Models, create DAX measures and manage table relationships.
-    Full Power Pivot automation.
+    Build Data Models, create DAX measures and manage table relationships
+    through Excel's supported automation.
+
+    [Query the Excel Data Model with DAX :material-arrow-right:](guides/query-data-model-with-dax.md)
 
 -   :material-chart-box:{ .lg .middle } __PivotTables &amp; charts__
 
     ---
 
     Create PivotTables from ranges, tables or the Data Model. Build charts and
-    PivotCharts with full formatting control.
+    PivotCharts with supported formatting controls.
+
+    [Automate Excel PivotTables :material-arrow-right:](guides/automate-pivottables.md)
 
 -   :material-table:{ .lg .middle } __Tables &amp; ranges__
 
@@ -94,6 +122,8 @@ hide:
     Read/write data, formulas and formatting. Filter, sort and validate. Manage
     Excel Tables with structured references.
 
+    [Read, write, and format Excel ranges :material-arrow-right:](reference/range.md)
+
 -   :material-code-braces:{ .lg .middle } __VBA macros__
 
     ---
@@ -101,12 +131,16 @@ hide:
     View, import, update and execute VBA code. Export modules for version
     control.
 
+    [Run Excel VBA macros with an AI agent :material-arrow-right:](guides/run-vba-macros.md)
+
 -   :material-file-table-box-multiple:{ .lg .middle } __Worksheets &amp; connections__
 
     ---
 
     Manage sheets, named ranges and data connections. Copy and move sheets
     between workbooks.
+
+    [Manage Excel worksheets :material-arrow-right:](reference/worksheet.md)
 
 -   :material-eye-outline:{ .lg .middle } __Agent mode__
 
@@ -116,6 +150,8 @@ hide:
     feedback and smart window arrangement, like a pair programmer in a
     spreadsheet.
 
+    [Watch an AI agent work in Excel :material-arrow-right:](reference/agent-mode.md)
+
 -   :fontawesome-brands-python:{ .lg .middle } __Python in Excel__
 
     ---
@@ -123,16 +159,19 @@ hide:
     Write and run `=PY()` formulas that execute in Excel's cloud Python engine —
     process worksheet data with pandas, NumPy and more, from your AI assistant.
 
--   :material-test-tube:{ .lg .middle } __LLM-tested quality__
+    [Python in Excel requirements and limits :material-arrow-right:](features/automation-advanced.md#python-in-excel)
+
+-   :material-test-tube:{ .lg .middle } __Agent workflow checks__
 
     ---
 
-    Tool behavior validated with real LLM workflows, so AI assistants reliably
-    understand and use every operation.
+    Selected MCP and CLI workflows are checked with real agents and independent
+    workbook inspection. Skill-value comparisons measure whether guidance helps;
+    they do not guarantee every agent can use every operation.
 
 </div>
 
-[See all 31 tools and 326 operations :material-arrow-right:](features.md){ .md-button .md-button--primary }
+[Explore capabilities across 31 tools and 387 operations :material-arrow-right:](features.md){ .md-button .md-button--primary }
 
 ## Popular guides
 
@@ -187,6 +226,14 @@ features like **Python in Excel** work too — your AI assistant can write
   ![Close-up of the Excel ribbon Python group and the formula bar showing a =PY() formula that uses pandas to sum a table column](assets/images/excel-demo-python.png){ width="1360" height="392" loading=lazy }
   <figcaption>The formula bar with a <code>=PY()</code> formula (note the green <strong>PY</strong> badge) and Excel's <strong>Python</strong> ribbon group — summing the <code>SalesData</code> table with <code>pandas</code>, driven from your AI assistant.</figcaption>
 </figure>
+
+!!! info "Local Excel and your data"
+    Excel runs on your Windows desktop. Requested workbook results are returned
+    to your AI assistant, whose privacy policy applies. Release builds can send
+    anonymous usage statistics, but those statistics exclude workbook contents,
+    file names, and paths. Optional remote M/DAX formatting and Python in Excel
+    use external services only when you request those features.
+    [Read the privacy policy](privacy.md).
 
 ## CLI or MCP Server?
 

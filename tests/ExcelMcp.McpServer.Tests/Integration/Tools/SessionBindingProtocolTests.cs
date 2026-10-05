@@ -1,7 +1,5 @@
 using System.IO.Pipelines;
 using System.Text.Json;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Client;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
@@ -76,7 +74,7 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
     [Theory]
     [InlineData("range", "get-used-range", true)]
     [InlineData("workbook", "get-info", true)]
-    [InlineData("calculation_mode", "get-mode", true)]
+    [InlineData("calculation_mode", "get-settings", true)]
     [InlineData("powerquery", "list", true)]
     [InlineData("file", "close", false)]
     [InlineData("worksheet", "list", false)]
@@ -85,7 +83,7 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
         var tools = await Client!.ListToolsAsync(cancellationToken: TestCancellationToken);
         var schema = Assert.Single(tools, tool => tool.Name == toolName).JsonSchema;
         var properties = schema.GetProperty("properties");
-        Assert.Equal("string", properties.GetProperty("session_id").GetProperty("type").GetString());
+        Assert.True(properties.TryGetProperty("session_id", out _));
         Assert.False(properties.TryGetProperty("sessionId", out _));
         Assert.Equal(required, schema.GetProperty("required").EnumerateArray()
             .Any(property => property.GetString() == "session_id"));
@@ -108,7 +106,7 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
     [Theory]
     [InlineData("range", "get-used-range")]
     [InlineData("workbook", "get-info")]
-    [InlineData("calculation_mode", "get-mode")]
+    [InlineData("calculation_mode", "get-settings")]
     [InlineData("powerquery", "list")]
     [InlineData("file", "close")]
     [InlineData("worksheet", "list")]
@@ -152,7 +150,7 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
     [Theory]
     [InlineData("range", "get-used-range")]
     [InlineData("workbook", "get-info")]
-    [InlineData("calculation_mode", "get-mode")]
+    [InlineData("calculation_mode", "get-settings")]
     [InlineData("powerquery", "list")]
     [InlineData("file", "close")]
     [InlineData("worksheet", "list")]
@@ -161,7 +159,7 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
     [InlineData("worksheet", "delete")]
     [InlineData("worksheet", "move")]
     [InlineData("worksheet", "copy")]
-    public async Task CamelCaseSessionIdAlias_ReachesSessionLookup(string toolName, string action)
+    public async Task CamelCaseSessionId_IsRejectedBeforeSessionLookup(string toolName, string action)
     {
         var arguments = SessionArguments(toolName, action);
         arguments["sessionId"] = "synthetic-unknown-session";
@@ -170,15 +168,15 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
         using var document = ParseJsonResult(json, $"{toolName}.{action}");
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         var error = document.RootElement.GetProperty("errorMessage").GetString();
-        Assert.Contains("not found", error, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("required", error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("session_id", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("not found", error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
     [InlineData("workbook", "get-info")]
     [InlineData("file", "close")]
     [InlineData("worksheet", "list")]
-    public async Task EqualCanonicalAndAliasSessionIds_ReachSessionLookup(string toolName, string action)
+    public async Task EqualCanonicalAndLegacySessionIds_ReturnStructuredInputError(string toolName, string action)
     {
         var arguments = SessionArguments(toolName, action);
         arguments["session_id"] = "synthetic-unknown-session";
@@ -187,8 +185,11 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
         var json = await CallToolAsync(toolName, arguments, TimeSpan.FromSeconds(30));
         using var document = ParseJsonResult(json, $"{toolName}.{action}");
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-        Assert.Contains("not found", document.RootElement.GetProperty("errorMessage").GetString(),
-            StringComparison.OrdinalIgnoreCase);
+        AssertFailureEnvelope(document.RootElement, $"{toolName}.{action}",
+            nameof(ArgumentException), expectedErrorCategory: "InvalidInput");
+        Assert.Contains("session_id", document.RootElement.GetProperty("errorMessage").GetString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-unknown-session", json, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -267,41 +268,6 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
         Assert.Contains("session_id", text, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void AliasObservation_WritesPrivacySafeWarningOnlyToStandardError()
-    {
-        using var stdout = new StringWriter();
-        using var stderr = new StringWriter();
-        var originalOut = Console.Out;
-        var originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(stdout);
-            Console.SetError(stderr);
-
-            var services = new ServiceCollection();
-            services.AddLogging(Program.ConfigureStdioLogging);
-            using var provider = services.BuildServiceProvider();
-            var logger = provider
-                .GetRequiredService<ILoggerFactory>()
-                .CreateLogger("SessionIdentityFilterTest");
-
-            SessionIdentityFilter.WriteAliasWarning(logger, "workbook", "get-info");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-
-        Assert.Empty(stdout.ToString());
-        Assert.Contains("Compatibility sessionId alias observed", stderr.ToString(),
-            StringComparison.Ordinal);
-        Assert.Contains("workbook/get-info", stderr.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("synthetic-private-value", stderr.ToString(), StringComparison.Ordinal);
-    }
-
     [Theory]
     [InlineData("open")]
     [InlineData("create")]
@@ -321,8 +287,8 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
         using var aliasDocument = ParseJsonResult(json, action);
         Assert.False(aliasDocument.RootElement.GetProperty("success").GetBoolean());
         error = aliasDocument.RootElement.GetProperty("errorMessage").GetString();
-        Assert.Contains("path", error, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("session", error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("sessionId", error, StringComparison.Ordinal);
+        Assert.Contains("not a valid MCP parameter", error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -337,8 +303,8 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
         aliasArguments["sessionId"] = "synthetic-optional-alias";
         json = await CallToolAsync("file", aliasArguments, TimeSpan.FromSeconds(30));
         using var aliasDocument = ParseJsonResult(json, "file.list");
-        Assert.True(aliasDocument.RootElement.GetProperty("success").GetBoolean());
-        Assert.Empty(aliasDocument.RootElement.GetProperty("sessions").EnumerateArray());
+        Assert.False(aliasDocument.RootElement.GetProperty("success").GetBoolean());
+        Assert.Contains("sessionId", aliasDocument.RootElement.GetProperty("errorMessage").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -362,21 +328,24 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
     [InlineData("file", "synthetic-unknown-action")]
     [InlineData("worksheet", null)]
     [InlineData("worksheet", "synthetic-unknown-action")]
-    public async Task InvalidActionWithoutSessionId_PreservesSdkError(string toolName, string? action)
+    public async Task InvalidActionWithoutSessionId_ReturnsSafeActionGuidance(string toolName, string? action)
     {
         var arguments = action is null ? new Dictionary<string, object?>() : Arguments(action);
         var response = await Client!.CallToolAsync(toolName, arguments,
             cancellationToken: TestCancellationToken);
         Assert.True(response.IsError);
         var text = Assert.Single(response.Content.OfType<TextContentBlock>()).Text;
-        Assert.Equal($"An error occurred invoking '{toolName}'.", text);
+        using var document = ParseJsonResult(text, toolName);
+        AssertFailureEnvelope(document.RootElement, toolName,
+            nameof(ArgumentException), expectedErrorCategory: "InvalidInput");
+        Assert.Contains("action", text, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("workbook")]
     [InlineData("file")]
     [InlineData("worksheet")]
-    public async Task InvalidActionWithAlias_PreservesSdkError(string toolName)
+    public async Task InvalidActionWithAlias_ReturnsSafeActionGuidance(string toolName)
     {
         var arguments = Arguments("synthetic-unknown-action");
         arguments["sessionId"] = "synthetic-private-value";
@@ -384,7 +353,10 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
             cancellationToken: TestCancellationToken);
         Assert.True(response.IsError);
         var text = Assert.Single(response.Content.OfType<TextContentBlock>()).Text;
-        Assert.Equal($"An error occurred invoking '{toolName}'.", text);
+        using var document = ParseJsonResult(text, toolName);
+        AssertFailureEnvelope(document.RootElement, toolName,
+            nameof(ArgumentException), expectedErrorCategory: "InvalidInput");
+        Assert.Contains("action", text, StringComparison.Ordinal);
         Assert.DoesNotContain("synthetic-private-value", text, StringComparison.Ordinal);
     }
 
@@ -430,15 +402,18 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
     [InlineData("create")]
     [InlineData("list")]
     [InlineData("test")]
-    public async Task FileOptionalIdentity_MalformedValuePreservesSdkError(string action)
+    public async Task FileOptionalIdentity_RejectsUnusedParameter(string action)
     {
         var arguments = Arguments(action);
         arguments["session_id"] = 42;
         var response = await Client!.CallToolAsync("file", arguments,
             cancellationToken: TestCancellationToken);
         Assert.True(response.IsError);
-        Assert.Equal("An error occurred invoking 'file'.",
-            Assert.Single(response.Content.OfType<TextContentBlock>()).Text);
+        var text = Assert.Single(response.Content.OfType<TextContentBlock>()).Text;
+        using var document = ParseJsonResult(text, "file");
+        AssertFailureEnvelope(document.RootElement, "file",
+            nameof(ArgumentException), expectedErrorCategory: "InvalidInput");
+        Assert.Contains("session_id", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -516,7 +491,7 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
     [Theory]
     [InlineData("copy-to-file")]
     [InlineData("move-to-file")]
-    public async Task WorksheetFileActions_PreserveOptionalIdentity(string action)
+    public async Task WorksheetFileActions_RejectUnusedIdentity(string action)
     {
         var json = await CallToolAsync("worksheet", Arguments(action), TimeSpan.FromSeconds(30));
         using var document = ParseJsonResult(json, $"worksheet.{action}");
@@ -530,8 +505,8 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
         var response = await Client!.CallToolAsync("worksheet", arguments,
             cancellationToken: TestCancellationToken);
         Assert.True(response.IsError);
-        Assert.Equal("An error occurred invoking 'worksheet'.",
-            Assert.Single(response.Content.OfType<TextContentBlock>()).Text);
+        Assert.Contains("session_id",
+            Assert.Single(response.Content.OfType<TextContentBlock>()).Text, StringComparison.Ordinal);
 
         arguments = Arguments(action);
         arguments["sessionId"] = "synthetic-optional-alias";
@@ -541,8 +516,8 @@ public sealed class SessionBindingProtocolTests : IAsyncLifetime, IAsyncDisposab
         using var aliasDocument = ParseJsonResult(text, $"worksheet.{action}");
         AssertFailureEnvelope(aliasDocument.RootElement, $"worksheet.{action}",
             nameof(ArgumentException), expectedErrorCategory: "InvalidInput");
-        Assert.Contains("sourceFile", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("session", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("session_id", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-optional-alias", text, StringComparison.Ordinal);
     }
 
     private static Dictionary<string, object?> SessionArguments(string toolName, string action)

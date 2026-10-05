@@ -17,7 +17,7 @@ use_directory_urls: true
 # hooks.py mirrors canonical Markdown from all over the repo into the site, but
 # MkDocs only watches docs_dir, mkdocs.yml and the hooks themselves. Without
 # these entries `mkdocs serve` silently ignores edits to the real sources, so a
-# local preview of a FEATURES.md or skills/shared/ change showed nothing.
+# local preview of a FEATURES.md or docs/reference/ change showed nothing.
 watch:
   - ../FEATURES.md
   - ../CHANGELOG.md
@@ -27,6 +27,8 @@ watch:
   - ../skills
   - ../src/ExcelMcp.CLI/README.md
   - ../src/ExcelMcp.McpServer/README.md
+  - ../samples/world-bank-dashboard
+  - ../videos/world-in-motion-demo/capture/assets
 
 # Raw generated includes live in gh-pages/_generated/ (outside docs_dir, so
 # `mkdocs serve` does not retrigger itself) and are pulled into the thin wrapper
@@ -104,6 +106,7 @@ nav:
     - Query the Data Model with DAX: guides/query-data-model-with-dax.md
     - Run VBA macros: guides/run-vba-macros.md
     - COM vs. file parsers: guides/excel-automation-vs-file-parsers.md
+    - Claude Desktop setup: guides/claude-desktop.md
   - Features:
     - Overview: features.md
     - Data & analytics: features/data-analytics.md
@@ -116,7 +119,7 @@ nav:
     - CLI: installation-cli.md
   - MCP Server: mcp-server.md
   - CLI: cli.md
-  - Reference:
+  - Workflow guidance:
     - Overview: reference/index.md
     - Working with agents:
       - Key constraints & sequencing: reference/workflows.md
@@ -130,6 +133,7 @@ nav:
       - Ranges & formatting: reference/range.md
       - Excel Tables: reference/table.md
       - Window management: reference/window.md
+      - Calculation modes: reference/calculation.md
     - Data & the model:
       - Power Query: reference/powerquery.md
       - M code syntax: reference/m-code-syntax.md
@@ -145,8 +149,10 @@ nav:
       - Slicers: reference/slicer.md
       - Drawing objects: reference/drawing.md
       - Screenshots: reference/screenshot.md
-      - Dashboards & reports: reference/dashboard.md
+      - Optional report formatting: reference/report-formatting.md
+      - Dashboard guidance links: reference/dashboard.md
   - Resources:
+    - Downloadable dashboard: samples/world-in-motion.md
     - Usage analytics: usage-analytics.md
     - Examples & use cases: use-cases.md
     - Agent Skills: skills.md

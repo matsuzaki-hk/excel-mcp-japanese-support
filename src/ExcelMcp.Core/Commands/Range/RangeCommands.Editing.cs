@@ -36,24 +36,12 @@ public partial class RangeCommands
     // === COPY OPERATIONS ===
 
     /// <inheritdoc />
-    public OperationResult Copy(IExcelBatch batch, string sourceSheet, string sourceRange, string targetSheet, string targetRange)
+    public RangeCopyResult Copy(IExcelBatch batch, string sourceSheet, string sourceRange,
+        string targetSheet, string targetRange, PasteKind pasteKind, bool transpose = false,
+        bool skipBlanks = false, OverwritePolicy overwritePolicy = OverwritePolicy.RejectNonempty)
     {
-        return CopyRange(batch, sourceSheet, sourceRange, targetSheet, targetRange, "copy",
-            (src, tgt) => src.Copy(tgt));
-    }
-
-    /// <inheritdoc />
-    public OperationResult CopyValues(IExcelBatch batch, string sourceSheet, string sourceRange, string targetSheet, string targetRange)
-    {
-        return CopyRange(batch, sourceSheet, sourceRange, targetSheet, targetRange, "copy-values",
-            (src, tgt) => { src.Copy(); tgt.PasteSpecial(-4163); }); // xlPasteValues
-    }
-
-    /// <inheritdoc />
-    public OperationResult CopyFormulas(IExcelBatch batch, string sourceSheet, string sourceRange, string targetSheet, string targetRange)
-    {
-        return CopyRange(batch, sourceSheet, sourceRange, targetSheet, targetRange, "copy-formulas",
-            (src, tgt) => { src.Copy(); tgt.PasteSpecial(-4123); }); // xlPasteFormulas
+        return CopyRange(batch, sourceSheet, sourceRange, targetSheet, targetRange,
+            pasteKind, transpose, skipBlanks, overwritePolicy);
     }
 
     // === INSERT/DELETE OPERATIONS ===
@@ -145,6 +133,4 @@ public partial class RangeCommands
     // === FIND/REPLACE OPERATIONS ===
 
 }
-
-
 

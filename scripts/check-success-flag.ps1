@@ -15,7 +15,7 @@
     .\check-success-flag.ps1
     
 .NOTES
-    Part of pre-commit validation. See CRITICAL-RULES.md Rule 0.
+    Part of pre-commit validation. See the success/error rule in AGENTS.md.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -26,9 +26,11 @@ Write-Host ""
 
 $violations = @()
 
-# Scan all Core Commands files
-Get-ChildItem -Path "$rootDir\src\ExcelMcp.Core\Commands" -Filter "*.cs" -Recurse | ForEach-Object {
-    $lines = Get-Content $_.FullName
+$files = @(Get-ChildItem -LiteralPath "$rootDir\src\ExcelMcp.Core\Commands" -File -Filter "*.cs" -Recurse |
+    Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' -and $_.Name -notmatch '\.g\.cs$' })
+if ($files.Count -eq 0) { throw 'No command source files found for the success flag pattern guard.' }
+$files | ForEach-Object {
+    $lines = @(Get-Content -LiteralPath $_.FullName)
     
     for ($i = 0; $i -lt $lines.Count; $i++) {
         # Look for Success = true
@@ -77,7 +79,7 @@ Get-ChildItem -Path "$rootDir\src\ExcelMcp.Core\Commands" -Filter "*.cs" -Recurs
 
 # Report results
 if ($violations.Count -eq 0) {
-    Write-Host "No violations found - all Success flags match reality!" -ForegroundColor Green
+    Write-Host "No nearby conflicting Success/ErrorMessage assignments found; this pattern check is not control-flow analysis." -ForegroundColor Green
     exit 0
 }
 
@@ -97,8 +99,8 @@ foreach ($v in $violations) {
 Write-Host "Action Required:" -ForegroundColor Yellow
 Write-Host "  1. In each catch block, add: result.Success = false;" -ForegroundColor Yellow
 Write-Host "  2. Or move: result.Success = true; to INSIDE try block (after work succeeds)" -ForegroundColor Yellow
-Write-Host "  3. See CRITICAL-RULES.md Rule 0 for pattern examples" -ForegroundColor Yellow
+Write-Host "  3. See AGENTS.md: Implementation for the success/error contract" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "See: .github/instructions/CRITICAL-RULES.md Rule 0" -ForegroundColor Gray
+Write-Host "See: AGENTS.md#implementation" -ForegroundColor Gray
 
 exit 1

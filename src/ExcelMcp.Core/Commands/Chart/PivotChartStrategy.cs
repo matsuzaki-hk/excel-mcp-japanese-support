@@ -99,23 +99,7 @@ public class PivotChartStrategy : IChartStrategy
             ComUtilities.Release(ref pivotLayout!);
         }
 
-        // Series count = number of value fields in PivotTable
-        dynamic? pivotLayout2 = null;
-        dynamic? pivotTable2 = null;
-        dynamic? dataFields = null;
-        try
-        {
-            pivotLayout2 = chart.PivotLayout;
-            pivotTable2 = pivotLayout2.PivotTable;
-            dataFields = pivotTable2.DataFields;
-            info.SeriesCount = Convert.ToInt32(dataFields.Count);
-        }
-        finally
-        {
-            ComUtilities.Release(ref dataFields!);
-            ComUtilities.Release(ref pivotTable2!);
-            ComUtilities.Release(ref pivotLayout2!);
-        }
+        info.SeriesCount = ChartSeriesReader.Count(chart);
 
         return info;
     }
@@ -207,8 +191,7 @@ public class PivotChartStrategy : IChartStrategy
             info.HasLegend = false;
         }
 
-        // PivotCharts don't expose series in the same way - data comes from PivotTable value fields
-        // Series list remains empty for PivotCharts
+        info.Series = ChartSeriesReader.Read(chart);
 
         return info;
     }
@@ -228,7 +211,7 @@ public class PivotChartStrategy : IChartStrategy
         throw new NotSupportedException(
             "Cannot add series directly to PivotChart. " +
             "PivotCharts automatically sync with PivotTable fields. " +
-            "Use pivottable tool with 'add-value-field' action to add data series.");
+            "Use pivottable_field (CLI: pivottablefield) with 'add-value-field' to add data series.");
     }
 
     /// <inheritdoc />
@@ -237,8 +220,6 @@ public class PivotChartStrategy : IChartStrategy
         throw new NotSupportedException(
             "Cannot remove series directly from PivotChart. " +
             "PivotCharts automatically sync with PivotTable fields. " +
-            "Use pivottable tool with 'remove-field' action to remove data series.");
+            "Use pivottable_field (CLI: pivottablefield) with 'remove-field' to remove data series.");
     }
 }
-
-

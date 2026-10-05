@@ -15,13 +15,15 @@ Excel MCP Server lets you automate Excel through conversation with Claude:
 - **Automate** - VBA macros, batch operations, data refresh
 - **Agent Mode** - Say "show me Excel" and watch AI work in real-time, side-by-side with Claude
 
-**31 tools with 326 operations** for comprehensive Excel automation.
+**31 tools with 387 operations** for comprehensive Excel automation.
 
 ## Requirements
 
 - **Windows** (required - uses Excel COM automation)
 - **Microsoft Excel 2016 or later**
 - **Claude Desktop** (Windows version)
+- **An interactive desktop**
+- No Node.js or .NET runtime required - the server executable is bundled
 
 ## Installation
 
@@ -30,6 +32,18 @@ Excel MCP Server lets you automate Excel through conversation with Claude:
 3. Restart Claude Desktop if prompted
 
 That's it! Start a new conversation and ask Claude to work with Excel.
+
+## Updates
+
+This bundle contains the fixed `mcp-excel.exe` server executable; it does not
+update itself automatically. To update, download the newer `.mcpb` from the
+[fork releases page](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/releases)
+and install it the same way.
+
+Before restarting, finish work and explicitly save and close the intended
+workbook sessions. A running server keeps its installed version until Claude
+Desktop is restarted. To uninstall, remove Excel from Claude's
+Settings > Extensions.
 
 ## Usage Examples
 
@@ -102,13 +116,15 @@ referenced worksheet data in Microsoft's cloud.
 error-rate metrics. Telemetry excludes file contents, file names, paths, and
 personal data.
 
-See our complete [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/PRIVACY.md).
+See our complete [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/ja-localization/PRIVACY.md).
 
 ## Troubleshooting
 
 **Claude says the tool isn't available:**
 - Restart Claude Desktop after installation
-- Check Settings → Integrations to verify Excel MCP Server is enabled
+- Check Settings → Extensions to verify Excel MCP Server is enabled
+- Reinstall the `.mcpb` if the bundled executable was moved or blocked by
+  antivirus software
 
 **Excel operations fail:**
 - Close the workbook in Excel before asking Claude to modify it
@@ -121,6 +137,7 @@ See our complete [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japa
 ## Links
 
 - [GitHub Repository](https://github.com/matsuzaki-hk/excel-mcp-japanese-support)
-- [Agent Skills](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/skills/README-ja.md) - Cross-platform AI guidance
-- [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/PRIVACY.md)
-- [License (MIT)](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/LICENSE)
+- [Feature Reference](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/features/)
+- [Agent Skills](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/ja-localization/skills/README-ja.md) - Cross-platform AI guidance
+- [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/ja-localization/PRIVACY.md)
+- [License (MIT)](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/ja-localization/LICENSE)

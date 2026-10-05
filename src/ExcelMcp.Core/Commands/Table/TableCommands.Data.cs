@@ -16,8 +16,7 @@ public partial class TableCommands
     /// <inheritdoc />
     public OperationResult Append(IExcelBatch batch, string tableName, List<List<object?>>? rows = null, string? rowsFile = null)
     {
-        // Security: Validate table name
-        ValidateTableName(tableName);
+        ValidateRequiredTableName(tableName);
 
         // Resolve rows from inline parameter or file
         var resolvedRows = ParameterTransforms.ResolveValuesOrFile(rows, rowsFile, "rows");
@@ -27,6 +26,10 @@ public partial class TableCommands
             dynamic? table = null;
             dynamic? sheet = null;
             dynamic? dataBodyRange = null;
+            dynamic? dataRows = null;
+            dynamic? listColumns = null;
+            dynamic? tableRange = null;
+            dynamic? cells = null;
             int originalCalculation = -1;
             bool calculationChanged = false;
 
@@ -47,7 +50,8 @@ public partial class TableCommands
                 dataBodyRange = table.DataBodyRange;
                 if (dataBodyRange != null)
                 {
-                    currentRow = dataBodyRange.Row + dataBodyRange.Rows.Count;
+                    dataRows = dataBodyRange.Rows;
+                    currentRow = dataBodyRange.Row + dataRows.Count;
                 }
                 else
                 {
@@ -64,7 +68,22 @@ public partial class TableCommands
                     }
                 }
 
-                int columnCount = table.ListColumns.Count;
+                listColumns = table.ListColumns;
+                int columnCount = listColumns.Count;
+                for (int rowIndex = 0; rowIndex < resolvedRows.Count; rowIndex++)
+                {
+                    var row = resolvedRows[rowIndex];
+                    if (row is null || row.Count != columnCount)
+                    {
+                        throw new ArgumentException(
+                            $"Append row {rowIndex + 1} must have {columnCount} columns to match table '{tableName}'.",
+                            nameof(rows));
+                    }
+                }
+                tableRange = table.Range;
+                int tableRow = tableRange.Row;
+                int tableColumn = tableRange.Column;
+                cells = sheet.Cells;
                 int rowsToAdd = resolvedRows.Count;
 
                 // Calculation suppressed here (not in ExcelWriteGuard) because Data Model ops need it enabled
@@ -79,12 +98,12 @@ public partial class TableCommands
                 for (int i = 0; i < resolvedRows.Count; i++)
                 {
                     var rowValues = resolvedRows[i];
-                    for (int j = 0; j < Math.Min(rowValues.Count, columnCount); j++)
+                    for (int j = 0; j < columnCount; j++)
                     {
                         dynamic? cell = null;
                         try
                         {
-                            cell = sheet.Cells[currentRow + i, table.Range.Column + j];
+                            cell = cells[currentRow + i, tableColumn + j];
                             cell.Value2 = RangeHelpers.ConvertToCellValue(rowValues[j]);
                         }
                         finally
@@ -110,8 +129,21 @@ public partial class TableCommands
 
                 // Resize table to include new rows
                 int newLastRow = currentRow + rowsToAdd - 1;
-                int newLastCol = table.Range.Column + columnCount - 1;
-                string newRangeAddress = $"{sheet.Cells[table.Range.Row, table.Range.Column].Address}:{sheet.Cells[newLastRow, newLastCol].Address}";
+                int newLastCol = tableColumn + columnCount - 1;
+                dynamic? firstCell = null;
+                dynamic? lastCell = null;
+                string newRangeAddress;
+                try
+                {
+                    firstCell = cells[tableRow, tableColumn];
+                    lastCell = cells[newLastRow, newLastCol];
+                    newRangeAddress = $"{firstCell.Address}:{lastCell.Address}";
+                }
+                finally
+                {
+                    ComUtilities.Release(ref lastCell);
+                    ComUtilities.Release(ref firstCell);
+                }
 
                 dynamic? resizeRange = null;
                 try
@@ -139,6 +171,10 @@ public partial class TableCommands
                         // Ignore errors restoring calculation mode
                     }
                 }
+                ComUtilities.Release(ref cells);
+                ComUtilities.Release(ref tableRange);
+                ComUtilities.Release(ref listColumns);
+                ComUtilities.Release(ref dataRows);
                 ComUtilities.Release(ref dataBodyRange);
                 ComUtilities.Release(ref sheet);
                 ComUtilities.Release(ref table);
@@ -149,8 +185,7 @@ public partial class TableCommands
     /// <inheritdoc />
     public TableDataResult GetData(IExcelBatch batch, string tableName, bool visibleOnly)
     {
-        // Security: Validate table name
-        ValidateTableName(tableName);
+        ValidateRequiredTableName(tableName);
 
         var result = new TableDataResult
         {
@@ -294,6 +329,3 @@ public partial class TableCommands
         }
     }
 }
-
-
-

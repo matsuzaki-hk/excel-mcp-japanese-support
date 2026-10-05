@@ -276,10 +276,10 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine("        /// <summary>");
         sb.AppendLine("        /// Routes an action to the appropriate forward method.");
         sb.AppendLine("        /// </summary>");
-        sb.AppendLine($"        public static string RouteAction(");
+        sb.AppendLine($"        public static TResult RouteAction<TResult>(");
         sb.AppendLine($"            {info.CategoryPascal}Action action,");
         sb.AppendLine($"            string sessionId,");
-        sb.AppendLine($"            System.Func<string, string, object?, string> forwardToService,");
+        sb.AppendLine($"            System.Func<string, string, object?, TResult> forwardToService,");
 
         // Collect all unique exposed parameters across all methods
         var allExposedParams = GetAllExposedParameters(info);
@@ -668,6 +668,11 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
                 var nonNullableType = p.TypeName.TrimEnd('?');
                 sb.AppendLine($"                {p.Name}: !string.IsNullOrWhiteSpace(settings.{StringHelper.ToPascalCase(p.Name)}) ? ServiceRegistry.DeserializeList<{nonNullableType}>(settings.{StringHelper.ToPascalCase(p.Name)}) : null{comma}");
             }
+            else if (parameterInfo is { IsJsonObject: true })
+            {
+                var nonNullableType = p.TypeName.TrimEnd('?');
+                sb.AppendLine($"                {p.Name}: !string.IsNullOrWhiteSpace(settings.{StringHelper.ToPascalCase(p.Name)}) ? ServiceRegistry.DeserializeObject<{nonNullableType}>(settings.{StringHelper.ToPascalCase(p.Name)}, \"{p.Name}\") : null{comma}");
+            }
             else
             {
                 sb.AppendLine($"                {p.Name}: settings.{StringHelper.ToPascalCase(p.Name)}{comma}");
@@ -737,7 +742,8 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
 
         // Action argument (always first)
         sb.AppendLine("            [Spectre.Console.Cli.CommandArgument(0, \"<ACTION>\")]");
-        sb.AppendLine("            [System.ComponentModel.Description(\"The action to perform\")]");
+        var availableActions = string.Join(", ", info.Methods.Select(method => method.ActionName));
+        sb.AppendLine($"            [System.ComponentModel.Description(\"The action to perform. Available actions: {availableActions}\")]");
         sb.AppendLine("            public string Action { get; init; } = string.Empty;");
         sb.AppendLine();
 
@@ -765,12 +771,13 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
             // Deserialized back to the original type in RouteFromSettings.
             var isCollectionForJson = IsNestedCollectionType(p.TypeName) || IsSimpleListType(p.TypeName);
             var parameterInfo = FindParameterInfo(info, p.Name);
+            var isJsonParameter = isCollectionForJson || parameterInfo is { IsJsonObject: true };
             var isTimeoutSeconds = parameterInfo != null && IsTimeSpanType(parameterInfo.TypeName);
-            var cliTypeName = isCollectionForJson ||
+            var cliTypeName = isJsonParameter ||
                               parameterInfo is { IsEnum: true, IsFromString: false }
                 ? "string?"
                 : p.TypeName;
-            if (isCollectionForJson && !escapedDescription.Contains("JSON"))
+            if (isJsonParameter && !escapedDescription.Contains("JSON"))
                 escapedDescription += " (JSON format)";
             if (isTimeoutSeconds && escapedDescription.IndexOf("seconds", StringComparison.OrdinalIgnoreCase) < 0)
             {
@@ -851,7 +858,7 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine($"        /// <summary>Forward method for {method.ActionName} action</summary>");
 
         // Build parameter list - Core params might need transforms
-        var methodParams = new List<string> { "string sessionId", "System.Func<string, string, object?, string> forwardToService" };
+        var methodParams = new List<string> { "string sessionId", "System.Func<string, string, object?, TResult> forwardToService" };
 
         foreach (var p in method.Parameters)
         {
@@ -870,7 +877,8 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
             {
                 // Expose as string
                 var exposedName = p.ExposedName ?? p.Name;
-                methodParams.Add($"string? {exposedName} = null");
+                var defaultStr = p.HasDefault ? " = null" : "";
+                methodParams.Add($"string? {exposedName}{defaultStr}");
             }
             else
             {
@@ -882,7 +890,7 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
             }
         }
 
-        sb.AppendLine($"        public static string Forward{method.MethodName}({string.Join(", ", methodParams)})");
+        sb.AppendLine($"        public static TResult Forward{method.MethodName}<TResult>({string.Join(", ", methodParams)})");
         sb.AppendLine("        {");
 
         // FromString enum parameters are passed as-is to the service (service does parsing).
@@ -1304,6 +1312,29 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine("public static partial class ServiceRegistry");
         sb.AppendLine("{");
+        sb.AppendLine("    /// <summary>Validates supplied MCP names using the generated action contracts.</summary>");
+        sb.AppendLine("    public static void ValidateMcpActionParameters(string tool, string action, System.Collections.Generic.IEnumerable<string> names)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        switch (tool)");
+        sb.AppendLine("        {");
+        foreach (var category in categories.OrderBy(c => c.McpToolName, StringComparer.Ordinal))
+        {
+            sb.AppendLine($"            case \"{category.McpToolName}\":");
+            sb.AppendLine($"                {category.CategoryPascal}.ValidateActionParameters(action, names.Select(name => name switch");
+            sb.AppendLine("                {");
+            foreach (var parameter in ServiceInfoExtractor.GetAllExposedParameters(category))
+            {
+                var name = parameter.TypeName.Contains("TimeSpan") ? parameter.Name + "Seconds" : parameter.Name;
+                sb.AppendLine($"                    \"{StringHelper.ToSnakeCase(name)}\" => \"{parameter.Name}\",");
+            }
+            sb.AppendLine("                    _ => name");
+            sb.AppendLine("                }), allowFileParameters: true);");
+            sb.AppendLine("                return;");
+        }
+        sb.AppendLine("            default: throw new System.ArgumentException($\"Unknown tool: {tool}\");");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
         sb.AppendLine("    /// <summary>Validates a generated service command before transport dispatch.</summary>");
         sb.AppendLine("    public static void ValidateCommandArguments(string command, string? argsJson)");
         sb.AppendLine("    {");
@@ -1328,6 +1359,36 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         }
         sb.AppendLine("        }");
         sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Valid actions of every generated service command category.</summary>");
+        sb.AppendLine("    public static readonly System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<string>> ValidActionsByCategory =");
+        sb.AppendLine("        new System.Collections.Generic.Dictionary<string, System.Collections.Generic.IReadOnlyList<string>>(System.StringComparer.OrdinalIgnoreCase)");
+        sb.AppendLine("        {");
+        foreach (var categoryGroup in categories
+                     .GroupBy(category => category.Category, StringComparer.Ordinal)
+                     .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            var actionSource = string.Join(
+                ", ",
+                categoryGroup.Select(category => $"{category.CategoryPascal}.ValidActions"));
+            var actions = categoryGroup.Count() == 1
+                ? actionSource
+                : $"System.Linq.Enumerable.ToArray(System.Linq.Enumerable.SelectMany(new System.Collections.Generic.IReadOnlyList<string>[] {{ {actionSource} }}, actions => actions))";
+            sb.AppendLine($"            [\"{categoryGroup.Key}\"] = {actions},");
+        }
+        sb.AppendLine("        };");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Maps CLI command names to their service command category.</summary>");
+        sb.AppendLine("    public static readonly System.Collections.Generic.IReadOnlyDictionary<string, string> CategoryByCliCommand =");
+        sb.AppendLine("        new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)");
+        sb.AppendLine("        {");
+        foreach (var cliCommandGroup in categories
+                     .GroupBy(category => category.McpToolName.Replace("_", ""), StringComparer.Ordinal)
+                     .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            sb.AppendLine($"            [\"{cliCommandGroup.Key}\"] = \"{cliCommandGroup.First().Category}\",");
+        }
+        sb.AppendLine("        };");
         sb.AppendLine("}");
         return sb.ToString();
     }
@@ -1377,8 +1438,7 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Generates a JSON manifest as a constant string for skill documentation generation.
-    /// The Build.Tasks project extracts this JSON to generate SKILL.md files.
+    /// Generates the command manifest used by documentation count validation.
     /// </summary>
     private static string GenerateSkillManifest(List<ServiceInfo> categories)
     {
@@ -1391,8 +1451,7 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine("namespace Sbroenne.ExcelMcp.Generated;");
         sb.AppendLine();
         sb.AppendLine("/// <summary>");
-        sb.AppendLine("/// JSON manifest for skill file generation.");
-        sb.AppendLine("/// Used by ExcelMcp.Build.Tasks to generate SKILL.md files from templates.");
+        sb.AppendLine("/// JSON command manifest for documentation count validation.");
         sb.AppendLine("/// </summary>");
         sb.AppendLine("internal static class _SkillManifest");
         sb.AppendLine("{");
@@ -1682,6 +1741,20 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine("        if (string.IsNullOrWhiteSpace(json)) return null;");
         sb.AppendLine("        return System.Text.Json.JsonSerializer.Deserialize<T>(json)");
         sb.AppendLine("            ?? throw new System.Text.Json.JsonException($\"Failed to deserialize list from JSON: {json}\");");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Deserializes CLI object options using the shared Service JSON naming policy.</summary>");
+        sb.AppendLine("    internal static T DeserializeObject<T>(string json, string parameterName) where T : class");
+        sb.AppendLine("    {");
+        sb.AppendLine("        try");
+        sb.AppendLine("        {");
+        sb.AppendLine("            return System.Text.Json.JsonSerializer.Deserialize<T>(json, DispatchJsonOptions)");
+        sb.AppendLine("                ?? throw new System.Text.Json.JsonException(\"Expected a non-null JSON object.\");");
+        sb.AppendLine("        }");
+        sb.AppendLine("        catch (System.Text.Json.JsonException exception)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            throw new System.ArgumentException($\"Invalid JSON object for {parameterName}.\", parameterName, exception);");
+        sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine("}");
 

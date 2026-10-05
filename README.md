@@ -22,7 +22,7 @@
 
 ファイルパーサーツールとは異なり、ExcelMcpは公式COM APIを通じて**実際のExcelアプリケーション**を駆動します。Power Queryの更新、数式の再計算、DAXの評価、VBAとPython `=PY()` の実行、そしてピボットテーブル、グラフ、マクロ、データモデル、ブックの書式を保持できます。
 
-**31 tools with 326 operations（31の専門ツール、326の操作）**で、Excel自動化の端到端をカバーします。
+**31 tools with 387 operations（31の専門ツール、387の操作）**で、Excel自動化の端到端をカバーします。
 
 > [!IMPORTANT]
 > **Windows**、**Microsoft Excel 2016以降**、および対話型デスクトップが必要です。Linux、macOS、またはサーバー側のバッチ処理を目的としていません。
@@ -60,12 +60,10 @@
 
 ## 🎯 できること
 
-- **[データと分析](https://excelmcpserver.dev/features/data-analytics/):** Power Query、DAX、Power Pivot、Excelテーブル、ピボットテーブル、データ接続
-- **[セルとブック](https://excelmcpserver.dev/features/cells-workbooks/):** 範囲、数式、書式、ワークシート、ファイル、計算、名前付き範囲
-- **[グラフとビジュアル](https://excelmcpserver.dev/features/charts-visuals/):** グラフ、スライサー、条件付き書式、スクリーンショット、描画、スパークライン
-- **[自動化と高度な機能](https://excelmcpserver.dev/features/automation-advanced/):** VBA、Excel Python、Goal Seek、シナリオ、データテーブル、ウィンドウ、XML Maps
+[全387操作の機能一覧](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/features/)。
+コマンドの詳細は CLI ヘルプまたは MCP ツール説明を参照してください。
 
-[all 326 operations - 完全なリファレンス](FEATURES.md)
+[all 387 operations - 完全なリファレンス](FEATURES.md)
 
 ## 💬 プロンプト例
 
@@ -96,7 +94,7 @@ AIアシスタントまたはスクリプト
         ↓   実際の Excel COM API
 ```
 
-[アーキテクチャ](docs/ARCHITECTURE.md)を読むか、[MCP Server](https://excelmcpserver.dev/mcp-server/) および [CLI](https://excelmcpserver.dev/cli/) ガイドを参照してください。
+[アーキテクチャ](docs/ARCHITECTURE.md)を読むか、[MCP Server](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/mcp-server/) および [CLI](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/cli/) ガイドを参照してください。
 
 ## ⚙️ 技術要件
 
@@ -114,11 +112,11 @@ AIアシスタントまたはスクリプト
 
 ## 🌟 GitHub Star History
 
-[![GitHub stars over time for ExcelMcp](https://excelmcpserver.dev/assets/images/star-history.svg)](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/stargazers)
+[![GitHub stars over time for ExcelMcp](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/assets/images/star-history.svg)](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/stargazers)
 
 ## � 追加情報
 
-[ドキュメント](https://excelmcpserver.dev/) ・
+[ドキュメント](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/) ・
 [Changelog](CHANGELOG.md) ・
 [貢献](docs/CONTRIBUTING.md) ・
 [セキュリティ](docs/SECURITY.md) ・

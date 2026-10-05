@@ -1,148 +1,105 @@
 # Charts & Visualization Features
 
-Create charts, slicers, conditional formatting, screenshots, drawing objects, and sparklines.
+Turn workbook results into charts, interactive filters, and other visuals
+rendered by Excel itself.
 
-[← Back to the complete feature reference](../../FEATURES.md)
+[Back to the feature overview](../../FEATURES.md)
 
----
-
-## 📉 Charts (33 operations)
-
-Create and format charts and PivotCharts, with full control over series, axes, labels, and trendlines.
-
-**Creation:**
-- **Create from Range:** Build a chart from a cell range
-- **Create from Excel Table:** Build a chart from an Excel Table
-- **Create from PivotTable:** Build a live PivotChart linked to the requested
-  PivotTable, including OLAP/Data Model PivotTables. ExcelMcp verifies the
-  PivotLayout link and fails without leaving a static chart if the requested
-  chart type or layout cannot produce a PivotChart.
-
-**Series Management:**
-- **Add Series:** Add a data series to a chart
-- **Remove Series:** Remove a data series
-- **Update Series Data:** Change the data range for a series
-- **Set Series Chart Type:** Build combo charts by assigning a type to one series
-
-**Configuration:**
-- **Set Data Source:** Change the chart's source range
-- **Set Chart Type:** Change the chart type (bar, line, pie, etc.)
-- **Get/Set Plot Options:** Control row/column orientation, blank cells, and hidden-cell plotting
-- **Show/Hide Legend:** Toggle the legend
-- **Set Style:** Apply a built-in chart style
-
-**Formatting:**
-- **Set Chart Title:** Set or clear the chart title
-- **Set Axis Title:** Set or clear an axis title
-- **Set Axis Number Format:** Apply a number format to an axis
-- **Get Axis Number Format:** Read the current axis number format
-
-**Data Labels:**
-- **Configure Data Labels:** Show values, percentages, category names, etc.
-- **Set Label Position:** Position labels (Center, InsideEnd, OutsideEnd, etc.)
-- **Apply to Series:** Apply label config to all series or a specific one
-
-**Axis Scale:**
-- **Get Axis Scale:** Read current min/max/unit settings
-- **Set Min/Max Scale:** Set axis minimum/maximum
-- **Set Major/Minor Units:** Set axis tick unit spacing
-
-**Gridlines:**
-- **Get Gridlines Config:** Read current gridline visibility
-- **Set Gridlines:** Toggle major/minor gridline visibility
-
-**Series Formatting:**
-- **Set Marker Style:** Set marker shape (Circle, Square, Diamond, Triangle, etc.)
-- **Set Marker Size:** Set marker size
-- **Set Marker Colors:** Set marker fill/line colors
-- **Set Series Fill/Line:** Set material fill, transparency, line color, and line weight
-
-**Area Formatting:**
-- **Set Area Format:** Format chart-area or plot-area fill, transparency, and border
-
-**Trendlines:**
-- **Add Trendline:** Add a trendline (Linear, Exponential, Logarithmic, Polynomial, Power, MovingAverage)
-- **List Trendlines:** List trendlines on a series
-- **Delete Trendline:** Remove a trendline
-- **Configure Trendline:** Set forecast forward/backward, display equation, display R²
-
-**Placement & Positioning:**
-- **Set Placement:** Configure cell anchoring, printing, locking, and rounded corners
-- **Fit to Range:** Position and size a chart to match a range
-
-**Lifecycle:**
-- **List:** List charts in a worksheet or workbook
-- **Read:** Get chart info
-- **Move:** Move a chart to a different worksheet or a new sheet
-- **Delete:** Remove a chart
+These pages describe supported outcomes. Current command details come from
+CLI help or MCP tool descriptions, not a separately maintained action list.
 
 ---
 
-## 🔪 Slicers (8 operations)
+## Charts (40 operations)
 
-Add interactive slicers to filter PivotTables and Excel Tables visually.
+- **Create visuals:** Build charts from ranges or worksheet Tables, or live PivotCharts linked to regular or Data Model PivotTables.
+- **Configure data:** Replace a regular chart's source, add or remove series, and control how rows, columns, blanks, and hidden cells are plotted.
+- **Explain results:** Set titles, axes, labels, legends, trendlines, and supported error bars.
+- **Shape presentation:** Use combo charts and secondary axes, styles, series/point formatting, and chart/plot-area formatting.
+- **Arrange and export:** Position charts against worksheet ranges, inspect their actual data and bounds, and export native image files.
 
-**PivotTable Slicers:**
-- **Create Slicer:** Add slicer for PivotTable field with optional position
-- **List Slicers:** List all PivotTable slicers in workbook
-- **Set Selection:** Filter PivotTable by slicer selection (single or multi-select)
-- **Delete Slicer:** Remove PivotTable slicer
+A live PivotChart follows its PivotTable's fields and filters. Its series are
+not managed like a regular chart's series. Some formatting and error-bar
+settings also depend on the chart type, and Excel cannot read back every
+setting it accepts.
 
-**Table Slicers:**
-- **Create Table Slicer:** Add slicer for Excel Table column
-- **List Table Slicers:** List all Table slicers in workbook
-- **Set Table Selection:** Filter Table by slicer selection
-- **Delete Table Slicer:** Remove Table slicer
+Choose the source and units deliberately. A chart of displayed PivotTable cells
+is not a live PivotChart, and a successful creation does not establish correct
+totals or nonoverlapping placement.
 
-**Notes:**
-- **Use cases:** Interactive data filtering without modifying PivotTable/Table structure, dashboard creation with visual filter controls, and multi-slicer filtering for complex data analysis.
-
----
-
-## 🌈 Conditional Formatting (4 operations)
-
-Apply rule-based formatting that highlights cells based on their values.
-
-**Operations:**
-- **Add Rule:** Create a conditional formatting rule — cell value comparison (>, <, =, etc.), expression-based formula (custom DAX/Excel formula), or color scale/data bar/icon set
-- **Clear Rules:** Remove formatting from ranges
-- **List Rules:** Read existing conditional formatting rules for a range — returns rule type, operator, formulas, applies-to range, priority, and formatting (interior/font/borders) with colors as #RRGGBB hex
-- **List Worksheet Rules:** Read all conditional formatting rules across an entire worksheet, each with its applies-to range, in priority order
+[Chart-building guidance](../reference/chart.md)
 
 ---
 
-## 📸 Screenshot (2 operations)
+## Slicers (15 operations)
 
-Capture ranges or worksheets as images by photographing the live Excel window.
+- **Filter interactively:** Create and manage visual filters for PivotTables or worksheet Tables, including model-backed PivotTables.
+- **Filter dates:** Add native PivotTable timelines and select calendar-date ranges.
+- **Share compatible filters:** Inspect and change connections between a PivotTable control and compatible shared-cache PivotTables.
+- **Arrange controls:** Inspect and update control position, dimensions, appearance, and supported layout settings.
 
-**Operations:**
-- **Capture Range:** Capture a specific range as an image
-- **Capture Sheet:** Capture the entire used area of a worksheet as an image — captures formatting, charts, and conditional formatting exactly as Excel displays them. Works on protected sheets and leaves the workbook and clipboard untouched, but requires an interactive desktop session. MCP returns the image directly as `ImageContent`; CLI returns JSON with base64-encoded image data.
+A Table slicer filters its Table, not a separate PivotTable cache. PivotTable
+slicers and timelines affect only connected PivotTables; matching field names
+do not establish cache compatibility. Removing a control does not necessarily
+clear its filter. Verify both the selection and the resulting data.
+
+[Slicer and timeline guidance](../reference/slicer.md)
 
 ---
 
-## 🖼️ Drawing Objects & Sparklines (14 operations)
+## Conditional Formatting (7 operations)
 
-Create and manage worksheet visuals without replacing the workbook file.
+- **Highlight meaning:** Create value- or formula-based rules and supported visual scales, bars, and icons.
+- **Inspect existing rules:** Read rule coverage, priority, and applicable formatting.
+- **Make targeted changes:** Update or remove selected rules and change their priority without clearing unrelated rules.
 
-- **List / Get / Update / Delete Objects:** Manage geometry, text, colors, placement, accessibility text, and safe control bindings
-- **Add Image / Shape / Text Box / Connector:** Create and format worksheet drawing objects
-- **Add Form Control:** Add safe Forms controls such as buttons, check boxes, option buttons, lists, and drop-downs
-- **List / Get / Add / Update / Delete Sparklines:** Manage line, column, and win/loss sparkline groups
+Rules interact through their coverage and order. Select an existing rule from
+a fresh listing before editing it; priority is not a permanent identifier.
+Excel can normalize formulas and settings, and failed edits can leave partial
+changes. Read the resulting rules rather than assuming the request was fully applied.
 
-ActiveX/OLE controls and macro assignment are intentionally excluded because they cannot be automated safely and reliably across Excel security configurations.
+[Conditional-formatting guidance](../reference/conditionalformat.md)
+
+---
+
+## Screenshot (2 operations)
+
+- **Inspect appearance:** Capture a selected range or a worksheet's used cells and embedded charts from the live Excel window.
+- **Share an image:** Receive an image in MCP or return/save an image through the CLI.
+
+Capture briefly shows Excel and brings it forward. It requires an unlocked
+interactive desktop and can fail in a disconnected Remote Desktop session.
+Protected sheets are supported without modifying the workbook or clipboard.
+Large areas can be stitched or truncated; check the result before claiming
+that the whole sheet was visually inspected.
+
+Screenshots are optional. Data-only and unattended jobs do not need to fail
+because visual capture is unavailable.
+
+[Visual verification guidance](../reference/screenshot.md)
+
+---
+
+## Drawing Objects & Sparklines (20 operations)
+
+- **Annotate worksheets:** Add images, shapes, text boxes, connectors, and supported Forms controls.
+- **Manage layout:** Inspect and update objects, group or ungroup them, align/distribute them, duplicate them, and change stacking order.
+- **Show compact trends:** Create and manage line, column, or win/loss sparklines in worksheet cells.
+
+Object layout affects selected supported objects, not charts or every item on
+the sheet. Grouping can change native membership; use the returned names and
+state rather than assuming the old structure survives. Protected drawing
+objects and macro-bound duplication have restrictions.
+
+ActiveX/OLE controls and macro assignment are intentionally excluded.
+
+[Drawing and layout guidance](../reference/drawing.md)
 
 ---
 
 ## Related feature areas
 
-- [Data & analytics](DATA-ANALYTICS.md) — build the tables, PivotTables, and models behind visual reports
-- [Cells & workbooks](CELLS-WORKBOOKS.md) — prepare and format worksheet data before visualization
-- [Automation & advanced](AUTOMATION-ADVANCED.md) — generate reports with VBA, Python, and reusable automation
-- [Example workflows](../USE-CASES.md) — see these capabilities combined in practical requests
-- [Installation](../INSTALLATION.md) — choose and configure the MCP Server or CLI
-
-## Task guides
-
-- [Build and update PivotTables with an AI assistant](../guides/AUTOMATE-PIVOTTABLES.md)
-- [Refresh Power Query from an AI assistant](../guides/REFRESH-POWER-QUERY.md)
+- [Data & analytics](DATA-ANALYTICS.md) - build the sources and summaries behind visuals
+- [Cells & workbooks](CELLS-WORKBOOKS.md) - prepare data, formatting, and print layout
+- [Automation & advanced](AUTOMATION-ADVANCED.md) - automate repeated reporting
+- [Optional report formatting](../reference/report-formatting.md)

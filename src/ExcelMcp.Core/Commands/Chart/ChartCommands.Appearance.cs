@@ -91,22 +91,13 @@ public partial class ChartCommands
 
             dynamic? axes = null;
             dynamic? targetAxis = null;
+            Excel.AxisTitle? axisTitle = null;
 
             try
             {
                 axes = findResult.Chart.Axes;
-
-                // Map axis type to Excel constants
-                int axisType = axis switch
-                {
-                    ChartAxisType.Category => 1,    // xlCategory
-                    ChartAxisType.Value => 2,       // xlValue
-                    ChartAxisType.Primary => 1,     // Primary = Category
-                    ChartAxisType.Secondary => 2,   // Secondary = Value
-                    _ => 1
-                };
-
-                targetAxis = axes.Item(axisType);
+                var (axisType, axisGroup) = MapAxisType(axis);
+                targetAxis = axes.Item(axisType, axisGroup);
 
                 // Set axis title (empty string hides title)
                 if (string.IsNullOrEmpty(title))
@@ -116,13 +107,15 @@ public partial class ChartCommands
                 else
                 {
                     targetAxis.HasTitle = true;
-                    targetAxis.AxisTitle.Text = title;
+                    axisTitle = ((Excel.Axis)targetAxis).AxisTitle;
+                    axisTitle.Text = title;
                 }
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath }; // Void operation completed
             }
             finally
             {
+                ComUtilities.Release(ref axisTitle);
                 ComUtilities.Release(ref targetAxis!);
                 ComUtilities.Release(ref axes!);
                 if (findResult.Shape != null) ComUtilities.Release(ref findResult.Shape!);
@@ -154,21 +147,16 @@ public partial class ChartCommands
             {
                 axes = findResult.Chart.Axes;
 
-                // Map axis type to Excel constants
-                int axisType = axis switch
-                {
-                    ChartAxisType.Category => 1,    // xlCategory
-                    ChartAxisType.Value => 2,       // xlValue
-                    ChartAxisType.Primary => 1,     // Primary = Category
-                    ChartAxisType.Secondary => 2,   // Secondary = Value
-                    _ => 1
-                };
-
-                targetAxis = axes.Item(axisType);
+                var (axisType, axisGroup) = MapAxisType(axis);
+                targetAxis = axes.Item(axisType, axisGroup);
                 tickLabels = targetAxis.TickLabels;
 
-                // Get the number format for axis tick labels
-                return tickLabels.NumberFormat?.ToString() ?? "General";
+                var labels = (Excel.TickLabels)tickLabels;
+                var invariantKeywords = labels.NumberFormat ?? "General";
+                var storedFormat = Sbroenne.ExcelMcp.ComInterop.Formatting.NumberFormatTranslator.ContainsNamedColor(invariantKeywords)
+                    ? invariantKeywords
+                    : labels.NumberFormatLocal ?? "General";
+                return ctx.FormatTranslator.TranslateFromLocale(storedFormat);
             }
             finally
             {
@@ -205,21 +193,20 @@ public partial class ChartCommands
             {
                 axes = findResult.Chart.Axes;
 
-                // Map axis type to Excel constants
-                int axisType = axis switch
-                {
-                    ChartAxisType.Category => 1,    // xlCategory
-                    ChartAxisType.Value => 2,       // xlValue
-                    ChartAxisType.Primary => 1,     // Primary = Category
-                    ChartAxisType.Secondary => 2,   // Secondary = Value
-                    _ => 1
-                };
-
-                targetAxis = axes.Item(axisType);
+                var (axisType, axisGroup) = MapAxisType(axis);
+                targetAxis = axes.Item(axisType, axisGroup);
                 tickLabels = targetAxis.TickLabels;
 
                 // Set the number format for axis tick labels
-                tickLabels.NumberFormat = numberFormat;
+                if (Sbroenne.ExcelMcp.ComInterop.Formatting.NumberFormatTranslator.ContainsNamedColor(numberFormat))
+                {
+                    ((Excel.TickLabels)tickLabels).NumberFormat = ctx.FormatTranslator.TranslateForChart(
+                        NumberFormatLiterals.PreserveCurrencyLiterals(numberFormat));
+                }
+                else
+                {
+                    ((Excel.TickLabels)tickLabels).NumberFormatLocal = ctx.FormatTranslator.TranslateToLocale(numberFormat);
+                }
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath }; // Void operation completed
             }
@@ -384,13 +371,13 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? seriesCollection = null;
-            dynamic? series = null;
-            dynamic? dataLabels = null;
+            Excel.SeriesCollection? seriesCollection = null;
+            Excel.Series? series = null;
+            Excel.DataLabels? dataLabels = null;
 
             try
             {
-                seriesCollection = findResult.Chart.SeriesCollection();
+                seriesCollection = (Excel.SeriesCollection)findResult.Chart.SeriesCollection();
                 int seriesCount = seriesCollection.Count;
 
                 if (seriesCount == 0)
@@ -410,6 +397,28 @@ public partial class ChartCommands
                     throw new ArgumentException($"Series index {seriesIndex.Value} is out of range. Chart has {seriesCount} series (1-based).");
                 }
 
+                // Validate every target before changing any series in a combination chart.
+                if (labelPosition is DataLabelPosition.InsideEnd or DataLabelPosition.InsideBase or DataLabelPosition.OutsideEnd)
+                {
+                    for (int i = startIndex; i <= endIndex; i++)
+                    {
+                        series = seriesCollection.Item(i);
+                        var chartType = series.ChartType;
+                        if (chartType is Excel.XlChartType.xlLine or Excel.XlChartType.xlLineMarkers
+                            or Excel.XlChartType.xlLineStacked or Excel.XlChartType.xlLineStacked100
+                            or Excel.XlChartType.xlLineMarkersStacked or Excel.XlChartType.xlLineMarkersStacked100
+                            or Excel.XlChartType.xl3DLine or Excel.XlChartType.xlXYScatter
+                            or Excel.XlChartType.xlXYScatterLines or Excel.XlChartType.xlXYScatterLinesNoMarkers
+                            or Excel.XlChartType.xlXYScatterSmooth or Excel.XlChartType.xlXYScatterSmoothNoMarkers)
+                        {
+                            throw new InvalidOperationException(
+                                $"Label position '{labelPosition.Value}' is not supported for series {i} ({chartType}). " +
+                                "Use Above, Below, Left, Right, or Center for line and scatter charts.");
+                        }
+                        ComUtilities.Release(ref series);
+                    }
+                }
+
                 for (int i = startIndex; i <= endIndex; i++)
                 {
                     series = seriesCollection.Item(i);
@@ -421,7 +430,7 @@ public partial class ChartCommands
                         series.HasDataLabels = true;
                     }
 
-                    dataLabels = series.DataLabels;
+                    dataLabels = (Excel.DataLabels)series.DataLabels();
 
                     // Apply each property if specified
                     if (showValue.HasValue)
@@ -437,7 +446,7 @@ public partial class ChartCommands
                             when (ex.HResult == unchecked((int)0x800A03EC))
                         {
                             throw new InvalidOperationException(
-                                $"ShowPercentage is not supported for this chart type. " +
+                                "Excel rejected the percentage-label setting. " +
                                 "Use show_percentage only with pie or doughnut chart types.", ex);
                         }
                     }
@@ -458,7 +467,7 @@ public partial class ChartCommands
                     {
                         try
                         {
-                            dataLabels.Position = (int)labelPosition.Value;
+                            dataLabels.Position = (Excel.XlDataLabelPosition)labelPosition.Value;
                         }
                         catch (System.Runtime.InteropServices.COMException ex)
                         {
@@ -850,7 +859,7 @@ public partial class ChartCommands
             ChartAxisType.Secondary => (2, 1),          // xlValue, xlPrimary
             ChartAxisType.CategorySecondary => (1, 2),  // xlCategory, xlSecondary
             ChartAxisType.ValueSecondary => (2, 2),     // xlValue, xlSecondary
-            _ => (1, 1)
+            _ => throw new ArgumentOutOfRangeException(nameof(axis), axis, "Unsupported chart axis.")
         };
     }
 

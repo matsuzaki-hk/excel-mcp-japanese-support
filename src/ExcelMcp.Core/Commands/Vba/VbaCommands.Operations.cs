@@ -20,11 +20,7 @@ public partial class VbaCommands
         ArgumentException.ThrowIfNullOrWhiteSpace(procedureName);
         parameters ??= [];
 
-        var (isValid, validationError) = ValidateVbaFile(batch.WorkbookPath);
-        if (!isValid)
-        {
-            throw new ArgumentException(validationError, nameof(batch));
-        }
+        EnsureVbaFile(batch.WorkbookPath);
 
         using var timeoutCts = timeout.HasValue
             ? new CancellationTokenSource(timeout.Value)
@@ -106,11 +102,7 @@ public partial class VbaCommands
     /// <inheritdoc />
     public OperationResult Delete(IExcelBatch batch, string moduleName)
     {
-        var (isValid, validationError) = ValidateVbaFile(batch.WorkbookPath);
-        if (!isValid)
-        {
-            throw new OperationFailureException(OperationFailureCategory.InvalidInput, validationError);
-        }
+        EnsureVbaFile(batch.WorkbookPath);
 
         // Check VBA trust BEFORE attempting operation
         if (!IsVbaTrustEnabled())
@@ -374,4 +366,3 @@ public partial class VbaCommands
         });
     }
 }
-

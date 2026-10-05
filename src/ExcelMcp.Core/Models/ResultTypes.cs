@@ -192,6 +192,19 @@ public class SheetProtectionResult : ResultBase
     /// Whether the worksheet is protected
     /// </summary>
     public bool IsProtected { get; set; }
+
+    /// <summary>Whether locked cell contents are protected.</summary>
+    public bool ProtectContents { get; set; }
+    /// <summary>Whether drawing objects are protected.</summary>
+    public bool ProtectDrawingObjects { get; set; }
+    /// <summary>Whether scenarios are protected.</summary>
+    public bool ProtectScenarios { get; set; }
+    /// <summary>Native runtime-only UI protection, not persisted after reopening.</summary>
+    public bool UserInterfaceOnly { get; set; }
+    /// <summary>Native permission flags; only effective while their protection is enabled.</summary>
+    public Sbroenne.ExcelMcp.Core.Commands.SheetProtectionOptions Permissions { get; set; } = new();
+    /// <summary>Runtime-only protection must be explicitly requested again after reopening.</summary>
+    public string RuntimeOnlyCoverage { get; } = "UserInterfaceOnly is not persisted after reopening.";
 }
 
 /// <summary>
@@ -265,6 +278,61 @@ public class WorksheetShapeCountResult : ResultBase
 /// </summary>
 public class SheetPageSetupResult : ResultBase
 {
+    /// <summary>Fixed scale percentage, or null while fit-to-page scaling is active.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? ZoomPercent { get; set; }
+    /// <summary>Native print area; empty means automatic.</summary>
+    public string PrintArea { get; set; } = string.Empty;
+    /// <summary>Native repeated title rows; empty means none.</summary>
+    public string PrintTitleRows { get; set; } = string.Empty;
+    /// <summary>Native repeated title columns; empty means none.</summary>
+    public string PrintTitleColumns { get; set; } = string.Empty;
+    /// <summary>Left margin in points.</summary>
+    public double LeftMargin { get; set; }
+    /// <summary>Right margin in points.</summary>
+    public double RightMargin { get; set; }
+    /// <summary>Top margin in points.</summary>
+    public double TopMargin { get; set; }
+    /// <summary>Bottom margin in points.</summary>
+    public double BottomMargin { get; set; }
+    /// <summary>Header margin in points.</summary>
+    public double HeaderMargin { get; set; }
+    /// <summary>Footer margin in points.</summary>
+    public double FooterMargin { get; set; }
+    /// <summary>Native left header text.</summary>
+    public string LeftHeader { get; set; } = string.Empty;
+    /// <summary>Native center header text.</summary>
+    public string CenterHeader { get; set; } = string.Empty;
+    /// <summary>Native right header text.</summary>
+    public string RightHeader { get; set; } = string.Empty;
+    /// <summary>Native left footer text.</summary>
+    public string LeftFooter { get; set; } = string.Empty;
+    /// <summary>Native center footer text.</summary>
+    public string CenterFooter { get; set; } = string.Empty;
+    /// <summary>Native right footer text.</summary>
+    public string RightFooter { get; set; } = string.Empty;
+    /// <summary>Native XlPaperSize name.</summary>
+    public string PaperSize { get; set; } = string.Empty;
+    /// <summary>Native XlOrder name.</summary>
+    public string PageOrder { get; set; } = string.Empty;
+    /// <summary>Whether gridlines print.</summary>
+    public bool PrintGridlines { get; set; }
+    /// <summary>Whether headings print.</summary>
+    public bool PrintHeadings { get; set; }
+    /// <summary>Whether black-and-white printing is enabled.</summary>
+    public bool BlackAndWhite { get; set; }
+    /// <summary>Whether draft printing is enabled.</summary>
+    public bool Draft { get; set; }
+    /// <summary>First page number; zero means automatic.</summary>
+    public int FirstPageNumber { get; set; }
+    /// <summary>Native XlPrintLocation name.</summary>
+    public string PrintComments { get; set; } = string.Empty;
+    /// <summary>Native XlPrintErrors name.</summary>
+    public string PrintErrors { get; set; } = string.Empty;
+    /// <summary>Whether headers/footers scale with the document.</summary>
+    public bool ScaleWithDocHeaderFooter { get; set; }
+    /// <summary>Whether headers/footers align to page margins.</summary>
+    public bool AlignMarginsHeaderFooter { get; set; }
     /// <summary>
     /// Page orientation (portrait or landscape)
     /// </summary>
@@ -350,14 +418,6 @@ public class PowerQueryInfo
     /// Name of the Power Query
     /// </summary>
     public string Name { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Full M code retained for source and binary compatibility.
-    /// Use the Power Query view action for new code.
-    /// </summary>
-    [Obsolete("Use the Power Query view action to retrieve full M code. This compatibility property is not serialized.")]
-    [JsonIgnore]
-    public string Formula { get; set; } = string.Empty;
 
     /// <summary>
     /// Bounded preview of the formula (at most 80 characters).
@@ -1004,14 +1064,14 @@ public class FileValidationInfo
     public DateTime LastModified { get; set; }
 
     /// <summary>
-    /// Whether a standard OOXML file has a supported extension and valid package.
+    /// Whether Excel successfully opened the workbook during validation.
     /// IRM/AIP containers require interactive Excel validation and report false.
     /// </summary>
     public bool IsValid { get; set; }
 
     /// <summary>
-    /// Whether a standard OOXML workbook passes package validation and can be
-    /// accessed using ExcelMcp's required open mode. IRM/AIP openability requires
+    /// Whether Excel opened the workbook using ExcelMcp's required validation
+    /// mode. IRM/AIP openability requires
     /// interactive authentication and reports false during preflight.
     /// </summary>
     public bool CanOpen { get; set; }
@@ -1356,9 +1416,24 @@ public class RangeFindResult : ResultBase
     public string SearchValue { get; set; } = string.Empty;
 
     /// <summary>
-    /// List of matching cells
+    /// Matching cell details, limited to the requested maximum (default: 10).
     /// </summary>
     public List<RangeCell> MatchingCells { get; set; } = [];
+
+    /// <summary>
+    /// Exact number of matching cells in the searched range.
+    /// </summary>
+    public long TotalCount { get; set; }
+
+    /// <summary>
+    /// Number of matching cells included in this response.
+    /// </summary>
+    public int ReturnedCount => MatchingCells.Count;
+
+    /// <summary>
+    /// Whether matching cells were omitted because of the return limit.
+    /// </summary>
+    public bool Truncated => TotalCount > ReturnedCount;
 }
 
 /// <summary>
@@ -1870,7 +1945,8 @@ public class DataModelMeasureInfo
 public class MeasureFormatInfo
 {
     /// <summary>
-    /// Format type: General, Currency, Decimal, Percentage, WholeNumber, Scientific, Boolean, Date
+    /// Format type: General, Currency, Decimal, Percentage, WholeNumber,
+    /// Scientific, Boolean, Date. The last three are read-only format results.
     /// </summary>
     public string Type { get; set; } = "General";
 
@@ -2330,16 +2406,18 @@ public class ColumnFilter
     public bool IsFiltered { get; set; }
 
     /// <summary>
-    /// Filter criteria (if single criteria)
+    /// Native operator when the column is filtered
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Criteria { get; set; }
+    public Commands.Filtering.FilterOperator? FilterOperator { get; set; }
 
     /// <summary>
-    /// Filter values (if multiple values)
+    /// First native criterion, preserving arrays and read failures
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<string>? FilterValues { get; set; }
+    public Commands.Filtering.FilterCriterion? Criteria1 { get; set; }
+    /// <summary>Second native criterion, preserving arrays and read failures.</summary>
+    public Commands.Filtering.FilterCriterion? Criteria2 { get; set; }
 }
 
 /// <summary>
@@ -2683,27 +2761,6 @@ public class RangeMergeInfoResult : ResultBase
     /// Distinct merged ranges contained in the queried range
     /// </summary>
     public IReadOnlyList<string> MergedRanges { get; set; } = [];
-}
-
-/// <summary>
-/// Result for cell lock information
-/// </summary>
-public class RangeLockInfoResult : ResultBase
-{
-    /// <summary>
-    /// Sheet name
-    /// </summary>
-    public string SheetName { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Range address
-    /// </summary>
-    public string RangeAddress { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Whether the cells are locked
-    /// </summary>
-    public bool IsLocked { get; set; }
 }
 
 #endregion

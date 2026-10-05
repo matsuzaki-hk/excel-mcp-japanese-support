@@ -7,8 +7,8 @@ ExcelMcp is a Windows-only automation system that controls the installed Microso
 ## System map
 
 ```text
-MCP Server -> in-process ExcelMcpService -> Core commands -> Excel COM
-CLI        -> background ExcelMcpService -> Core commands -> Excel COM
+MCP Server -> owned Service bridge -> in-process ExcelMcpService -> Core -> Excel COM
+CLI parser -> named-pipe daemon host -> ExcelMcpService -> Core -> Excel COM
 ```
 
 The MCP Server and `excelcli` are equal user entry points. They expose the same operations and behavior, but they run in separate processes and do not share open sessions.
@@ -21,6 +21,10 @@ The MCP Server and `excelcli` are equal user entry points. They expose the same 
 - **Batch (`IExcelBatch`):** The internal object that keeps Excel and its workbook open and runs COM work on Excel's required thread.
 - **Core command:** Transport-independent Excel behavior implemented under `src/ExcelMcp.Core`.
 - **Service:** The shared command router and session owner used by both entry points.
+- **Daemon host:** The CLI process component that owns named-pipe acceptance,
+  connection limits, idle shutdown, and connection draining around the Service.
+- **Service bridge:** The MCP host component that owns one in-process Service
+  generation and prevents stale requests from disposing a newer generation.
 - **COM reference:** A live Excel object such as a workbook, worksheet, range, chart, or model object. It belongs to the Excel process and requires controlled cleanup.
 - **Generated surface:** CLI commands, service routes, MCP schemas, or reference material produced from a source contract rather than maintained separately.
 - **Source contract:** An annotated Core interface from which matching Service, CLI, and MCP behavior is generated.
@@ -37,14 +41,22 @@ The MCP Server and `excelcli` are equal user entry points. They expose the same 
 - Operations inside one session run in order on one Excel thread.
 - Different sessions can run independently, but the same workbook cannot be opened in multiple sessions.
 - A timeout can leave Excel busy after the caller stops waiting. Such a session is no longer safe for additional work and must be closed.
-- Workbook changes are not automatically saved when a batch or session is disposed. Saving is an explicit operation.
+- Ordinary operations change the in-memory workbook. Explicit close defaults to discarding unsaved changes; request saving to keep them. Normal Service shutdown attempts to save remaining sessions before disposal. Bare batch disposal, crashes, and forced cancellation cleanup do not guarantee saving.
+- MCP uses the official SDK for registration, transport, argument binding, and protocol errors. The host owns its injected Service bridge; cancelled startup reclaims only the eventual session. Session publication is coordinated with shutdown.
 
 ## Sources of truth
 
-- `.github/copilot-instructions.md` and `.github/instructions/` define coding, testing, COM safety, and release rules.
+- `AGENTS.md`, nested `AGENTS.md` files, and `docs/agents/rules/` define shared coding, testing, COM safety, and release rules. The root [Code Review Rules](AGENTS.md#code-review-rules) section covers review tasks.
+- [Architecture decisions](docs/DECISIONS.md) explain the reasons and tradeoffs behind current choices, without duplicating those instructions.
 - `docs/ARCHITECTURE.md` explains the public architecture.
-- `specs/` defines feature contracts and intended behavior.
+- Annotated Core interfaces and their implementations define operation contracts and behavior.
 - `docs/features/` documents user-facing behavior.
-- `skills/shared/` is the source for guidance shared by the generated CLI and MCP skills.
+- `docs/reference/` owns general workflows, limitations, and recovery documentation.
+- `skills/` contains a small CLI launcher-discovery skill and the CLI and MCP
+  report-formatting skills; packaging selects the formatting skills' reference
+  from `docs/reference/report-formatting.md`.
 
 When these sources disagree, confirm the current implementation and update the stale source instead of creating another competing definition.
+
+Track proposed feature requirements in GitHub issues. Do not maintain separate
+specification copies of contracts or shipped feature documentation.

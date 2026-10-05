@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Sbroenne.ExcelMcp.CLI.Infrastructure;
+using Sbroenne.ExcelMcp.CLI.Telemetry;
 using Sbroenne.ExcelMcp.Service;
 using Spectre.Console.Cli;
 
@@ -58,7 +59,10 @@ internal sealed class ServiceStopCommand : AsyncCommand
         try
         {
             using var client = new ServiceClient(pipeName, connectTimeout: CommandTimeout, requestTimeout: CommandTimeout);
-            var response = await client.SendAsync(new ServiceRequest { Command = "service.shutdown" }, cancellationToken);
+            var request = new ServiceRequest { Command = "service.shutdown" };
+            var response = await CliTelemetry.TrackCommandAsync(
+                request,
+                () => client.SendAsync(request, cancellationToken));
             if (response.Success)
             {
                 if (await WaitForDaemonExitAsync(pipeName, cancellationToken))
@@ -213,16 +217,28 @@ internal sealed class ServiceStatusCommand : AsyncCommand
     {
         var pipeName = DaemonAutoStart.GetPipeName();
         var observation = DaemonConnectionPolicy.Observe(pipeName);
-        var response = await DaemonConnectionPolicy.SendControlRequestAsync(
-            pipeName,
-            new ServiceRequest { Command = "service.status" },
-            cancellationToken,
-            observation.IsStopped
-                ? DaemonConnectionPolicy.InitialProbeTimeout
-                : DaemonConnectionPolicy.ControlTimeout);
+        var request = new ServiceRequest { Command = "service.status" };
+        var response = await CliTelemetry.TrackCommandAsync(
+            request,
+            () => DaemonConnectionPolicy.SendControlRequestAsync(
+                pipeName,
+                request,
+                cancellationToken,
+                observation.IsStopped
+                    ? DaemonConnectionPolicy.InitialProbeTimeout
+                    : DaemonConnectionPolicy.ControlTimeout));
         if (response.Success && response.Result != null)
         {
-            var status = ServiceProtocol.Deserialize<ServiceStatus>(response.Result);
+            ServiceStatus? status;
+            try
+            {
+                status = ServiceProtocol.Deserialize<ServiceStatus>(response.Result);
+            }
+            catch (JsonException)
+            {
+                CliTelemetry.RecordFinalFailure("InvalidResponse");
+                throw;
+            }
             if (status != null)
             {
                 Console.WriteLine(JsonSerializer.Serialize(new
@@ -248,6 +264,7 @@ internal sealed class ServiceStatusCommand : AsyncCommand
                 ErrorCategory = "InvalidResponse",
                 ErrorMessage = "Service returned an invalid status response."
             };
+            CliTelemetry.RecordFinalFailure(response.ErrorCategory);
         }
 
         var failureState = DaemonConnectionPolicy.ResolveFailureState(pipeName, response);

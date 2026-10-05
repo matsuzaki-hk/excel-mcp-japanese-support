@@ -4,7 +4,7 @@
 
 ## 日本語サポートの範囲
 
-- 日本語テーブル名（`[\p{L}_][\p{L}\p{N}_]*` 正規表現）
+- 日本語テーブル名（upstream がテーブル名検証を Excel 委任に変更して以降、ローカライズ名はネイティブに許可される）
 - 日本語シート名・ワークブック名・ファイルパス
 - 日本語シナリオ名・XmlMap 名・QueryTable 名・VBA モジュール名・画像名
 
@@ -41,11 +41,11 @@
 ### Documentation
 
 - Update README, skill files, and upstream snapshot docs when user-facing behavior changes.
-- Keep tool/operation counts consistent (31 tools / 326 operations as of v2.0.8).
+- Keep tool/operation counts consistent (31 tools / 387 operations as of v2.2.1; canonical source is `doc-counts.json`).
 
 ### Japanese Fork Specifics
 
-- Preserve Unicode support for table/sheet/file names. Do not reintroduce ASCII-only regexes.
+- Preserve Unicode support for table/sheet/file names. Upstream now delegates table-name validation to Excel itself (`e94159f9`); do not reintroduce ASCII-only regexes.
 - Keep `ComUtilities` Unicode normalization (`NormalizationForm.FormC`) intact.
 - Do not remove the Japanese manual test assets under `tests/manual/japanese-*/`.
 - Use the fork repository `matsuzaki-hk/excel-mcp-japanese-support` in release assets and skill package URLs.

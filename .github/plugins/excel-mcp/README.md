@@ -2,7 +2,11 @@
 
 **Model Context Protocol server for natural language Excel automation**
 
-This plugin provides the `excel-mcp` skill and a plugin-local MCP bootstrap for GitHub Copilot. Use natural language to automate Power Query, DAX measures, PivotTables, Tables, Charts, VBA macros, and more through Windows Excel COM API.
+This plugin provides an npx launch configuration for GitHub Copilot and the
+optional `excel-mcp-report-formatting` skill for requested report presentation.
+Use natural language and native tool schemas for ordinary Excel automation;
+general workflows and recovery remain in the
+[documentation](https://excelmcpserver.dev/reference/).
 
 **Best for:** Conversational AI workflows (GitHub Copilot Chat, Claude Desktop, Cursor) where rich tool schemas and persistent connections matter more than token efficiency.
 
@@ -11,6 +15,7 @@ This plugin provides the `excel-mcp` skill and a plugin-local MCP bootstrap for 
 ## Prerequisites
 
 - **Windows** with Microsoft Excel 2016 or later (COM interop required)
+- **Node.js 18 or later** with `npx`
 - **GitHub Copilot extension** or other MCP-compatible client
 
 ---
@@ -23,42 +28,45 @@ Install the [Excel MCP VS Code extension](https://marketplace.visualstudio.com/i
 
 ### Option 2: Plugin Marketplace
 
+Install from [Awesome Copilot](https://github.com/github/awesome-copilot), the
+default marketplace in current Copilot clients:
+
+```powershell
+copilot plugin install excel-mcp@awesome-copilot
+```
+
+Alternatively, install from our direct marketplace:
+
 ```powershell
 copilot plugin marketplace add sbroenne/mcp-server-excel-plugins
 copilot plugin install excel-mcp@mcp-server-excel-plugins
 ```
 
+Choose one marketplace for this plugin; do not install both copies.
+
 ### Option 3: Manual Installation
 
 1. Install the plugin
-2. Let the plugin bootstrap the latest self-contained `mcp-excel.exe` on first use
+2. Let the plugin run the latest `@sbroenne/mcp-server-excel` package through `npx`
 3. Or add the standalone binary to your MCP client configuration manually (see [MCP Server Installation Guide](https://excelmcpserver.dev/installation-mcp-server/))
 
-### Runtime Bootstrap
+### Runtime Launch
 
-The plugin does **not** rely on a bundled `mcp-excel.exe`. Its Agent Plugins 1.0 `mcp.json` launches a PowerShell wrapper that:
-
-- checks GitHub Releases for the newest `ExcelMcp-MCP-Server-*-windows.zip`
-- downloads and caches the latest self-contained Windows server on first invocation
-- stores plugin-hosted runtime state under `PLUGIN_DATA\runtime`
-- re-checks freshness at most once per Copilot chat session
-
-The optional global shim runs outside an Agent Plugins host, uses
-`~\.copilot\plugin-runtime\mcp-server-excel\excel-mcp`, and checks for updates at
-most once every 24 hours.
-
-If you want the server registered globally in `~/.copilot/mcp-config.json`, run:
+The plugin does **not** bundle `mcp-excel.exe`. Its Agent Plugins 1.0 `mcp.json`
+launches the public npm package directly:
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File `
-  "$env:USERPROFILE\.copilot\installed-plugins\mcp-server-excel-plugins\excel-mcp\com.github.copilot\bin\install-global.ps1"
+npx -y @sbroenne/mcp-server-excel@latest
 ```
+
+The plugin supplies this configuration itself. No global helper or separate
+entry in `~/.copilot/mcp-config.json` is required.
 
 ---
 
 ## What You Can Do
 
-**31 specialized tools with 326 operations** for comprehensive Excel automation:
+**31 specialized tools with 387 operations** for comprehensive Excel automation:
 
 ### Core Operations
 
@@ -147,7 +155,7 @@ ExcelMcp drives the **actual Excel application** through its official COM API �
 - 📊 Build complex DAX measures with AI guidance
 - 📋 Automate repetitive data transformations and formatting
 - 👀 **Show Excel Mode** — Watch changes live as AI works
-- 🚀 **First-Run Bootstrap** — Auto-download the newest self-contained MCP runtime when the plugin is first invoked
+- 🚀 **npm-first launch** — Run the newest published MCP package through `npx`
 
 ### Optional Remote Code Formatting
 

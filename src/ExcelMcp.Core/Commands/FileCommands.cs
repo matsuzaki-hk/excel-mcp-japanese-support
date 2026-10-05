@@ -16,7 +16,7 @@ public class FileCommands : IFileCommands
 
         bool exists = File.Exists(filePath);
         string extension = Path.GetExtension(filePath).ToLowerInvariant();
-        bool isValidExtension = extension is ".xlsx" or ".xlsm";
+        bool isValidExtension = extension is ".xlsx" or ".xlsm" or ".xlsb" or ".xls";
         bool isIrmProtected = exists && isValidExtension && FileAccessValidator.IsIrmProtected(filePath);
         bool isValid = false;
         bool canOpen = false;
@@ -33,7 +33,7 @@ public class FileCommands : IFileCommands
 
         string? message = !exists
             ? $"File not found: {filePath}"
-            : !isValidExtension ? $"Invalid file extension. Expected .xlsx or .xlsm, got {extension}" : null;
+            : !isValidExtension ? $"Invalid file extension. Expected .xlsx, .xlsm, .xlsb or .xls, got {extension}" : null;
 
         if (exists && isValidExtension)
         {
@@ -53,12 +53,6 @@ public class FileCommands : IFileCommands
                 else
                 {
                     FileAccessValidator.ValidateFileNotLocked(filePath);
-                    isValid = FileAccessValidator.HasValidWorkbookContainer(filePath);
-                    canOpen = isValid;
-                    if (!isValid)
-                    {
-                        message = $"File is not a valid Excel workbook container: {filePath}";
-                    }
                 }
             }
             catch (InvalidOperationException ex)

@@ -9,8 +9,8 @@ keywords: "Excel MCP FAQ, does Excel MCP need Excel installed, Excel MCP Windows
 # Frequently Asked Questions
 
 <!--
-  Every `###` heading on this page is parsed by gh-pages/hooks.py into FAQPage
-  JSON-LD (see `_faq_jsonld`). The structured data is derived from this visible
+  Every `###` heading on this page is   parsed by gh-pages/sitegen/llm.py into FAQPage
+    JSON-LD (see `faq_jsonld`). The structured data is derived from this visible
   content, so there is nothing to keep in sync by hand - just write the
   questions here. Headings rather than collapsible admonitions are used
   deliberately: they give each answer a stable anchor that can be deep-linked
@@ -26,12 +26,12 @@ Hitting an actual error rather than a question? See
 
 No. You talk to your AI assistant in plain language ("build a PivotTable of
 sales by product and chart it") and it drives Excel for you. The
-[feature reference](features.md) is there when you want to see everything that's
-possible - you don't need to memorize it.
+[feature overview](features.md) helps you explore the capabilities and important
+limitations - you don't need to memorize commands.
 
 ### CLI or MCP Server - which should I install?
 
-Both expose the **same 326 operations**. Use the **MCP Server** for
+Both expose the **same 387 operations**. Use the **MCP Server** for
 conversational AI (Claude Desktop, VS Code Chat); use the **CLI** (`excelcli`)
 for coding agents and scripting, where it uses ~64% fewer tokens. You can
 install both. See [Installation](installation.md).
@@ -62,10 +62,12 @@ for the full comparison with tools like openpyxl and pandas.
 
 ### Will it damage my existing workbooks?
 
-No. Excel itself opens and saves the file, so formulas, PivotTables, charts,
-macros, the Data Model, and formatting are all preserved. Other tools that
-rewrite the `.xlsx` file directly can silently drop those; here Excel does the
-work.
+Excel itself opens and saves the file, rather than a file-parser library
+rewriting it. That avoids file-parser limitations, but it is not a guarantee
+that a workbook stays unchanged. Requested edits can change or remove data,
+formulas, formatting, charts, PivotTables, macros, or Data Model features.
+Review the requested changes before saving; some operations are destructive
+and have no tool-level undo.
 
 ## Cost, privacy and support
 

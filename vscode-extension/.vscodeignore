@@ -16,13 +16,20 @@ out/tests/**
 .vscode/**
 .github/**
 scripts/**
+tests/**
+vitest.config.*
 tsconfig.json
+tsconfig.test.json
+.vitest/**
+coverage/**
 node_modules/**
 *.vsix
 .gitignore
 package-lock.json
 
 # Development documentation (not needed by users)
+**/AGENTS.md
+**/CLAUDE.md
 DEVELOPMENT.md
 MARKETPLACE-PUBLISHING.md
 PUBLISHER-GUIDE.md

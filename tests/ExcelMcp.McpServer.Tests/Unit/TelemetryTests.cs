@@ -15,6 +15,7 @@ namespace Sbroenne.ExcelMcp.McpServer.Tests.Unit;
 [Trait("Layer", "McpServer")]
 [Trait("Feature", "Telemetry")]
 [Collection("ProgramTransport")]
+[Trait("RequiresExcel", "false")]
 public class TelemetryTests
 {
     #region ExcelMcpTelemetry Tests
@@ -52,6 +53,16 @@ public class TelemetryTests
     {
         // User ID should be lowercase hex characters only
         Assert.True(ExcelMcpTelemetry.UserId.All(c => char.IsAsciiHexDigitLower(c)));
+    }
+
+    [Fact]
+    public void Identity_IsStableWithinTheProcessAndSessionIdIsHex()
+    {
+        var user = ExcelMcpTelemetry.UserId;
+        var session = ExcelMcpTelemetry.SessionId;
+        Assert.True(session.All(char.IsAsciiHexDigit));
+        Assert.Equal(user, ExcelMcpTelemetry.UserId);
+        Assert.Equal(session, ExcelMcpTelemetry.SessionId);
     }
 
     [Fact]

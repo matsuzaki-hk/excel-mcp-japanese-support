@@ -55,9 +55,9 @@ public class ScreenshotCommands : IScreenshotCommands
     }
 
     /// <summary>
-    /// Captures the entire used area of a worksheet as an image.
-    /// If UsedRange exceeds 500 rows or 50 columns, it is capped to keep the capture legible
-    /// on sheets with formatting extending far beyond the data.
+    /// Captures the entire used area of a worksheet and its embedded charts as an image.
+    /// Large sheets are tiled and may be truncated by the capture tile limit, which is reported in
+    /// the result message.
     /// </summary>
     public ScreenshotResult CaptureSheet(IExcelBatch batch, string? sheetName = null, ScreenshotQuality quality = ScreenshotQuality.Medium)
     {
@@ -75,25 +75,11 @@ public class ScreenshotCommands : IScreenshotCommands
                 usedRange = sheet.UsedRange;
                 string actualSheet = sheet.Name?.ToString() ?? "Sheet1";
 
-                int rows = Convert.ToInt32(usedRange.Rows.Count);
-                int cols = Convert.ToInt32(usedRange.Columns.Count);
+                captureRange = GetCaptureRangeIncludingCharts(sheet, usedRange, ct);
 
-                const int maxRows = 500;
-                const int maxCols = 50;
+                string actualRange = captureRange.Address?.ToString() ?? "A1";
 
-                if (rows > maxRows || cols > maxCols)
-                {
-                    int startRow = Convert.ToInt32(usedRange.Row);
-                    int startCol = Convert.ToInt32(usedRange.Column);
-                    int endRow = startRow + Math.Min(rows, maxRows) - 1;
-                    int endCol = startCol + Math.Min(cols, maxCols) - 1;
-                    captureRange = sheet.Range[sheet.Cells[startRow, startCol], sheet.Cells[endRow, endCol]];
-                }
-
-                dynamic rangeToCapture = captureRange ?? usedRange;
-                string actualRange = rangeToCapture.Address?.ToString() ?? "A1";
-
-                return ExportRangeAsImage(ctx.App, sheet, rangeToCapture, actualSheet, actualRange, quality);
+                return ExportRangeAsImage(ctx.App, sheet, captureRange, actualSheet, actualRange, quality);
             }
             finally
             {
@@ -102,6 +88,101 @@ public class ScreenshotCommands : IScreenshotCommands
                 ComUtilities.Release(ref sheet);
             }
         });
+    }
+
+    /// <summary>
+    /// Gets the smallest cell range containing the used cells and all embedded chart shapes.
+    /// Chart objects do not expand Excel's UsedRange, but their anchor cells describe the area that
+    /// must be visible for a window screenshot to include them.
+    /// </summary>
+    private static dynamic GetCaptureRangeIncludingCharts(dynamic sheet, dynamic usedRange, CancellationToken ct)
+    {
+        dynamic? usedRows = null;
+        dynamic? usedColumns = null;
+        dynamic? shapes = null;
+        dynamic? shape = null;
+        dynamic? topLeftCell = null;
+        dynamic? bottomRightCell = null;
+
+        try
+        {
+            int firstRow = Convert.ToInt32(usedRange.Row);
+            int firstColumn = Convert.ToInt32(usedRange.Column);
+            usedRows = usedRange.Rows;
+            usedColumns = usedRange.Columns;
+            int lastRow = firstRow + Convert.ToInt32(usedRows.Count) - 1;
+            int lastColumn = firstColumn + Convert.ToInt32(usedColumns.Count) - 1;
+
+            shapes = sheet.Shapes;
+            int shapeCount = Convert.ToInt32(shapes.Count);
+
+            for (int index = 1; index <= shapeCount; index++)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                try
+                {
+                    shape = shapes.Item(index);
+
+                    // msoChart
+                    if (Convert.ToInt32(shape.Type) != 3)
+                    {
+                        continue;
+                    }
+
+                    // msoFalse: hidden charts are not rendered, so they must not expand the capture area
+                    if (Convert.ToInt32(shape.Visible) == 0)
+                    {
+                        continue;
+                    }
+
+                    topLeftCell = shape.TopLeftCell;
+                    bottomRightCell = shape.BottomRightCell;
+
+                    firstRow = Math.Min(firstRow, Convert.ToInt32(topLeftCell.Row));
+                    firstColumn = Math.Min(firstColumn, Convert.ToInt32(topLeftCell.Column));
+                    lastRow = Math.Max(lastRow, Convert.ToInt32(bottomRightCell.Row));
+                    lastColumn = Math.Max(lastColumn, Convert.ToInt32(bottomRightCell.Column));
+                }
+                finally
+                {
+                    ComUtilities.Release(ref bottomRightCell);
+                    ComUtilities.Release(ref topLeftCell);
+                    ComUtilities.Release(ref shape);
+                }
+            }
+
+            return GetRange(sheet, firstRow, firstColumn, lastRow, lastColumn);
+        }
+        finally
+        {
+            ComUtilities.Release(ref shapes);
+            ComUtilities.Release(ref usedColumns);
+            ComUtilities.Release(ref usedRows);
+        }
+    }
+
+    /// <summary>Gets a worksheet range by its inclusive cell boundaries.</summary>
+    private static dynamic GetRange(dynamic sheet, int firstRow, int firstColumn, int lastRow, int lastColumn)
+    {
+        dynamic? cells = null;
+        dynamic? topLeft = null;
+        dynamic? bottomRight = null;
+
+        try
+        {
+            cells = sheet.Cells;
+            topLeft = cells[firstRow, firstColumn];
+            bottomRight = cells[lastRow, lastColumn];
+
+            return sheet.Range[topLeft, bottomRight];
+        }
+        finally
+        {
+            ComUtilities.Release(ref bottomRight);
+            ComUtilities.Release(ref topLeft);
+            ComUtilities.Release(ref cells);
+        }
     }
 
     /// <summary>
@@ -274,8 +355,8 @@ public class ScreenshotCommands : IScreenshotCommands
 
         plan = CapturePlanner.Replan(range, plan.Zoom, usable);
 
-        int[] columnOffsets = BuildPixelOffsets(plan.ColumnSegments, pixelsPerPoint, paneMaxWidth);
-        int[] rowOffsets = BuildPixelOffsets(plan.RowSegments, pixelsPerPoint, paneMaxHeight);
+        int[] columnOffsets = BuildPixelOffsets(range, false, plan.ColumnSegments, pixelsPerPoint, paneMaxWidth);
+        int[] rowOffsets = BuildPixelOffsets(range, true, plan.RowSegments, pixelsPerPoint, paneMaxHeight);
 
         int totalWidth = Math.Max(1, columnOffsets[^1]);
         int totalHeight = Math.Max(1, rowOffsets[^1]);
@@ -449,19 +530,41 @@ public class ScreenshotCommands : IScreenshotCommands
     /// Converts segment sizes in points to cumulative pixel offsets, so adjacent tiles meet without
     /// gaps or overlaps after rounding.
     /// </summary>
-    private static int[] BuildPixelOffsets(IReadOnlyList<CapturePlanner.Segment> segments, double pixelsPerPoint, int paneMax)
+    private static int[] BuildPixelOffsets(dynamic range, bool rows, IReadOnlyList<CapturePlanner.Segment> segments, double pixelsPerPoint, int paneMax)
     {
         var offsets = new int[segments.Count + 1];
         int cursor = 0;
-
-        for (int i = 0; i < segments.Count; i++)
+        dynamic? items = null;
+        try
         {
-            offsets[i] = cursor;
+            items = rows ? range.Rows : range.Columns;
+            for (int i = 0; i < segments.Count; i++)
+            {
+                offsets[i] = cursor;
+                int renderedSize = 0;
+                var segment = segments[i];
+                for (int index = segment.Start; index < segment.Start + segment.Count; index++)
+                {
+                    dynamic? item = null;
+                    try
+                    {
+                        item = items[index];
+                        double extent = rows ? Convert.ToDouble(item.Height) : Convert.ToDouble(item.Width);
+                        // Excel rounds each rendered cell to whole pixels, not the summed range height.
+                        renderedSize += (int)Math.Round(extent * pixelsPerPoint, MidpointRounding.AwayFromZero);
+                    }
+                    finally
+                    {
+                        ComUtilities.Release(ref item);
+                    }
+                }
 
-            // Capped at the pane, and rounded per segment rather than cumulatively, so that the
-            // space reserved on the canvas is exactly the number of pixels the tile can supply.
-            // Any mismatch shows up as an unpainted hairline at the seam.
-            cursor += Math.Min((int)Math.Round(segments[i].Size * pixelsPerPoint), paneMax);
+                cursor += Math.Min(renderedSize, paneMax);
+            }
+        }
+        finally
+        {
+            ComUtilities.Release(ref items);
         }
 
         offsets[segments.Count] = cursor;

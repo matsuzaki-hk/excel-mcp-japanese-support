@@ -96,6 +96,90 @@ public partial class DataModelCommands
     }
 
     /// <summary>
+    /// Reads each measure's stored formula from the Data Model engine catalog.
+    /// </summary>
+    /// <remarks>
+    /// <c>ModelMeasure.Formula</c> returns the formula converted to the Windows number format;
+    /// after a workbook is reopened on a decimal-comma computer it reports <c>1.5</c> as <c>1,5</c>.
+    /// The engine catalog holds the DAX the model actually evaluates. Returns null when the
+    /// catalog cannot be read so callers can fall back to <c>ModelMeasure.Formula</c>.
+    /// </remarks>
+    private static Dictionary<string, string>? TryReadStoredMeasureFormulas(Excel.Model model)
+    {
+        Excel.WorkbookConnection? dataModelConn = null;
+        Excel.ModelConnection? modelConn = null;
+        dynamic? adoConnection = null;
+        dynamic? recordset = null;
+        dynamic? fields = null;
+        dynamic? nameField = null;
+        dynamic? expressionField = null;
+        try
+        {
+            dataModelConn = model.DataModelConnection;
+            modelConn = dataModelConn?.ModelConnection;
+            // ADO has no referenced PIA; the existing evaluate path also uses late binding.
+            adoConnection = modelConn?.ADOConnection;
+            if (adoConnection == null)
+            {
+                return null;
+            }
+
+            recordset = adoConnection.Execute(
+                "SELECT [MEASURE_NAME], [EXPRESSION] FROM $SYSTEM.MDSCHEMA_MEASURES");
+            fields = recordset.Fields;
+            nameField = fields.Item(0);
+            expressionField = fields.Item(1);
+
+            var formulas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            while (!Convert.ToBoolean(recordset.EOF, CultureInfo.InvariantCulture))
+            {
+                object? nameValue = nameField.Value;
+                object? expressionValue = expressionField.Value;
+                string? name = nameValue is null or DBNull ? null : Convert.ToString(nameValue, CultureInfo.InvariantCulture);
+                string? expression = expressionValue is null or DBNull ? null : Convert.ToString(expressionValue, CultureInfo.InvariantCulture);
+                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(expression))
+                {
+                    formulas.TryAdd(name, expression);
+                }
+
+                recordset.MoveNext();
+            }
+
+            return formulas;
+        }
+        catch (Exception ex) when (ex is COMException or RuntimeBinderException or InvalidCastException or FormatException)
+        {
+            return null;
+        }
+        finally
+        {
+            if (recordset != null)
+            {
+                try
+                {
+                    // 1 = adStateOpen
+                    if (Convert.ToInt32(recordset.State, CultureInfo.InvariantCulture) == 1)
+                    {
+                        recordset.Close();
+                    }
+                }
+                catch (Exception ex) when (ex is COMException or RuntimeBinderException)
+                {
+                    // Closing a finished recordset is best effort.
+                }
+            }
+
+            ComUtilities.Release(ref expressionField);
+            ComUtilities.Release(ref nameField);
+            ComUtilities.Release(ref fields);
+            ComUtilities.Release(ref recordset);
+            ComUtilities.Release(ref adoConnection);
+            ComUtilities.Release(ref modelConn);
+            ComUtilities.Release(ref dataModelConn);
+        }
+    }
+
+    /// <summary>
     /// Gets all measure names from the Data Model
     /// </summary>
     /// <param name="model">Model COM object</param>
@@ -254,7 +338,7 @@ public partial class DataModelCommands
     /// </summary>
     /// <param name="model">Model COM object</param>
     /// <param name="formatType">Format type (General, Currency, Decimal, Percentage, WholeNumber)</param>
-    /// <returns>FormatInformation COM object (never null - always returns at least ModelFormatGeneral)</returns>
+    /// <returns>The requested FormatInformation COM object; an omitted format uses General</returns>
     private static object GetFormatObject(Excel.Model model, string? formatType)
     {
         // CRITICAL FIX: FormatInformation parameter is REQUIRED by Excel COM API
@@ -264,25 +348,14 @@ public partial class DataModelCommands
         // Solution: Always return a format object - use ModelFormatGeneral as default
         // See: docs/KNOWN-ISSUES.md for investigation details
 
-        if (string.IsNullOrEmpty(formatType))
+        var requestedFormat = string.IsNullOrEmpty(formatType) ? GeneralMeasureFormat : formatType;
+        if (!MeasureFormatFactories.TryGetValue(requestedFormat, out var createFormat))
         {
-            return model.ModelFormatGeneral;  // Default format
+            throw UnknownMeasureFormatType(requestedFormat);
         }
 
-        if (!MeasureFormatFactories.TryGetValue(formatType, out var createFormat))
-        {
-            throw UnknownMeasureFormatType(formatType);
-        }
-
-        try
-        {
-            return createFormat(model);
-        }
-        catch (Exception ex) when (ex is COMException or RuntimeBinderException)
-        {
-            // COM format object not available - use General as safe fallback
-            return model.ModelFormatGeneral;
-        }
+        return createFormat(model)
+            ?? throw new InvalidOperationException($"Excel did not provide the requested measure format '{requestedFormat}'.");
     }
 
     private static ArgumentException UnknownMeasureFormatType(string formatType) =>
@@ -299,71 +372,39 @@ public partial class DataModelCommands
     /// </summary>
     /// <param name="formatInfo">The FormatInformation COM object from a ModelMeasure</param>
     /// <returns>Structured format info with Type, Symbol, DecimalPlaces, UseThousandSeparator as applicable</returns>
-    private static MeasureFormatInfo GetFormatInfo(dynamic formatInfo)
-    {
-        var result = new MeasureFormatInfo { Type = GeneralMeasureFormat };
-
-        try
+    private static MeasureFormatInfo GetFormatInfo(object formatInfo) =>
+        formatInfo switch
         {
-            // Try to detect the format type by checking for type-specific properties
-            // Each ModelFormat* type has different properties available
-
-            if (formatInfo is Excel.ModelFormatWholeNumber wholeNumber)
+            Excel.ModelFormatWholeNumber whole => new MeasureFormatInfo
             {
-                result.Type = WholeNumberMeasureFormat;
-                result.DecimalPlaces = 0;
-                result.UseThousandSeparator = wholeNumber.UseThousandSeparator;
-                return result;
-            }
-
-            // Check for Currency (has Symbol and DecimalPlaces)
-            // COM property probing: access throws COMException or RuntimeBinderException if property doesn't exist on this format type
-            try
+                Type = WholeNumberMeasureFormat,
+                DecimalPlaces = 0,
+                UseThousandSeparator = whole.UseThousandSeparator
+            },
+            Excel.ModelFormatCurrency currency => new MeasureFormatInfo
             {
-                string? symbol = formatInfo.Symbol?.ToString();
-                if (!string.IsNullOrEmpty(symbol))
-                {
-                    result.Type = CurrencyMeasureFormat;
-                    result.Symbol = symbol;
-                    result.DecimalPlaces = Convert.ToInt32(formatInfo.DecimalPlaces);
-                    return result;
-                }
-            }
-            catch (Exception ex) when (ex is COMException or RuntimeBinderException) { /* Not a currency format - property doesn't exist */ }
-
-            // Check for Percentage (has DecimalPlaces and UseThousandSeparator)
-            try
+                Type = CurrencyMeasureFormat,
+                Symbol = currency.Symbol,
+                DecimalPlaces = currency.DecimalPlaces
+            },
+            Excel.ModelFormatDecimalNumber number => new MeasureFormatInfo
             {
-                // Percentage format has UseThousandSeparator but no Symbol
-                bool useThousands = formatInfo.UseThousandSeparator;
-                int decimals = Convert.ToInt32(formatInfo.DecimalPlaces);
-                // If we got here without exception, it's likely Percentage or Decimal
-                result.Type = PercentageMeasureFormat;
-                result.DecimalPlaces = decimals;
-                result.UseThousandSeparator = useThousands;
-                return result;
-            }
-            catch (Exception ex) when (ex is COMException or RuntimeBinderException) { /* Not a percentage format - property doesn't exist */ }
-
-            // Check for DecimalNumber or WholeNumber (has DecimalPlaces)
-            try
+                Type = DecimalMeasureFormat,
+                DecimalPlaces = number.DecimalPlaces,
+                UseThousandSeparator = number.UseThousandSeparator
+            },
+            Excel.ModelFormatPercentageNumber percentage => new MeasureFormatInfo
             {
-                int decimals = Convert.ToInt32(formatInfo.DecimalPlaces);
-                result.Type = decimals == 0 ? WholeNumberMeasureFormat : DecimalMeasureFormat;
-                result.DecimalPlaces = decimals;
-                return result;
-            }
-            catch (Exception ex) when (ex is COMException or RuntimeBinderException) { /* Not a decimal format - property doesn't exist */ }
-
-            // Default to General if we can't determine the type
-            return result;
-        }
-        catch (Exception ex) when (ex is COMException or RuntimeBinderException)
-        {
-            // COM object access failed entirely - return default General format
-            return result;
-        }
-    }
+                Type = PercentageMeasureFormat,
+                DecimalPlaces = percentage.DecimalPlaces,
+                UseThousandSeparator = percentage.UseThousandSeparator
+            },
+            Excel.ModelFormatScientificNumber => new MeasureFormatInfo { Type = "Scientific" },
+            Excel.ModelFormatBoolean => new MeasureFormatInfo { Type = "Boolean" },
+            Excel.ModelFormatDate => new MeasureFormatInfo { Type = "Date" },
+            Excel.ModelFormatGeneral => new MeasureFormatInfo { Type = GeneralMeasureFormat },
+            _ => throw new InvalidOperationException("Excel returned an unrecognized measure format; its metadata cannot be read.")
+        };
 
     /// <summary>
     /// Finds a relationship between two tables by column names

@@ -1,16 +1,15 @@
 # CI Gate — the authoritative status checks for pull requests.
 #
-# Both jobs ALWAYS run on every PR to `main` (no path filters), so they can be
+# Both required checks ALWAYS report on every PR to `main`, so they can be
 # safely marked as required status checks without the "required check never
 # runs on path-filtered PRs" deadlock.
 #
-# `Docs Site` builds and audits the MkDocs website. `CI Gate` ports the
-# Excel-free pre-commit gates (scripts/pre-commit.ps1) into CI so
-# that the correctness checks are enforced server-side even if a contributor
-# does not have the local hook installed. The Excel-dependent gates — the CLI
-# workflow smoke test and the MCP smoke test — are intentionally NOT run here:
-# this job uses the GitHub-hosted `windows-latest` runner, which does not have
-# Microsoft Excel installed. Those two gates remain local prerequisites and are
+# `Docs Site` builds and audits the MkDocs website. `CI Gate` verifies that
+# change detection and all selected jobs succeeded. Main/manual runs are complete.
+# The Excel-dependent gates — the CLI workflow, stale-build graceful-save
+# acceptance, and MCP workflow scenarios — are intentionally NOT run here:
+# GitHub-hosted `windows-latest` runners do not have Microsoft Excel installed.
+# All required acceptance stages remain local prerequisites and are
 # explicitly attested in the pull request testing checklist.
 
 name: CI Gate
@@ -40,10 +39,10 @@ jobs:
   # so it can safely be a required check.
   docs:
     name: Docs Site
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # hooks.py derives each sitemap <lastmod> from `git log`, so the full
           # history is required. A shallow clone would date every page to the
@@ -51,7 +50,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
           cache: pip
@@ -59,6 +58,13 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r gh-pages/requirements.txt
+
+      - name: Unit test site generator
+        working-directory: gh-pages
+        run: python -m unittest discover -s tests
+
+      - name: Check sample data and build scripts
+        run: python -m unittest discover -s samples/world-bank-dashboard -p "test_*.py"
 
       - name: Build with MkDocs
         working-directory: gh-pages
@@ -69,104 +75,180 @@ jobs:
         run: python audit_site.py
 
       # Guards against the deploy workflow's hand-written paths: filter drifting
-      # from the canonical sources hooks.py mirrors, which would publish a
+      # from the canonical sources listed in sitegen/sources.py, which would publish a
       # silently stale site until the nightly cron caught up.
       - name: Verify deploy path filter covers every mirrored source
         working-directory: gh-pages
         run: python check_deploy_paths.py
 
-  ci-gate:
-    name: CI Gate
-    runs-on: windows-latest
+  changes:
+    name: Select validation
+    runs-on: ubuntu-26.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      tests: ${{ steps.select.outputs.tests }}
+      packages: ${{ steps.select.outputs.packages }}
+      package_build: ${{ steps.select.outputs.package_build }}
+      npm: ${{ steps.select.outputs.npm }}
+      lockfiles: ${{ steps.select.outputs.lockfiles }}
+      source_checks_group: ${{ steps.select.outputs.source_checks_group }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Npm lockfile portability regression tests
-        timeout-minutes: 2
-        shell: pwsh
-        run: ./scripts/Test-NpmLockfiles.ps1
-
-      - name: Npm lockfile portability
-        timeout-minutes: 2
-        shell: pwsh
-        run: ./scripts/check-npm-lockfiles.ps1
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          dotnet-version: 10.0.x
+          fetch-depth: 0
+      - name: Select changed inputs
+        id: select
+        shell: pwsh
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          ./scripts/Get-CiValidationPlan.ps1 -BaseRef $env:BASE_REF -HeadRef $env:HEAD_REF `
+            -Full:($env:EVENT -ne 'pull_request') -OutputPath artifacts/ci-plan.json
+      - name: Share selection
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ci-validation-plan
+          path: artifacts/ci-plan.json
+          if-no-files-found: error
 
+  tests:
+    name: Excel-free (${{ matrix.group }})
+    needs: changes
+    if: needs.changes.outputs.tests == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Read selection
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ci-validation-plan
+          path: artifacts
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - name: Cache NuGet downloads
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('global.json', 'Directory.*', 'NuGet.Config', '**/*.csproj', '**/*.props', '**/*.targets') }}
       - name: Setup Node.js
+        if: matrix.group == 'Tooling'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      # Separate checkouts keep rebuild/process regressions from racing packaging.
+      - name: Restore and build selected inputs
+        shell: pwsh
+        run: |
+          ./scripts/Build-CiInputs.ps1 -PlanFile artifacts/ci-plan.json -Group '${{ matrix.group }}'
+      - name: Generate complete skill inputs
+        if: matrix.group == needs.changes.outputs.source_checks_group
+        shell: pwsh
+        run: ./scripts/Build-AgentSkills.ps1 -GenerateOnly
+      - name: Selected Excel-free tests
+        shell: pwsh
+        run: |
+          ./scripts/Invoke-ExcelFreeTests.ps1 -Group '${{ matrix.group }}' `
+            -PlanFile artifacts/ci-plan.json -ResultsDirectory 'TestResults/${{ matrix.group }}'
+      - name: Source correctness checks
+        if: matrix.group == needs.changes.outputs.source_checks_group
+        shell: pwsh
+        run: |
+          foreach ($script in @('check-com-leaks','check-workbook-package-access','check-success-flag','check-dynamic-casts')) {
+            & "./scripts/$script.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "$script failed." }
+          }
+          & ./scripts/check-doc-counts.ps1 -SkipBuild
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed documentation counts are stale.' }
+      - name: Verify entry-point builds
+        if: matrix.group == 'Fast' && matrix.group == needs.changes.outputs.source_checks_group
+        shell: pwsh
+        run: |
+          & ./src/ExcelMcp.CLI/bin/Release/net10.0-windows/excelcli.exe --help
+          if ($LASTEXITCODE -ne 0) { throw 'CLI help failed.' }
+          if (-not (Test-Path ./src/ExcelMcp.McpServer/bin/Release/net10.0-windows/Sbroenne.ExcelMcp.McpServer.exe)) {
+            throw 'MCP Server executable missing.'
+          }
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: excel-free-${{ matrix.group }}-results
+          path: TestResults/${{ matrix.group }}/**/*.trx
+          if-no-files-found: error
+
+  packages:
+    name: Affected packages
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Read selection
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ci-validation-plan
+          path: artifacts
+      - name: Setup .NET
+        if: needs.changes.outputs.package_build == 'true'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - name: Cache NuGet downloads
+        if: needs.changes.outputs.package_build == 'true'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('global.json', 'Directory.*', 'NuGet.Config', '**/*.csproj', '**/*.props', '**/*.targets') }}
+      - name: Setup Node.js
+        if: needs.changes.outputs.package_build == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           registry-url: https://registry.npmjs.org
-          package-manager-cache: false
+          cache: npm
+          cache-dependency-path: |
+            vscode-extension/package-lock.json
+            npm-packages/shared/package-lock.json
 
-      - name: Restore
-        run: dotnet restore Sbroenne.ExcelMcp.sln
-
-      # Release build validates compilation and runs the source generators, so
-      # the audit scripts below see the generated CLI/MCP surface. Mirrors the
-      # pre-commit Release build gate (NuGetAudit disabled here — the Dependency
-      # Review workflow owns vulnerability scanning).
-      - name: Build (Release)
-        run: dotnet build Sbroenne.ExcelMcp.sln --configuration Release --no-restore -p:NuGetAudit=false
-
-      - name: Pre-commit hook regression tests
-        run: dotnet test tests/ExcelMcp.SkillGeneration.Tests/ExcelMcp.SkillGeneration.Tests.csproj --configuration Release --no-build --no-restore --filter "Feature=PreCommit" --blame-hang-timeout 60s
-
-      # --- Excel-free correctness gates (ported from scripts/pre-commit.ps1) ---
-
-      - name: COM object leak check
+      - name: Generate complete skill inputs
+        shell: pwsh
+        run: ./scripts/Build-AgentSkills.ps1 -GenerateOnly
+      - name: Build and verify affected distributable packages
         shell: pwsh
         run: |
-          & scripts/check-com-leaks.ps1
-          if ($LASTEXITCODE -ne 0) { throw "COM object leaks detected. All dynamic COM objects must be released in finally blocks." }
+          $plan = Get-Content artifacts/ci-plan.json -Raw | ConvertFrom-Json
+          $components = @('Cli','Mcp','Extension','Mcpb','Skills','Plugins') | Where-Object { $plan.$_ }
+          if (-not $components) { throw 'Selected package job has no components.' }
+          ./scripts/Build-ReleasePackages.ps1 -Components $components -SkillsDirectory artifacts/generated-skills
+          if ($LASTEXITCODE -ne 0) { throw 'Selected package validation failed.' }
 
-      - name: Core coverage + naming audit
-        shell: pwsh
-        run: |
-          & scripts/audit-core-coverage.ps1 -CheckNaming -FailOnGaps
-          if ($LASTEXITCODE -ne 0) { throw "Coverage or naming gaps detected. Every Core method must be exposed via the MCP Server with a matching name." }
-
-      - name: MCP actions have Core implementations
-        shell: pwsh
-        run: |
-          & scripts/check-mcp-core-implementations.ps1
-          if ($LASTEXITCODE -ne 0) { throw "MCP enum actions without a matching Core Command implementation were found." }
-
-      - name: Success flag check
-        shell: pwsh
-        run: |
-          & scripts/check-success-flag.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Success flag violations detected (Success=true with an ErrorMessage set)." }
-
-      - name: Shared bootstrap template drift check
-        shell: pwsh
-        run: |
-          & scripts/Build-BootstrapScripts.ps1 -Check
-          if ($LASTEXITCODE -ne 0) { throw "Bootstrap drift detected. Regenerate the canonical download.ps1 template output before committing." }
-
-      - name: Documentation count structure
-        shell: pwsh
-        run: |
-          & scripts/check-doc-counts.ps1 -SkipBuild -AllowStaleAdvertisedCounts
-          if ($LASTEXITCODE -ne 0) { throw "Documentation count derivation, managed locations, or feature totals are inconsistent." }
-
-      - name: Dynamic cast audit (documented ((dynamic)) casts)
-        shell: pwsh
-        run: |
-          & scripts/check-dynamic-casts.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Undocumented ((dynamic)) casts detected. Each cast needs a justification comment." }
-
-      - name: Plugin README check
-        shell: pwsh
-        run: |
-          & scripts/check-plugin-readmes.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Plugin README validation failed." }
-
+  npm:
+    name: npm launchers
+    needs: changes
+    if: needs.changes.outputs.npm == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: npm-packages/shared/package-lock.json
       - name: npm launcher and packaging tests (MCP + CLI)
         shell: pwsh
         run: |
@@ -175,47 +257,45 @@ jobs:
           npm test --prefix npm-packages/shared
           if ($LASTEXITCODE -ne 0) { throw "npm launcher or packaging tests failed." }
 
-      # --- Excel-free build smoke checks (absorbed from the old Build CLI /
-      #     Build MCP Server workflows) ---
-
-      - name: Verify CLI build + help (no Excel required)
+  lockfiles:
+    name: npm lockfiles
+    needs: changes
+    if: needs.changes.outputs.lockfiles == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check lockfile portability
+        timeout-minutes: 2
         shell: pwsh
         run: |
-          $exe = "src/ExcelMcp.CLI/bin/Release/net10.0-windows/excelcli.exe"
-          if (-not (Test-Path $exe)) { throw "excelcli.exe not found at $exe" }
-          $help = & $exe --help 2>&1
-          if ($LASTEXITCODE -ne 0) { throw "excelcli --help failed with exit code $LASTEXITCODE" }
-          Write-Host "excelcli --help OK"
+          ./scripts/Test-NpmLockfiles.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Lockfile regressions failed.' }
+          ./scripts/check-npm-lockfiles.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Lockfile portability failed.' }
 
-      - name: Verify MCP Server build
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs: [changes, tests, packages, npm, lockfiles]
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify every selected result
         shell: pwsh
+        env:
+          DETECTION: ${{ needs.changes.result }}
+          TESTS: ${{ needs.tests.result }}
+          PACKAGES: ${{ needs.packages.result }}
+          NPM: ${{ needs.npm.result }}
+          LOCKFILES: ${{ needs.lockfiles.result }}
+          SELECTED_TESTS: ${{ needs.changes.outputs.tests }}
+          SELECTED_PACKAGES: ${{ needs.changes.outputs.packages }}
+          SELECTED_NPM: ${{ needs.changes.outputs.npm }}
+          SELECTED_LOCKFILES: ${{ needs.changes.outputs.lockfiles }}
         run: |
-          $exe = "src/ExcelMcp.McpServer/bin/Release/net10.0-windows/Sbroenne.ExcelMcp.McpServer.exe"
-          if (-not (Test-Path $exe)) { throw "MCP Server exe not found at $exe" }
-          if (-not (Test-Path "src/ExcelMcp.McpServer/bin/Release/net10.0-windows/.mcp/server.json")) {
-            Write-Warning "MCP server.json configuration not found"
-          }
-          Write-Host "MCP Server build OK"
-
-      - name: Integration tests note
-        shell: pwsh
-        run: |
-          Write-Host "Full Excel integration tests, the CLI workflow smoke test, and the MCP smoke test all require Microsoft Excel."
-          Write-Host "This GitHub-hosted 'windows-latest' runner has no Excel, so this job does not run them."
-          Write-Host "Run '& .\scripts\Test-E2E.ps1' locally and attest the result in the pull request testing checklist."
-
-      - name: Upload CLI build artifacts
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ExcelMcp-CLI-${{ github.sha }}
-          path: src/ExcelMcp.CLI/bin/Release/net10.0-windows/
-          if-no-files-found: error
-
-      - name: Upload MCP Server build artifacts
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ExcelMcp-MCP-Server-${{ github.sha }}
-          path: src/ExcelMcp.McpServer/bin/Release/net10.0-windows/
-          if-no-files-found: error
+          ./scripts/Test-CiCompletion.ps1 -Detection $env:DETECTION -Tests $env:TESTS `
+            -Packages $env:PACKAGES -Npm $env:NPM -Lockfiles $env:LOCKFILES `
+            -SelectedTests $env:SELECTED_TESTS -SelectedPackages $env:SELECTED_PACKAGES `
+            -SelectedNpm $env:SELECTED_NPM -SelectedLockfiles $env:SELECTED_LOCKFILES

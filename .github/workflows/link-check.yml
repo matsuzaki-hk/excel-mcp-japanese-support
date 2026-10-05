@@ -21,20 +21,21 @@ permissions:
 jobs:
   link-check:
     name: Check links in built site
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write
+      pull-requests: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # hooks.py derives sitemap dates from git history. A shallow checkout
           # makes the strict MkDocs build fail before the link check can run.
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
           cache: pip
@@ -47,6 +48,9 @@ jobs:
         working-directory: gh-pages
         run: mkdocs build --strict --clean
 
+      # The fork publishes under a GitHub Pages path prefix, so mirror the
+      # built site under that prefix before lychee resolves root-relative
+      # links against --root-dir.
       - name: Mirror site under the GitHub Pages path prefix for lychee
         working-directory: gh-pages
         run: |
@@ -55,6 +59,14 @@ jobs:
           cp -r _site-mirror/* _site/excel-mcp-japanese-support/
           rm -rf _site-mirror
 
+      - name: Configure GitHub API authentication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          printf '[hosts."api.github.com"]\nheaders = { Authorization = "Bearer %s" }\n' \
+            "$GH_TOKEN" > "$RUNNER_TEMP/lychee-github.toml"
+
       - name: Check links
         id: lychee
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
@@ -62,12 +74,22 @@ jobs:
           # --root-dir lets root-relative hrefs resolve against the built
           # output, so internal and external links are both covered. It must be
           # an absolute path - lychee rejects relative values.
+          #
+          # npmjs.com answers automated clients with 403 even when the package
+          # exists, so its links can't be checked this way. The MCP Registry
+          # API is slow at times, so allow more time before giving up.
+          # GitHub's HTML pages can return 503/504 to automated clients. Check
+          # our files through raw URLs and exact commits/PRs/issues plus the
+          # release index through the API. Other release paths stay unchanged.
+          # Missing targets still fail; authentication is
+          # scoped to api.github.com and never sent to other hosts.
           args: >-
+            --config ${{ runner.temp }}/lychee-github.toml
             --root-dir ${{ github.workspace }}/gh-pages/_site
             --no-progress
             --max-concurrency 4
-            --accept 200,206,429
             --timeout 60
+            --accept 200,206,429
             --exclude '^https?://localhost'
             --exclude '^https?://127\.0\.0\.1'
             --exclude 'example\.com'
@@ -75,17 +97,31 @@ jobs:
             --exclude 'powerbi\.microsoft\.com'
             --exclude 'powerqueryformatter\.com'
             --exclude 'registry\.modelcontextprotocol\.io'
-            --exclude 'npmjs\.com'
+            --exclude '^https://www\.npmjs\.com/'
             --exclude '^https?://github\.com/github-actions'
             --exclude '^https?://github\.com/sbroenne/pytest-aitest'
             --exclude '^https?://docs\.microsoft\.com'
+            --remap '^https://github\.com/matsuzaki-hk/excel-mcp-japanese-support/blob/main/(.*)$ https://raw.githubusercontent.com/matsuzaki-hk/excel-mcp-japanese-support/main/$1'
+            --remap '^https://github\.com/matsuzaki-hk/excel-mcp-japanese-support/commit/([0-9a-f]{40})(?:[?#].*)?$ https://api.github.com/repos/matsuzaki-hk/excel-mcp-japanese-support/git/commits/$1'
+            --remap '^https://github\.com/matsuzaki-hk/excel-mcp-japanese-support/pull/([0-9]+)(?:[?#].*)?$ https://api.github.com/repos/matsuzaki-hk/excel-mcp-japanese-support/pulls/$1'
+            --remap '^https://github\.com/matsuzaki-hk/excel-mcp-japanese-support/issues/([0-9]+)(?:[?#].*)?$ https://api.github.com/repos/matsuzaki-hk/excel-mcp-japanese-support/issues/$1'
+            --remap '^https://github\.com/matsuzaki-hk/excel-mcp-japanese-support/releases(?:[?#].*)?$ https://api.github.com/repos/matsuzaki-hk/excel-mcp-japanese-support/releases'
+            --remap '^https://github\.com/sbroenne/mcp-server-excel/blob/main/(.*)$ https://raw.githubusercontent.com/sbroenne/mcp-server-excel/main/$1'
+            --remap '^https://github\.com/sbroenne/mcp-server-excel/commit/([0-9a-f]{40})(?:[?#].*)?$ https://api.github.com/repos/sbroenne/mcp-server-excel/git/commits/$1'
+            --remap '^https://github\.com/sbroenne/mcp-server-excel/pull/([0-9]+)(?:[?#].*)?$ https://api.github.com/repos/sbroenne/mcp-server-excel/pulls/$1'
+            --remap '^https://github\.com/sbroenne/mcp-server-excel/issues/([0-9]+)(?:[?#].*)?$ https://api.github.com/repos/sbroenne/mcp-server-excel/issues/$1'
+            --remap '^https://github\.com/sbroenne/mcp-server-excel/releases(?:[?#].*)?$ https://api.github.com/repos/sbroenne/mcp-server-excel/releases'
             'gh-pages/_site/**/*.html'
           fail: true
           output: lychee-report.md
 
+      - name: Remove temporary authentication
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/lychee-github.toml"
+
       - name: File an issue when links are broken
         if: failure() && steps.lychee.outcome == 'failure'
-        uses: peter-evans/create-issue-from-file@v6
+        uses: peter-evans/create-issue-from-file@fca9117c27cdc29c6c4db3b86c48e4115a786710 # v6
         with:
           title: "Broken links on matsuzaki-hk.github.io/excel-mcp-japanese-support"
           content-filepath: lychee-report.md

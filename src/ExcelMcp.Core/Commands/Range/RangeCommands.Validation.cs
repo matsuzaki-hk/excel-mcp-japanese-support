@@ -28,6 +28,12 @@ public partial class RangeCommands
         bool? ignoreBlank,
         bool? showDropdown)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(validationType);
+        var xlType = ParseValidationType(validationType);
+        var xlOperator = ParseValidationOperator(validationOperator ?? "between");
+        var xlAlertStyle = ParseErrorStyle(errorStyle ?? "stop");
+        var effectiveShowErrorAlert = showErrorAlert ?? true;
+
         return batch.Execute((ctx, ct) =>
         {
             dynamic? sheet = null;
@@ -50,11 +56,6 @@ public partial class RangeCommands
                 // Delete existing validation
                 validation.Delete();
 
-                // Parse validation type
-                var xlType = ParseValidationType(validationType);
-                var xlOperator = ParseValidationOperator(validationOperator ?? "between");
-                var xlAlertStyle = ParseErrorStyle(errorStyle ?? "stop");
-
                 // Add validation
                 validation.Add(
                     Type: xlType,
@@ -64,30 +65,27 @@ public partial class RangeCommands
                     Formula2: formula2 ?? "");
 
                 // Configure input message
+                validation.ShowInput = showInputMessage ?? false;
                 if (showInputMessage is true)
                 {
-                    validation.ShowInput = true;  // MUST set ShowInput=true BEFORE setting title/message
                     validation.InputTitle = inputTitle ?? "";
                     validation.InputMessage = inputMessage ?? "";
                 }
 
                 // Configure error alert
-                if (showErrorAlert is true)
+                if (effectiveShowErrorAlert)
                 {
                     validation.ErrorTitle = errorTitle ?? "";
                     validation.ErrorMessage = errorMessage ?? "";
-                    validation.ShowError = true;
                 }
+                validation.ShowError = effectiveShowErrorAlert;
 
                 // Configure additional options
-                if (ignoreBlank != null)
-                {
-                    validation.IgnoreBlank = ignoreBlank.Value;
-                }
+                validation.IgnoreBlank = ignoreBlank ?? true;
 
-                if (showDropdown != null && validationType.Equals("list", StringComparison.OrdinalIgnoreCase))
+                if (validationType.Equals("list", StringComparison.OrdinalIgnoreCase))
                 {
-                    validation.InCellDropdown = showDropdown.Value;
+                    validation.InCellDropdown = showDropdown ?? true;
                 }
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath };
@@ -317,6 +315,3 @@ public partial class RangeCommands
         };
     }
 }
-
-
-

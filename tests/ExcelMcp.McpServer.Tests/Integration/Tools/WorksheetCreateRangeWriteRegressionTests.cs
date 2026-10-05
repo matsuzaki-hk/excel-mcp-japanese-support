@@ -1,7 +1,6 @@
 // Copyright (c) Sbroenne. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
@@ -36,10 +35,6 @@ public class WorksheetCreateRangeWriteRegressionTests : McpIntegrationTestBase
     [Fact]
     public async Task CreateWorksheet_ThenSetValues_ToNonA1Range_SucceedsViaMcpProtocol()
     {
-        var baselineExcelProcessIds = Process.GetProcessesByName("EXCEL")
-            .Select(process => process.Id)
-            .ToHashSet();
-
         var sheetName = "Bug2Data";
         var values = new List<List<object?>>
         {
@@ -58,7 +53,6 @@ public class WorksheetCreateRangeWriteRegressionTests : McpIntegrationTestBase
         var setValuesJson = await CallToolAsync("range", new Dictionary<string, object?>
         {
             ["action"] = "set-values",
-            ["path"] = _testExcelFile,
             ["session_id"] = _sessionId,
             ["sheet_name"] = sheetName,
             ["range_address"] = "A3:G10",
@@ -69,7 +63,6 @@ public class WorksheetCreateRangeWriteRegressionTests : McpIntegrationTestBase
         var getValuesJson = await CallToolAsync("range", new Dictionary<string, object?>
         {
             ["action"] = "get-values",
-            ["path"] = _testExcelFile,
             ["session_id"] = _sessionId,
             ["sheet_name"] = sheetName,
             ["range_address"] = "A3:G10"
@@ -93,7 +86,6 @@ public class WorksheetCreateRangeWriteRegressionTests : McpIntegrationTestBase
         var a1Json = await CallToolAsync("range", new Dictionary<string, object?>
         {
             ["action"] = "get-values",
-            ["path"] = _testExcelFile,
             ["session_id"] = _sessionId,
             ["sheet_name"] = sheetName,
             ["range_address"] = "A1"
@@ -107,24 +99,6 @@ public class WorksheetCreateRangeWriteRegressionTests : McpIntegrationTestBase
         await CloseSessionAsync(_sessionId, save: false);
         _sessionId = null;
 
-        var waitDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
-        List<int> leakedExcelProcessIds;
-        do
-        {
-            leakedExcelProcessIds = Process.GetProcessesByName("EXCEL")
-                .Select(process => process.Id)
-                .Where(processId => !baselineExcelProcessIds.Contains(processId))
-                .ToList();
-
-            if (leakedExcelProcessIds.Count == 0)
-            {
-                break;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250));
-        }
-        while (DateTime.UtcNow < waitDeadline);
-
-        Assert.Empty(leakedExcelProcessIds);
+        await AssertNoLeakedExcelProcessesAsync();
     }
 }

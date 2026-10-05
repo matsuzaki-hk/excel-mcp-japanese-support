@@ -9,8 +9,24 @@ namespace Sbroenne.ExcelMcp.ComInterop.Tests.Unit;
 [Trait("Category", "Unit")]
 [Trait("Speed", "Fast")]
 [Trait("Layer", "ComInterop")]
+[Trait("RequiresExcel", "false")]
 public class ComUtilitiesTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RequiredMetadata_WithNullObject_ThrowsArgumentNullException(bool readCount)
+    {
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+        {
+            if (readCount)
+                ComUtilities.SafeGetInt(null, "Count");
+            else
+                ComUtilities.SafeGetString(null, "Name");
+        });
+        Assert.Equal("obj", exception.ParamName);
+    }
+
     [Fact]
     public void Release_WithNullObject_DoesNotThrow()
     {
@@ -49,7 +65,4 @@ public class ComUtilitiesTests
         Assert.Null(obj);
     }
 }
-
-
-
 

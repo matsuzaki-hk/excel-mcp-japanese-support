@@ -4,8 +4,9 @@ using Excel = Microsoft.Office.Interop.Excel;
 namespace Sbroenne.ExcelMcp.ComInterop.Formatting;
 
 /// <summary>
-/// Translates number and date/time format codes between US (English) format and the locale-specific format
-/// that Excel expects based on the current system locale.
+/// Translates number and date/time codes for localized Range and chart format APIs.
+/// Chart named colors require English keywords with regional numeric separators.
+/// Typed Range.NumberFormat reads do not need translation.
 /// </summary>
 /// <remarks>
 /// <para><b>Why This Is Needed:</b></para>
@@ -79,6 +80,8 @@ public sealed class NumberFormatTranslator
     /// <summary>True if locale uses same number separators as US English (. for decimal, , for thousands)</summary>
     public bool IsEnglishNumberLocale { get; }
 
+    internal string GeneralFormatName { get; }
+
     /// <summary>
     /// Creates a new NumberFormatTranslator by reading locale codes from the Excel Application.
     /// </summary>
@@ -98,6 +101,8 @@ public sealed class NumberFormatTranslator
         // Read number separators
         DecimalSeparator = GetInternationalValue(excelApp, XlDecimalSeparator) ?? ".";
         ThousandsSeparator = GetInternationalValue(excelApp, XlThousandsSeparator) ?? ",";
+        GeneralFormatName = GetInternationalValue(excelApp, (int)Excel.XlApplicationInternational.xlGeneralFormatName)
+            ?? throw new InvalidOperationException("Excel did not provide its General number-format name.");
 
         // Check if this is already English locale for dates (no translation needed)
         IsEnglishDateLocale = DayCode.Equals("d", StringComparison.OrdinalIgnoreCase) &&
@@ -106,6 +111,31 @@ public sealed class NumberFormatTranslator
 
         // Check if this is already English locale for numbers (no translation needed)
         IsEnglishNumberLocale = DecimalSeparator == "." && ThousandsSeparator == ",";
+    }
+
+    internal NumberFormatTranslator(
+        string decimalSeparator,
+        string thousandsSeparator,
+        string generalFormatName = "General",
+        string dayCode = "d",
+        string monthCode = "m",
+        string yearCode = "y")
+    {
+        DayCode = dayCode;
+        MonthCode = MinuteCode = monthCode;
+        YearCode = yearCode;
+        HourCode = "h";
+        SecondCode = "s";
+        DateSeparator = "/";
+        TimeSeparator = ":";
+        DecimalSeparator = decimalSeparator;
+        ThousandsSeparator = thousandsSeparator;
+        GeneralFormatName = generalFormatName;
+        IsEnglishDateLocale =
+            dayCode.Equals("d", StringComparison.OrdinalIgnoreCase) &&
+            monthCode.Equals("m", StringComparison.OrdinalIgnoreCase) &&
+            yearCode.Equals("y", StringComparison.OrdinalIgnoreCase);
+        IsEnglishNumberLocale = decimalSeparator == "." && thousandsSeparator == ",";
     }
 
     /// <summary>
@@ -118,9 +148,9 @@ public sealed class NumberFormatTranslator
     /// <para>Translation rules:</para>
     /// <list type="bullet">
     /// <item>'d' or 'dd' (day) → locale day code (e.g., 'T' or 'TT' on German)</item>
-    /// <item>'ddd' or 'dddd' (weekday names) → kept as-is (Excel handles these)</item>
+    /// <item>'ddd' or 'dddd' (weekday names) → repeated locale day code</item>
     /// <item>'m' or 'mm' (month, when NOT after time separator) → locale month code</item>
-    /// <item>'mmm' or 'mmmm' (month names) → kept as-is (Excel handles these)</item>
+    /// <item>'mmm' or 'mmmm' (month names) → repeated locale month code</item>
     /// <item>'y' or 'yy' or 'yyyy' (year) → locale year code</item>
     /// <item>'h', 'm' (after :), 's' (time) → locale time codes</item>
     /// <item>'.' (decimal separator in number formats) → locale decimal separator</item>
@@ -134,7 +164,8 @@ public sealed class NumberFormatTranslator
             return usFormat;
 
         // If already English locale for both dates and numbers, no translation needed
-        if (IsEnglishDateLocale && IsEnglishNumberLocale)
+        if (IsEnglishDateLocale && IsEnglishNumberLocale &&
+            GeneralFormatName.Equals("General", StringComparison.OrdinalIgnoreCase))
             return usFormat;
 
         // Don't translate if it already contains locale-specific codes
@@ -146,32 +177,132 @@ public sealed class NumberFormatTranslator
         return TranslateFormatString(usFormat);
     }
 
+    /// <summary>Converts a localized format returned by chart axes to invariant format codes.</summary>
+    public string TranslateFromLocale(string localFormat)
+    {
+        if (string.Equals(localFormat, GeneralFormatName, StringComparison.OrdinalIgnoreCase))
+            return "General";
+
+        return string.IsNullOrEmpty(localFormat) ||
+            (IsEnglishDateLocale && IsEnglishNumberLocale &&
+             GeneralFormatName.Equals("General", StringComparison.OrdinalIgnoreCase))
+            ? localFormat
+            : TranslateFormatString(localFormat, toInvariant: true);
+    }
+
+    /// <summary>
+    /// Adapts numeric separators for TickLabels.NumberFormat, which uses English
+    /// keywords but regional numeric separators on localized Excel installations.
+    /// </summary>
+    public string TranslateForChart(string invariantFormat) =>
+        string.IsNullOrEmpty(invariantFormat)
+            ? invariantFormat
+            : TranslateFormatString(invariantFormat, invariantKeywords: true);
+
+    /// <summary>Checks for English named-color directives outside literals.</summary>
+    public static bool ContainsNamedColor(string format)
+    {
+        for (var index = 0; index < format.Length; index++)
+        {
+            if (IsTwoCharacterLiteralPrefix(format[index]))
+            {
+                index++;
+                continue;
+            }
+            if (format[index] == '"')
+            {
+                var end = format.IndexOf('"', index + 1);
+                if (end < 0) { return false; }
+                index = end;
+                continue;
+            }
+            if (format[index] != '[') { continue; }
+            var close = format.IndexOf(']', index + 1);
+            if (close < 0) { return false; }
+            var directive = format.AsSpan(index + 1, close - index - 1);
+            foreach (var color in NamedColors)
+            {
+                if (directive.Equals(color, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            index = close;
+        }
+        return false;
+    }
+
+    private static readonly string[] NamedColors =
+        ["Black", "Blue", "Cyan", "Green", "Magenta", "Red", "White", "Yellow"];
+
     /// <summary>
     /// Checks if the format string already contains locale-specific date codes.
     /// </summary>
     private bool ContainsLocaleSpecificCodes(string format)
     {
-        // Check for German-style codes (case-insensitive)
-        // T = Tag (day), J = Jahr (year) are unique to German
-        // We check for these to avoid double-translation
-        if (!DayCode.Equals("d", StringComparison.OrdinalIgnoreCase) &&
-            format.Contains(DayCode, StringComparison.OrdinalIgnoreCase))
-            return true;
+        for (var index = 0; index < format.Length; index++)
+        {
+            if (IsTwoCharacterLiteralPrefix(format[index]) && index + 1 < format.Length)
+            {
+                index++;
+                continue;
+            }
 
-        if (!YearCode.Equals("y", StringComparison.OrdinalIgnoreCase) &&
-            format.Contains(YearCode, StringComparison.OrdinalIgnoreCase))
-            return true;
+            if (format[index] == '"')
+            {
+                var quoteEnd = format.IndexOf('"', index + 1);
+                if (quoteEnd < 0)
+                {
+                    return false;
+                }
+
+                index = quoteEnd;
+                continue;
+            }
+
+            if (format[index] == '[')
+            {
+                var bracketEnd = format.IndexOf(']', index + 1);
+                if (bracketEnd < 0)
+                {
+                    return false;
+                }
+
+                index = bracketEnd;
+                continue;
+            }
+
+            if (IsLocalizedDateTokenAt(format, index, DayCode, "d") ||
+                IsLocalizedDateTokenAt(format, index, YearCode, "y"))
+            {
+                return true;
+            }
+        }
 
         return false;
     }
 
+    private static bool IsLocalizedDateTokenAt(
+        string format,
+        int index,
+        string localeCode,
+        string invariantCode) =>
+        !localeCode.Equals(invariantCode, StringComparison.OrdinalIgnoreCase) &&
+        format.AsSpan(index).StartsWith(localeCode, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTwoCharacterLiteralPrefix(char value) =>
+        value is '\\' or '_' or '*';
+
     /// <summary>
     /// Translates format string character by character, handling context (date vs time vs number).
     /// </summary>
-    private string TranslateFormatString(string format)
+    private string TranslateFormatString(
+        string format, bool toInvariant = false, bool invariantKeywords = false)
     {
         var result = new StringBuilder(format.Length);
         int i = 0;
+        char sourceDecimal = toInvariant ? DecimalSeparator[0] : '.';
+        char sourceThousands = toInvariant ? ThousandsSeparator[0] : ',';
 
         // Track if we're in a time context (after seeing 'h' or ':')
         bool inTimeContext = false;
@@ -180,13 +311,28 @@ public sealed class NumberFormatTranslator
         {
             char c = format[i];
 
-            // Skip content in square brackets (locale prefixes, colors, conditions)
+            // Comparison constants use local decimals; colour and locale metadata stay unchanged.
             if (c == '[')
             {
                 int bracketEnd = format.IndexOf(']', i);
                 if (bracketEnd > i)
                 {
-                    result.Append(format.AsSpan(i, bracketEnd - i + 1));
+                    if (format[i + 1] is '<' or '>' or '=')
+                    {
+                        result.Append('[');
+                        for (int index = i + 1; index < bracketEnd; index++)
+                        {
+                            if (format[index] == sourceDecimal)
+                                result.Append(toInvariant ? "." : DecimalSeparator);
+                            else
+                                result.Append(format[index]);
+                        }
+                        result.Append(']');
+                    }
+                    else
+                    {
+                        result.Append(format.AsSpan(i, bracketEnd - i + 1));
+                    }
                     i = bracketEnd + 1;
                     continue;
                 }
@@ -204,39 +350,47 @@ public sealed class NumberFormatTranslator
                 }
             }
 
-            // Skip escaped characters (backslash)
-            if (c == '\\' && i + 1 < format.Length)
+            // Backslash escapes, spacing, and fill tokens consume the following character.
+            if (IsTwoCharacterLiteralPrefix(c) && i + 1 < format.Length)
             {
                 result.Append(format.AsSpan(i, 2));
                 i += 2;
                 continue;
             }
 
+            var sourceGeneral = toInvariant ? GeneralFormatName : "General";
+            if (sourceGeneral.Length > 0 &&
+                format.AsSpan(i).StartsWith(sourceGeneral, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Append(toInvariant || invariantKeywords ? "General" : GeneralFormatName);
+                i += sourceGeneral.Length;
+                continue;
+            }
+
             // Handle decimal separator '.' in number format context
             // A '.' is a decimal separator if it's followed by a digit placeholder (0 or #)
-            if (c == '.' && !IsEnglishNumberLocale)
+            if (c == sourceDecimal && !IsEnglishNumberLocale)
             {
                 if (i + 1 < format.Length && IsDigitPlaceholder(format[i + 1]))
                 {
                     // This is a decimal separator in a number format - translate it
-                    result.Append(DecimalSeparator);
+                    result.Append(toInvariant ? "." : DecimalSeparator);
                     i++;
                     continue;
                 }
             }
 
-            // Handle thousands separator ',' in number format context
-            // A ',' is a thousands separator if it's between digit placeholders
-            if (c == ',' && !IsEnglishNumberLocale)
+            // Commas after numeric placeholders also scale by thousands, including repeated commas.
+            if (c == sourceThousands && !IsEnglishNumberLocale)
             {
-                // Check if this is a thousands separator (surrounded by digit placeholders)
-                bool prevIsDigit = i > 0 && (IsDigitPlaceholder(format[i - 1]) || format[i - 1] == '.');
-                bool nextIsDigit = i + 1 < format.Length && (IsDigitPlaceholder(format[i + 1]) || format[i + 1] == '#' || format[i + 1] == '0');
-
-                if (prevIsDigit && nextIsDigit)
+                int previous = i - 1;
+                while (previous >= 0 && format[previous] == sourceThousands)
                 {
-                    // This is a thousands separator in a number format - translate it
-                    result.Append(ThousandsSeparator);
+                    previous--;
+                }
+                if (previous >= 0 && IsDigitPlaceholder(format[previous]))
+                {
+                    result.Append(toInvariant ? "," : ThousandsSeparator);
                     i++;
                     continue;
                 }
@@ -252,13 +406,13 @@ public sealed class NumberFormatTranslator
             }
 
             // Hour code - switch to time context
-            if (c == 'h' || c == 'H')
+            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(toInvariant ? HourCode[0] : 'h'))
             {
                 inTimeContext = true;
                 int count = CountRepeatingChar(format, i, c);
-                if (!IsEnglishDateLocale)
+                if (!IsEnglishDateLocale && !invariantKeywords)
                 {
-                    result.Append(HourCode[0], count);
+                    result.Append(toInvariant ? 'h' : HourCode[0], count);
                 }
                 else
                 {
@@ -269,12 +423,12 @@ public sealed class NumberFormatTranslator
             }
 
             // Second code
-            if (c == 's' || c == 'S')
+            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(toInvariant ? SecondCode[0] : 's'))
             {
                 int count = CountRepeatingChar(format, i, c);
-                if (!IsEnglishDateLocale)
+                if (!IsEnglishDateLocale && !invariantKeywords)
                 {
-                    result.Append(SecondCode[0], count);
+                    result.Append(toInvariant ? 's' : SecondCode[0], count);
                 }
                 else
                 {
@@ -285,58 +439,42 @@ public sealed class NumberFormatTranslator
             }
 
             // Day code - 'd' or 'D'
-            if ((c == 'd' || c == 'D') && !IsEnglishDateLocale)
+            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(toInvariant ? DayCode[0] : 'd') &&
+                !IsEnglishDateLocale && !invariantKeywords)
             {
                 int count = CountRepeatingChar(format, i, c);
 
-                // ddd and dddd are weekday names - keep as-is
-                if (count >= 3)
-                {
-                    result.Append(c, count);
-                }
-                else
-                {
-                    // d or dd = day number
-                    result.Append(DayCode[0], count);
-                }
+                result.Append(toInvariant ? 'd' : DayCode[0], count);
                 i += count;
                 continue;
             }
 
             // Month/Minute code - 'm' or 'M'
             // This is the tricky one - 'm' means month in date context, minutes in time context
-            if ((c == 'm' || c == 'M') && !IsEnglishDateLocale)
+            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(toInvariant ? (inTimeContext ? MinuteCode[0] : MonthCode[0]) : 'm') &&
+                !IsEnglishDateLocale && !invariantKeywords)
             {
                 int count = CountRepeatingChar(format, i, c);
 
                 if (inTimeContext)
                 {
                     // In time context, m = minutes
-                    result.Append(MinuteCode[0], count);
+                    result.Append(toInvariant ? 'm' : MinuteCode[0], count);
                 }
                 else
                 {
-                    // In date context, m = month
-                    // mmm and mmmm are month names - keep as-is (Excel handles translation)
-                    if (count >= 3)
-                    {
-                        result.Append(c, count);
-                    }
-                    else
-                    {
-                        // m or mm = month number
-                        result.Append(MonthCode[0], count);
-                    }
+                    result.Append(toInvariant ? 'm' : MonthCode[0], count);
                 }
                 i += count;
                 continue;
             }
 
             // Year code - 'y' or 'Y'
-            if ((c == 'y' || c == 'Y') && !IsEnglishDateLocale)
+            if (char.ToLowerInvariant(c) == char.ToLowerInvariant(toInvariant ? YearCode[0] : 'y') &&
+                !IsEnglishDateLocale && !invariantKeywords)
             {
                 int count = CountRepeatingChar(format, i, c);
-                result.Append(YearCode[0], count);
+                result.Append(toInvariant ? 'y' : YearCode[0], count);
                 i += count;
                 continue;
             }
@@ -408,5 +546,3 @@ public sealed class NumberFormatTranslator
                $"IsEnglishDate={IsEnglishDateLocale} IsEnglishNumber={IsEnglishNumberLocale}";
     }
 }
-
-

@@ -13,14 +13,14 @@ namespace Sbroenne.ExcelMcp.Core.Commands;
 /// - Power Query refresh auto-syncs (no manual refresh needed)
 ///
 /// PREREQUISITE: Tables must be added to the Data Model first.
-/// Use table add-to-datamodel for worksheet tables,
+/// Use table add-to-data-model for worksheet tables,
 /// or powerquery to import and load data directly to the Data Model.
 ///
 /// DAX MEASURES:
 /// - Create with DAX formulas like 'SUM(Sales[Amount])'
 /// - DAX formulas are preserved exactly by default
 /// - Set formatDax=true only with user consent; it sends formulas to daxformatter.com
-/// - Read operations return raw DAX as stored
+/// - Inputs and measure read/list use comma separators and decimal points regardless of Excel locale
 ///
 /// DAX EVALUATE QUERIES:
 /// - Use evaluate to execute DAX EVALUATE queries against the Data Model
@@ -36,11 +36,11 @@ namespace Sbroenne.ExcelMcp.Core.Commands;
 /// </summary>
 [ServiceCategory("datamodel", "DataModel")]
 [McpTool("datamodel", Title = "Data Model Operations", Destructive = true, Category = "analysis",
-    Description = "Data Model (Power Pivot) - DAX measures and table management. CRITICAL: Worksheet tables and Data Model are separate! After table(append), MUST call datamodel(refresh) to sync. Power Query refresh auto-syncs. DAX MEASURES: Create with formulas like SUM(Sales[Amount]); DAX is preserved exactly by default. Set formatDax=true only with user consent; it sends formulas to daxformatter.com. DAX EVALUATE: Execute queries (SUMMARIZE, FILTER, CALCULATETABLE, TOPN). DMV QUERIES: SELECT * FROM $SYSTEM.SchemaRowset for metadata. DAX FILE INPUT: daxFormulaFile/daxQueryFile for complex multi-line DAX. TIMEOUT: 2 min. Use datamodel_relationship for relationships, table for add-to-datamodel.")]
+    Description = "DAX measures and Data Model tables. Worksheet Tables and Data Model tables are separate: refresh the model after changing a worksheet source. Power Query refresh synchronizes data loaded to the model. DAX is preserved by default; formatDax=true sends formulas to daxformatter.com and requires user consent. Use evaluate for DAX queries and execute-dmv for SELECT * FROM $SYSTEM.SchemaRowset metadata queries. File inputs daxFormulaFile, daxQueryFile, and dmvQueryFile support longer expressions. Use datamodel_relationship for relationships and table add-to-data-model to add worksheet data.")]
 public interface IDataModelCommands
 {
     /// <summary>
-    /// Lists all tables in the Data Model
+    /// Lists all tables in the Data Model. Failed metadata reads fail the operation rather than inventing empty names or zero row counts.
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <returns>Result containing list of tables with metadata</returns>
@@ -94,7 +94,7 @@ public interface IDataModelCommands
 
     /// <summary>
     /// Gets complete measure details and DAX formula.
-    /// Returns the raw DAX formula as stored in the Data Model.
+    /// Returns DAX with comma argument separators and decimal points.
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="measureName">Name of the measure to get</param>
@@ -139,7 +139,7 @@ public interface IDataModelCommands
     RenameResult RenameTable(IExcelBatch batch, [RequiredParameter] string oldName, [RequiredParameter] string newName);
 
     /// <summary>
-    /// Refreshes entire Data Model or specific table
+    /// Refreshes entire Data Model or specific table. Excel failures retain their details and do not imply that model-level refresh is unsupported.
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="tableName">Optional: Specific table to refresh (if null, refreshes entire model)</param>
@@ -150,14 +150,15 @@ public interface IDataModelCommands
 
     /// <summary>
     /// Creates a new DAX measure in the Data Model.
-    /// DAX formula is preserved exactly by default.
+    /// Supply native DAX with comma argument separators and decimal points.
+    /// When Windows uses a decimal comma, spaces are added around commas that touch numbers so Excel keeps the formula intact; the result message reports this.
     /// Uses Excel COM API: ModelMeasures.Add method (Office 2016+)
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="tableName">Name of the table to add the measure to</param>
     /// <param name="measureName">Name of the new measure</param>
     /// <param name="daxFormula">DAX formula. Public callers must supply either inline daxFormula or a readable daxFormulaFile, not both.</param>
-    /// <param name="formatType">Optional format type: General, Currency, Decimal, Percentage, or WholeNumber (case-insensitive). Null or empty defaults to General on create and keeps the existing format on update.</param>
+    /// <param name="formatType">Optional format type: General, Currency, Decimal, Percentage, or WholeNumber (case-insensitive). Null or empty defaults to General on create and keeps the existing format on update. An unavailable requested format fails; it is not substituted with General.</param>
     /// <param name="description">Optional: Description of the measure</param>
     /// <param name="formatDax">Whether to send the DAX formula to the remote daxformatter.com service before saving. Defaults to false to preserve privacy.</param>
     /// <exception cref="ArgumentException">Thrown when parameters are invalid, including an unknown formatType</exception>
@@ -174,13 +175,14 @@ public interface IDataModelCommands
 
     /// <summary>
     /// Updates an existing DAX measure in the Data Model.
-    /// DAX formula is preserved exactly by default.
+    /// Supply native DAX with comma argument separators and decimal points.
+    /// When Windows uses a decimal comma, spaces are added around commas that touch numbers so Excel keeps the formula intact; the result message reports this.
     /// Uses Excel COM API: ModelMeasure properties (Formula, Description, FormatInformation - all Read/Write)
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="measureName">Name of the measure to update</param>
     /// <param name="daxFormula">Optional new DAX formula. Public callers may supply inline daxFormula or a readable daxFormulaFile, not both.</param>
-    /// <param name="formatType">Optional format type: General, Currency, Decimal, Percentage, or WholeNumber (case-insensitive). Null or empty defaults to General on create and keeps the existing format on update.</param>
+    /// <param name="formatType">Optional format type: General, Currency, Decimal, Percentage, or WholeNumber (case-insensitive). Null or empty defaults to General on create and keeps the existing format on update. An unavailable requested format fails; it is not substituted with General.</param>
     /// <param name="description">Optional: New description (null to keep existing)</param>
     /// <param name="formatDax">Whether to send the DAX formula to the remote daxformatter.com service before saving. Defaults to false to preserve privacy.</param>
     /// <exception cref="ArgumentException">Thrown when measureName is invalid, formatType is unknown, or all update parameters are null</exception>

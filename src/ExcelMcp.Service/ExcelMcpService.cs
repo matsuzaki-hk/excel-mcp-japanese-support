@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Sbroenne.ExcelMcp.ComInterop.Session;
@@ -13,7 +12,6 @@ using Sbroenne.ExcelMcp.Core.Commands.PivotTable;
 using Sbroenne.ExcelMcp.Core.Commands.PythonInExcel;
 using Sbroenne.ExcelMcp.Core.Commands.Range;
 using Sbroenne.ExcelMcp.Service.Rpc;
-using StreamJsonRpc;
 using Sbroenne.ExcelMcp.Core.Commands.Screenshot;
 using Sbroenne.ExcelMcp.Core.Commands.Slicer;
 using Sbroenne.ExcelMcp.Core.Commands.Table;
@@ -35,12 +33,8 @@ public sealed class ExcelMcpService : IDisposable
 {
     private readonly SessionManager _sessionManager = new();
     private readonly ConcurrentDictionary<string, byte> _knownSessionIds = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<Task, byte> _activeConnectionTasks = new();
-    private readonly CancellationTokenSource _shutdownCts = new();
+    private readonly DaemonHost _daemonHost;
     private readonly DateTime _startTime = DateTime.UtcNow;
-    private string _pipeName = "";
-    private TimeSpan? _idleTimeout;
-    private DateTime _lastActivityTime = DateTime.UtcNow;
     private bool _disposed;
 
     // Core command instances - use concrete types per CA1859
@@ -71,6 +65,9 @@ public sealed class ExcelMcpService : IDisposable
     public ExcelMcpService()
     {
         _powerQueryCommands = new PowerQueryCommands(_dataModelCommands);
+        _daemonHost = new DaemonHost(
+            ProcessAsync,
+            () => _sessionManager.GetActiveSessions().Count);
     }
 
     public DateTime StartTime => _startTime;
@@ -83,170 +80,10 @@ public sealed class ExcelMcpService : IDisposable
     /// </summary>
     /// <param name="pipeName">The named pipe to listen on.</param>
     /// <param name="idleTimeout">Optional idle timeout. Service shuts down after this duration with no active sessions. Null = no timeout.</param>
-    public async Task RunAsync(string pipeName, TimeSpan? idleTimeout = null)
-    {
-        _pipeName = pipeName;
-        _idleTimeout = idleTimeout;
-        await RunPipeServerAsync(_shutdownCts.Token);
-    }
+    public Task RunAsync(string pipeName, TimeSpan? idleTimeout = null) =>
+        _daemonHost.RunAsync(pipeName, idleTimeout);
 
-    public void RequestShutdown() => _shutdownCts.Cancel();
-
-    private void RequestShutdownAfterResponse()
-    {
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(100);
-            RequestShutdown();
-        });
-    }
-
-    // Exposed for testing — backoff parameters for pipe server accept loop error recovery
-    internal static readonly TimeSpan InitialBackoff = TimeSpan.FromMilliseconds(100);
-    internal static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(5);
-
-    /// <summary>
-    /// Records client activity to keep the idle timeout monitor alive.
-    /// Called by <see cref="Rpc.DaemonRpcTarget"/> on each incoming RPC call.
-    /// </summary>
-    internal void RecordActivity() => _lastActivityTime = DateTime.UtcNow;
-
-    private async Task RunPipeServerAsync(CancellationToken cancellationToken)
-    {
-        // Use a semaphore to limit concurrent connections (prevents resource exhaustion)
-        using var connectionLimit = new SemaphoreSlim(10, 10);
-
-        // Start idle timeout monitor if configured
-        if (_idleTimeout.HasValue)
-        {
-            _ = Task.Run(() => MonitorIdleTimeoutAsync(cancellationToken), cancellationToken);
-        }
-
-        var currentBackoff = InitialBackoff;
-
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            NamedPipeServerStream? server = null;
-            try
-            {
-                server = ServiceSecurity.CreateSecureServer(_pipeName);
-                await server.WaitForConnectionAsync(cancellationToken);
-
-                // Success — reset backoff
-                currentBackoff = InitialBackoff;
-
-                // Record activity on each connection
-                _lastActivityTime = DateTime.UtcNow;
-
-                // Capture server for the task
-                var clientServer = server;
-                server = null; // Prevent disposal in finally - task owns it now
-
-                var connectionTask = Task.Run(async () =>
-                {
-                    await connectionLimit.WaitAsync();
-                    try
-                    {
-                        var rpcTarget = new DaemonRpcTarget(this);
-                        using var rpc = JsonRpc.Attach(clientServer, rpcTarget);
-                        await rpc.Completion; // Waits until client disconnects
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"RPC connection failed: {ex.Message}");
-                    }
-                    catch (OperationCanceledException ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"RPC connection cancelled: {ex.Message}");
-                    }
-                    finally
-                    {
-                        connectionLimit.Release();
-                        try { if (clientServer.IsConnected) clientServer.Disconnect(); }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Pipe disconnect cleanup failed: {ex.Message}");
-                        }
-
-                        try { await clientServer.DisposeAsync(); }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Pipe disposal cleanup failed: {ex.Message}");
-                        }
-                    }
-                });
-                _activeConnectionTasks.TryAdd(connectionTask, 0);
-                _ = connectionTask.ContinueWith(
-                    completed => _activeConnectionTasks.TryRemove(completed, out _),
-                    CancellationToken.None,
-                    TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception)
-            {
-                // Backoff to prevent CPU spin when errors repeat (e.g. pipe creation failure).
-                // Doubles each iteration: 100ms → 200ms → 400ms → … → 5s cap.
-                // Resets to 100ms on next successful connection.
-                try { await Task.Delay(currentBackoff, cancellationToken); } catch (OperationCanceledException) { break; }
-                currentBackoff = TimeSpan.FromMilliseconds(Math.Min(currentBackoff.TotalMilliseconds * 2, MaxBackoff.TotalMilliseconds));
-            }
-            finally
-            {
-                if (server != null)
-                {
-                    try { if (server.IsConnected) server.Disconnect(); } catch (Exception) { /* Cleanup — disconnect may fail if client already disconnected */ }
-                    await server.DisposeAsync();
-                }
-            }
-        }
-
-        if (!_activeConnectionTasks.IsEmpty)
-        {
-            await Task.WhenAll(_activeConnectionTasks.Keys.Select(ObserveConnectionTaskAsync));
-        }
-    }
-
-    private static async Task ObserveConnectionTaskAsync(Task connectionTask)
-    {
-        try
-        {
-            await connectionTask;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            System.Diagnostics.Debug.WriteLine($"RPC connection drain failed: {ex.Message}");
-        }
-        catch (OperationCanceledException ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"RPC connection drain cancelled: {ex.Message}");
-        }
-    }
-
-    private async Task MonitorIdleTimeoutAsync(CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
-
-            var hasSessions = _sessionManager.GetActiveSessions().Count > 0;
-            if (hasSessions)
-            {
-                _lastActivityTime = DateTime.UtcNow;
-                continue;
-            }
-
-            var idleTime = DateTime.UtcNow - _lastActivityTime;
-            if (idleTime >= _idleTimeout!.Value)
-            {
-                RequestShutdown();
-                break;
-            }
-        }
-    }
+    public void RequestShutdown() => _daemonHost.RequestShutdown();
 
     /// <summary>
     /// Processes a service request directly (in-process, no pipe).
@@ -370,7 +207,7 @@ public sealed class ExcelMcpService : IDisposable
 
     private ServiceResponse HandleShutdown()
     {
-        RequestShutdownAfterResponse();
+        _daemonHost.RequestShutdownAfterResponse();
         return new ServiceResponse { Success = true };
     }
 
@@ -423,7 +260,9 @@ public sealed class ExcelMcpService : IDisposable
                 ["filePath", "show", "timeoutSeconds"],
                 StringComparer.Ordinal),
             "close" => new HashSet<string>(["save"], StringComparer.Ordinal),
-            "test" => new HashSet<string>(["filePath"], StringComparer.Ordinal),
+            "test" => new HashSet<string>(
+                ["filePath", "timeoutSeconds"],
+                StringComparer.Ordinal),
             _ => []
         };
         var unknownParameters = ServiceRegistry.GetJsonPropertyNames(argsJson, includeNullValues: true)
@@ -592,6 +431,11 @@ public sealed class ExcelMcpService : IDisposable
     private ServiceResponse HandleSessionTest(ServiceRequest request)
     {
         var args = ServiceRegistry.DeserializeArgs<SessionTestArgs>(request.Args);
+        var timeout = ParameterTransforms.ParseTimeoutSeconds(
+            args.TimeoutSeconds,
+            "timeoutSeconds",
+            minimumSeconds: 10,
+            maximumSeconds: 3600);
         if (string.IsNullOrWhiteSpace(args.FilePath))
         {
             return new ServiceResponse
@@ -605,6 +449,28 @@ public sealed class ExcelMcpService : IDisposable
         try
         {
             var result = _fileCommands.Test(args.FilePath);
+            if (result.Exists
+                && result.Extension is ".xlsx" or ".xlsm" or ".xlsb" or ".xls"
+                && !result.IsIrmProtected
+                && result.Message == null)
+            {
+                try
+                {
+                    _sessionManager.ValidateWorkbookOpen(result.FilePath, timeout);
+                    result.IsValid = true;
+                    result.CanOpen = true;
+                }
+                catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    result.Message =
+                        $"File is not a valid Excel workbook or Excel could not open it: {ex.Message}";
+                }
+            }
+
             return new ServiceResponse
             {
                 Success = true,
@@ -959,49 +825,49 @@ public sealed class ExcelMcpService : IDisposable
         }
         catch (TimeoutException ex)
         {
-            // Operation timed out — Excel COM call is hung (IDispatch.Invoke stuck).
-            // Force-close the session to trigger the force-kill path in ExcelBatch.Dispose(),
-            // which will kill the hung Excel process and release the STA thread.
-            try
+            if (batch!.HasTimedOutOperation)
             {
-                _sessionManager.CloseSession(sessionId, save: false, force: true);
+                CleanupDeadSession(sessionId);
+                return Task.FromResult(new ServiceResponse
+                {
+                    Success = false,
+                    ErrorCategory = "Timeout",
+                    ErrorMessage = $"Excel operation timed out after execution started and the session has been closed: {ex.Message} " +
+                                   "Please reopen the file with a new session.",
+                    ExceptionType = ex.GetType().Name
+                });
             }
-            catch (Exception cleanupEx)
-            {
-                System.Diagnostics.Debug.WriteLine($"Session cleanup failed for {sessionId}: {cleanupEx.Message}");
-            }
+
             return Task.FromResult(new ServiceResponse
             {
                 Success = false,
                 ErrorCategory = "Timeout",
-                ErrorMessage = $"Excel operation timed out and the session has been closed: {ex.Message} " +
-                               "Please reopen the file with a new session.",
+                ErrorMessage = ex.Message,
                 ExceptionType = ex.GetType().Name
             });
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            // Caller cancelled (e.g., VS Code cancelled the tool call) while a COM operation
-            // may still be running on the STA thread. ExcelBatch.Execute sets _operationTimedOut
-            // on cancellation, but nobody calls Dispose() — the session stays alive with a
-            // stuck STA thread, and all subsequent requests queue up and hang.
-            // Force-close the session to kill the hung Excel process and release the STA thread.
-            try
+            if (batch!.HasTimedOutOperation)
             {
-                _sessionManager.CloseSession(sessionId, save: false, force: true);
+                CleanupDeadSession(sessionId);
+                return Task.FromResult(new ServiceResponse
+                {
+                    Success = false,
+                    ErrorCategory = "Cancelled",
+                    ErrorMessage = "Operation was cancelled after execution started and the session has been closed. " +
+                                   "The Excel COM thread may have been unresponsive. " +
+                                   "Please reopen the file with a new session.",
+                    ExceptionType = ex.GetType().Name
+                });
             }
-            catch (Exception cleanupEx)
-            {
-                System.Diagnostics.Debug.WriteLine($"Session cleanup failed for {sessionId}: {cleanupEx.Message}");
-            }
+
             return Task.FromResult(new ServiceResponse
             {
                 Success = false,
                 ErrorCategory = "Cancelled",
-                ErrorMessage = $"Operation was cancelled and the session has been closed. " +
-                               "The Excel COM thread may have been unresponsive. " +
-                               "Please reopen the file with a new session.",
-                ExceptionType = nameof(OperationCanceledException)
+                ErrorMessage = ex.Message,
+                ExceptionType = ex.GetType().Name
             });
         }
         catch (COMException ex) when (
@@ -1021,21 +887,6 @@ public sealed class ExcelMcpService : IDisposable
                 HResult = $"0x{ex.HResult:X8}"
             });
         }
-        catch (InvalidOperationException ex) when (
-            ex.Message.Contains("no longer running", StringComparison.OrdinalIgnoreCase) ||
-            ex.Message.Contains("process", StringComparison.OrdinalIgnoreCase))
-        {
-            // Excel process detected as dead before COM call (ExcelBatch pre-check)
-            CleanupDeadSession(sessionId);
-            return Task.FromResult(new ServiceResponse
-            {
-                Success = false,
-                ErrorCategory = "ExcelProcessDied",
-                ErrorMessage = $"Excel process for session '{sessionId}' is no longer running. " +
-                               "Session has been cleaned up. Please reopen the file with a new session.",
-                ExceptionType = ex.GetType().Name
-            });
-        }
         catch (Exception ex)
         {
             if (IsFatalExcelDisconnect(ex))
@@ -1049,6 +900,8 @@ public sealed class ExcelMcpService : IDisposable
             if (batch != null && !batch.IsExcelProcessAlive())
             {
                 CleanupDeadSession(sessionId);
+                return Task.FromResult(CreateExcelDisconnectedResponse(sessionId, ex,
+                    $"Excel process for session '{sessionId}' is no longer running. Session has been cleaned up. Please reopen the file with a new session."));
             }
 
             return Task.FromResult(CreateErrorResponse(ex));
@@ -1097,15 +950,6 @@ public sealed class ExcelMcpService : IDisposable
                 return IsFatalComHResult(comEx.HResult) ? comEx.HResult : comEx.ErrorCode;
             }
 
-            if (current.Message.Contains("disconnected", StringComparison.OrdinalIgnoreCase))
-            {
-                return ResiliencePipelines.RPC_E_DISCONNECTED;
-            }
-
-            if (current.Message.Contains("RPC server is unavailable", StringComparison.OrdinalIgnoreCase))
-            {
-                return ResiliencePipelines.RPC_S_SERVER_UNAVAILABLE;
-            }
         }
 
         return null;
@@ -1227,9 +1071,15 @@ public sealed class ExcelMcpService : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        _shutdownCts.Cancel();
-        _sessionManager.Dispose();
-        _shutdownCts.Dispose();
+        _daemonHost.RequestShutdown();
+        try
+        {
+            _sessionManager.Dispose();
+        }
+        finally
+        {
+            _daemonHost.Dispose();
+        }
     }
 }
 
@@ -1244,4 +1094,8 @@ public sealed class SessionOpenArgs
     public int? TimeoutSeconds { get; set; }
 }
 public sealed class SessionCloseArgs { public bool Save { get; set; } }
-public sealed class SessionTestArgs { public string? FilePath { get; set; } }
+public sealed class SessionTestArgs
+{
+    public string? FilePath { get; set; }
+    public int? TimeoutSeconds { get; set; }
+}

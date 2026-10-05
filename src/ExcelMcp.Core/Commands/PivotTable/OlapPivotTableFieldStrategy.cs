@@ -763,7 +763,7 @@ public class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
 
             // Get the first (and typically only) PivotField and set its NumberFormat
             pivotField = pivotFields.Item(1);
-            pivotField.NumberFormat = numberFormat;
+            ((Excel.PivotField)pivotField).NumberFormat = numberFormat;
 
             // NOTE: No RefreshTable() needed - NumberFormat is a visual-only property
             // RefreshTable() would re-query the Data Model which is very slow for OLAP PivotTables
@@ -772,7 +772,7 @@ public class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
             string? appliedFormat = null;
             try
             {
-                appliedFormat = pivotField.NumberFormat?.ToString();
+                appliedFormat = ((Excel.PivotField)pivotField).NumberFormat;
             }
             catch (System.Runtime.InteropServices.COMException)
             {
@@ -838,12 +838,12 @@ public class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
     public PivotFieldResult SortField(dynamic pivot, string fieldName, SortDirection direction, string workbookPath)
     {
-        dynamic? cubeField = null;
-        dynamic? pivotFields = null;
-        dynamic? pivotField = null;
+        Excel.CubeField? cubeField = null;
+        Excel.PivotFields? pivotFields = null;
+        Excel.PivotField? pivotField = null;
         try
         {
-            cubeField = GetFieldForManipulation(pivot, fieldName);
+            cubeField = (Excel.CubeField)GetFieldForManipulation(pivot, fieldName);
 
             // OLAP sorting works through PivotField, not CubeField
             pivotFields = cubeField.PivotFields;
@@ -858,7 +858,8 @@ public class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 ? XlSortOrder.xlAscending
                 : XlSortOrder.xlDescending;
 
-            pivotField.AutoSort(sortOrder, fieldName);
+            // Excel needs the level's unique name, not the enclosing CubeField hierarchy.
+            pivotField.AutoSort(sortOrder, pivotField.SourceName);
 
             // NOTE: No RefreshTable() needed - Sorting is a visual-only operation
 
@@ -866,7 +867,7 @@ public class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
             {
                 Success = true,
                 FieldName = fieldName,
-                CustomName = cubeField.Caption?.ToString() ?? fieldName,
+                CustomName = cubeField.Caption ?? fieldName,
                 Area = (PivotFieldArea)cubeField.Orientation,
                 FilePath = workbookPath
             };
@@ -1572,4 +1573,3 @@ public class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
 
     #endregion
 }
-

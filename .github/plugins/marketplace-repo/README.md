@@ -19,19 +19,31 @@ This repository is the publish target for plugin artifacts from [`sbroenne/mcp-s
 
 ```text
 .github/plugin/marketplace.json
+.claude-plugin/marketplace.json
 plugins/
 ├── excel-mcp/
 │   ├── plugin.json
 │   ├── mcp.json
-│   └── skills/excel-mcp/SKILL.md
+│   └── skills/excel-mcp-report-formatting/SKILL.md
 └── excel-cli/
     ├── plugin.json
-    └── skills/excel-cli/SKILL.md
+    └── skills/excel-cli-report-formatting/SKILL.md
 ```
 
-The canonical marketplace manifest lives at `.github/plugin/marketplace.json`. The `plugins/` directory contains Agent Plugins 1.0 packages generated from source-owned templates by the source repo's `publish-plugins.yml` workflow.
+The canonical marketplace manifest lives at `.github/plugin/marketplace.json`; `.claude-plugin/marketplace.json` is the same catalog in Claude Code's format, with the excel-mcp server declared inline. The `plugins/` directory contains Agent Plugins 1.0 packages generated from source-owned templates by the source repo's `publish-plugins.yml` workflow.
 
 ## Install
+
+The plugins are listed in
+[Awesome Copilot](https://github.com/github/awesome-copilot), the default
+marketplace in current Copilot clients:
+
+```powershell
+copilot plugin install excel-mcp@awesome-copilot
+copilot plugin install excel-cli@awesome-copilot
+```
+
+Alternatively, register this direct marketplace:
 
 ```powershell
 # Register this marketplace
@@ -42,13 +54,34 @@ copilot plugin install excel-mcp@mcp-server-excel-plugins
 copilot plugin install excel-cli@mcp-server-excel-plugins
 ```
 
-Both plugins publish wrapper/bootstrap assets plus skills. On first use they fetch the newest self-contained Windows runtime from the main `sbroenne/mcp-server-excel` GitHub Releases feed. The bootstrap compares the release tag and executable version once per Copilot session, stores runtime state in the host-provided `PLUGIN_DATA` directory, and reuses the verified runtime for the rest of the session. Standalone shim use checks for updates at most once every 24 hours.
+Choose one marketplace per plugin; do not install duplicate copies. Existing
+direct-marketplace installations do not need to move.
+
+Both plugins use the public npm packages through `npx`. Node.js 18 or later is
+required.
+
+### Claude Code
+
+```powershell
+# Register this marketplace
+claude plugin marketplace add sbroenne/mcp-server-excel-plugins
+
+# Install one or both plugins
+claude plugin install excel-mcp@mcp-server-excel-plugins
+claude plugin install excel-cli@mcp-server-excel-plugins
+```
+
+Inside a Claude Code session, the same steps are `/plugin marketplace add sbroenne/mcp-server-excel-plugins`
+and `/plugin install excel-mcp@mcp-server-excel-plugins`.
+
+For Claude Desktop, use the one-click `.mcpb` bundle from the
+[latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest) instead.
 
 ## Notes
 
 - **Windows only** — ExcelMcp depends on Microsoft Excel COM automation.
-- **excel-mcp** includes portable root `mcp.json` configuration plus plugin-local bootstrap helpers for the ExcelMcp MCP runtime.
-- **excel-cli** includes plugin-local bootstrap helpers for the Excel CLI runtime; separate PATH installation is optional, not required for plugin use.
+- **excel-mcp** includes portable root `mcp.json` configuration that launches `@sbroenne/mcp-server-excel`.
+- **excel-cli** includes an argument-safe npx wrapper for `@sbroenne/excelcli`; separate PATH installation is optional.
 - Both root `plugin.json` manifests target `https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`; skills are discovered from the fixed `skills/` directory.
 
 ## Source and Support

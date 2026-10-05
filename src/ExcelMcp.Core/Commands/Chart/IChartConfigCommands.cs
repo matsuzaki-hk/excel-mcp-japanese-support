@@ -32,9 +32,62 @@ namespace Sbroenne.ExcelMcp.Core.Commands.Chart;
 /// </summary>
 [ServiceCategory("chartconfig", "ChartConfig")]
 [McpTool("chart_config", Title = "Chart Configuration", Destructive = true, Category = "analysis",
-    Description = "Chart configuration - data source, series, type, title, axis labels, legend, and styling. SERIES: add-series (valuesRange required), remove-series (1-based index), set-source-range. TITLES: set-title, set-axis-title (Category/Value/Secondary). AXIS: number format, scale min/max/units. LEGEND: Bottom, Corner, Top, Right, Left. STYLES: 1-48 built-in. DATA LABELS: values, percentages, positions (Center, InsideEnd, OutsideEnd, BestFit). GRIDLINES: major/minor for value/category axes. TRENDLINES: Linear, Exponential, Logarithmic, Polynomial, Power, MovingAverage. SERIES FORMAT: marker style/size/colors, invert if negative. PLACEMENT: 1=move+size with cells, 2=move only, 3=free floating. Use chart for lifecycle.")]
+    Description = "Configure chart data, series, titles, axes, labels, legends, styling, and trendlines. Add-series requires valuesRange; series/point indices are 1-based. get-series-settings inspects native type, axis assignment, formula, points and error-bar presence; set-series-axis-group assigns Primary/Secondary. get-error-bars/set-error-bars use typed error_bar_options; calculation/source getters are unavailable and settingsReadable is false, never cached request values. get-point-format/set-point-format use point_options and report native getter limitations explicitly; marker points support their own colors/style/size, not transparency/outline weight. Per-series writes reject PivotCharts; use pivottable_field for their fields. Prefer explicit axis selectors Category, Value, CategorySecondary, and ValueSecondary. Legacy aliases Primary=Category and Secondary=Value both use the primary axis group. Placement: 1=move and size with cells, 2=move only, 3=free floating. Use chart for lifecycle and native image export.")]
 public interface IChartConfigCommands
 {
+    /// <summary>Reads native error-bar presence and end caps. Excel exposes no getters for calculation kind, direction, include, amount or custom range references; settingsReadable is explicitly false.</summary>
+    /// <param name="batch">Excel batch session</param>
+    /// <param name="chartName">Existing embedded chart name</param>
+    /// <param name="seriesIndex">One-based existing series index</param>
+    [ServiceAction("get-error-bars")]
+    ChartErrorBarsResult GetErrorBars(IExcelBatch batch, [RequiredParameter] string chartName,
+        [RequiredParameter] int seriesIndex);
+
+    /// <summary>Sets native regular-chart error bars; disabled removes both directions. Custom ranges must match the point count. PivotCharts are rejected.</summary>
+    /// <param name="batch">Excel batch session</param>
+    /// <param name="chartName">Existing regular chart name</param>
+    /// <param name="seriesIndex">One-based existing series index</param>
+    /// <param name="errorBarOptions">Typed bar settings using camelCase nested keys; custom ranges are on sourceSheetName or the chart worksheet</param>
+    [ServiceAction("set-error-bars")]
+    ChartErrorBarsResult SetErrorBars(IExcelBatch batch, [RequiredParameter] string chartName,
+        [RequiredParameter] int seriesIndex, [RequiredParameter] ChartErrorBarOptions errorBarOptions);
+
+    /// <summary>Reads one native point's material format and supported marker settings.</summary>
+    /// <param name="batch">Excel batch session</param>
+    /// <param name="chartName">Existing embedded chart name</param>
+    /// <param name="seriesIndex">One-based existing series index</param>
+    /// <param name="pointIndex">One-based existing point index</param>
+    [ServiceAction("get-point-format")]
+    ChartPointFormatResult GetPointFormat(IExcelBatch batch, [RequiredParameter] string chartName,
+        [RequiredParameter] int seriesIndex, [RequiredParameter] int pointIndex);
+
+    /// <summary>Formats only the selected regular-chart point. Marker settings require line/scatter/radar series. PivotCharts are rejected.</summary>
+    /// <param name="batch">Excel batch session</param>
+    /// <param name="chartName">Existing regular chart name</param>
+    /// <param name="seriesIndex">One-based existing series index</param>
+    /// <param name="pointIndex">One-based existing point index</param>
+    /// <param name="pointOptions">Typed point material/marker settings with camelCase nested keys; omitted fields preserve existing settings</param>
+    [ServiceAction("set-point-format")]
+    ChartPointFormatResult SetPointFormat(IExcelBatch batch, [RequiredParameter] string chartName,
+        [RequiredParameter] int seriesIndex, [RequiredParameter] int pointIndex, [RequiredParameter] ChartPointOptions pointOptions);
+
+    /// <summary>Reads the selected native series type, axis assignment, source formula, point count and error-bar presence.</summary>
+    /// <param name="batch">Excel batch session</param>
+    /// <param name="chartName">Existing embedded chart name</param>
+    /// <param name="seriesIndex">One-based existing series index</param>
+    [ServiceAction("get-series-settings")]
+    ChartSeriesSettingsResult GetSeriesSettings(IExcelBatch batch, [RequiredParameter] string chartName,
+        [RequiredParameter] int seriesIndex);
+
+    /// <summary>Assigns a regular chart series to primary or secondary axes. PivotCharts are rejected; their series follow PivotTable fields.</summary>
+    /// <param name="batch">Excel batch session</param>
+    /// <param name="chartName">Existing regular chart name</param>
+    /// <param name="seriesIndex">One-based existing series index</param>
+    /// <param name="axisGroup">Primary or Secondary; native chart type must support the requested assignment</param>
+    [ServiceAction("set-series-axis-group")]
+    ChartSeriesSettingsResult SetSeriesAxisGroup(IExcelBatch batch, [RequiredParameter] string chartName,
+        [RequiredParameter] int seriesIndex, [RequiredParameter][FromString] ChartAxisGroup axisGroup);
+
     // === DATA SOURCE OPERATIONS ===
 
     /// <summary>
@@ -52,13 +105,13 @@ public interface IChartConfigCommands
 
     /// <summary>
     /// Adds a data series to Regular Charts.
-    /// PivotCharts: Throws exception guiding to pivottable(action: 'add-value-field').
+    /// PivotCharts: Throws exception guiding to pivottable_field add-value-field.
     /// </summary>
     /// <param name="batch">Excel batch session</param>
     /// <param name="chartName">Name of the chart</param>
     /// <param name="seriesName">Display name for the series</param>
-    /// <param name="valuesRange">Range containing series values (e.g., B2:B10)</param>
-    /// <param name="categoryRange">Optional range for category labels (e.g., A2:A10)</param>
+    /// <param name="valuesRange">Series values on the chart worksheet (e.g., B2:B10), or a sheet-qualified range in the chart workbook (e.g., Sheet1!B2:B10)</param>
+    /// <param name="categoryRange">Optional category labels on the chart worksheet (e.g., A2:A10), or a sheet-qualified range in the chart workbook</param>
     [ServiceAction("add-series")]
     SeriesInfo AddSeries(
         IExcelBatch batch,
@@ -69,7 +122,7 @@ public interface IChartConfigCommands
 
     /// <summary>
     /// Removes a data series from Regular Charts.
-    /// PivotCharts: Throws exception guiding to pivottable(action: 'remove-field').
+    /// PivotCharts: Throws exception guiding to pivottable_field remove-field.
     /// </summary>
     /// <param name="batch">Excel batch session</param>
     /// <param name="chartName">Name of the chart</param>
@@ -104,14 +157,14 @@ public interface IChartConfigCommands
     OperationResult SetTitle(
         IExcelBatch batch,
         [RequiredParameter] string chartName,
-        [RequiredParameter] string title);
+        [RequiredParameter, AllowEmptyString] string title);
 
     /// <summary>
     /// Sets axis title.
     /// </summary>
     /// <param name="batch">Excel batch session</param>
     /// <param name="chartName">Name of the chart</param>
-    /// <param name="axis">Which axis to set title for (Category, Value, SeriesAxis)</param>
+    /// <param name="axis">Axis selector: Category/Value for primary axes, CategorySecondary/ValueSecondary for secondary axes. Primary aliases Category; Secondary aliases Value on the primary group. The requested axis must exist.</param>
     /// <param name="title">Axis title text</param>
     [ServiceAction("set-axis-title")]
     OperationResult SetAxisTitle(
@@ -198,7 +251,7 @@ public interface IChartConfigCommands
     /// <param name="batch">Excel batch session</param>
     /// <param name="chartName">Name of the chart</param>
     /// <param name="showValue">Show data values on labels</param>
-    /// <param name="showPercentage">Show percentage values. Only meaningful for pie and doughnut chart types; setting to true on other chart types has no visual effect.</param>
+    /// <param name="showPercentage">Show percentage values for pie and doughnut charts. Excel can reject this setting on other chart types; rejection is an error, not a successful no-op.</param>
     /// <param name="showSeriesName">Show series name on labels</param>
     /// <param name="showCategoryName">Show category name on labels</param>
     /// <param name="showBubbleSize">Show bubble size (bubble charts)</param>

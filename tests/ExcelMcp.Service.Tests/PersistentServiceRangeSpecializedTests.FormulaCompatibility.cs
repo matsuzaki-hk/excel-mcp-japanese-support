@@ -1,0 +1,224 @@
+using System.Globalization;
+using Sbroenne.ExcelMcp.ComInterop;
+using Sbroenne.ExcelMcp.Core.Commands.Range;
+using Sbroenne.ExcelMcp.Core.Commands.Table;
+using Xunit;
+using Excel = Microsoft.Office.Interop.Excel;
+
+namespace Sbroenne.ExcelMcp.Service.Tests;
+
+public sealed partial class PersistentServiceRangeSpecializedTests
+{
+    [Fact]
+    public void FormulaCompatibility_TableArrayArgument_UsesSessionSemanticsAndLegacyControl()
+    {
+        var batch = _fixture.BatchToken;
+        var sheetName = _fixture.CreateTestSheet(batch);
+        var tableName = $"ArrayArgumentTable_{Guid.NewGuid():N}"[..31];
+        var tableCommands = _fixture.CreateCommands<ITableCommands>();
+        var supportsFormula2 = _fixture.ExecuteRawVerification(
+            (ctx, ct) => ctx.Capabilities.SupportsFormula2);
+        const string formula = "=SUM(SQRT($A$2:$A$3))";
+        RequireSuccess(_commands.SetValues(batch, sheetName, "A1:C3",
+        [
+            ["Input", "Session", "Legacy control"],
+            [4, null, null],
+            [9, null, null]
+        ]));
+        Assert.True(
+            tableCommands.Create(batch, sheetName, tableName, "A1:C3").Success);
+        Assert.True(
+            _commands.SetFormulas(batch, sheetName, "B2:B3", [[formula], [formula]]).Success);
+
+        _fixture.ExecuteRawVerification((ctx, ct) =>
+        {
+            Excel.Worksheet? sheet = null;
+            Excel.Range? range = null;
+            try
+            {
+                sheet = ComUtilities.FindSheet(ctx.Book, sheetName);
+                Assert.NotNull(sheet);
+                range = sheet.Range["C2:C3"];
+                range.Formula = formula;
+            }
+            finally
+            {
+                ComUtilities.Release(ref range);
+                ComUtilities.Release(ref sheet);
+            }
+        });
+
+        var legacyValues = RequireSuccess(_commands.GetValues(batch, sheetName, "C2:C3"));
+        Assert.Equal(2.0, Convert.ToDouble(legacyValues.Values[0][0], CultureInfo.InvariantCulture));
+        Assert.Equal(3.0, Convert.ToDouble(legacyValues.Values[1][0], CultureInfo.InvariantCulture));
+        var result = RequireSuccess(_commands.GetFormulas(batch, sheetName, "B2:B3"));
+        Assert.Equal(2, result.Formulas.Count);
+        Assert.Empty(result.CellErrors);
+        if (supportsFormula2)
+        {
+            Assert.All(result.Formulas, row =>
+            {
+                Assert.DoesNotContain("@", row[0]);
+                Assert.Equal(formula, row[0]);
+            });
+            Assert.All(
+                result.Values,
+                row => Assert.Equal(5.0, Convert.ToDouble(row[0], CultureInfo.InvariantCulture)));
+        }
+        else
+        {
+            var legacyFormulas = ReadLegacyTableFormulas(sheetName, "C2:C3");
+            for (var row = 0; row < 2; row++)
+            {
+                Assert.Equal(legacyFormulas[row + 1, 1], result.Formulas[row][0]);
+                Assert.Equal(legacyValues.Values[row][0], result.Values[row][0]);
+            }
+        }
+    }
+
+    [Fact]
+    public void GetValues_StructuredAndSpillReferences_ReturnValues()
+    {
+        var batch = _fixture.BatchToken;
+        var sheetName = _fixture.CreateTestSheet(batch);
+        var tableName = $"ReferenceTable_{Guid.NewGuid():N}"[..31];
+        var tableCommands = _fixture.CreateCommands<ITableCommands>();
+
+        RequireSuccess(_commands.SetValues(batch, sheetName, "A1:B2",
+        [
+            ["Name", "Amount"],
+            ["North", 1]
+        ]));
+        Assert.True(
+            tableCommands.Create(batch, sheetName, tableName, "A1:B2").Success);
+
+        var structured = RequireSuccess(_commands.GetValues(batch, sheetName, $"{tableName}[Name]"));
+        Assert.Single(structured.Values);
+        Assert.Equal("North", structured.Values[0][0]);
+
+        var supportsFormula2 = _fixture.ExecuteRawVerification(
+            (ctx, ct) => ctx.Capabilities.SupportsFormula2);
+        if (!supportsFormula2)
+        {
+            return;
+        }
+
+        Assert.True(_commands.SetFormulas(batch, sheetName, "D1", [["=SEQUENCE(2)"]]).Success);
+        var spilled = RequireSuccess(_commands.GetValues(batch, sheetName, "D1#"));
+
+        Assert.Equal(2, spilled.RowCount);
+        Assert.Equal(1.0, Convert.ToDouble(spilled.Values[0][0], CultureInfo.InvariantCulture));
+        Assert.Equal(2.0, Convert.ToDouble(spilled.Values[1][0], CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task FormulaCompatibility_LegacySafeFormulas_RoundTripAndEnrichErrors()
+    {
+        var batch = _fixture.BatchToken;
+        var sheetName = _fixture.CreateTestSheet(batch);
+        RequireSuccess(_commands.SetValues(batch, sheetName, "A1:A2", [[10], [20]]));
+        Assert.Equal(string.Empty, RequireSuccess(_commands.GetFormulas(batch, sheetName, "B1")).Formulas[0][0]);
+        var constants = RequireSuccess(_commands.GetFormulas(batch, sheetName, "A1:A2"));
+        Assert.All(constants.Formulas, row => Assert.Equal(string.Empty, row[0]));
+
+        Assert.True(_commands.SetFormulas(batch, sheetName, "A3", [["=A1+A2"]]).Success);
+        var routed = _commands.SetValues(batch, sheetName, "B1:B2", [["=A1+A2"], ["=1/0"]]);
+        Assert.True(routed.Success);
+        Assert.True(string.IsNullOrEmpty(routed.ErrorMessage));
+        Assert.Contains("set-formulas", routed.Message);
+
+        var single = RequireSuccess(_commands.GetValues(batch, sheetName, "B2"));
+        Assert.Equal("#DIV/0!", single.Values[0][0]);
+        Assert.Equal("=1/0", Assert.Single(single.CellErrors).Formula);
+        var multiple = RequireSuccess(_commands.GetValues(batch, sheetName, "B1:B2"));
+        Assert.Equal(30.0, Convert.ToDouble(multiple.Values[0][0], CultureInfo.InvariantCulture));
+        Assert.Equal("#DIV/0!", multiple.Values[1][0]);
+        var error = Assert.Single(multiple.CellErrors);
+        Assert.Equal("B2", error.CellAddress);
+        Assert.Equal("=1/0", error.Formula);
+        var formulas = RequireSuccess(_commands.GetFormulas(batch, sheetName, "B1:B2"));
+        Assert.Equal("=A1+A2", formulas.Formulas[0][0]);
+        Assert.Equal("=1/0", formulas.Formulas[1][0]);
+        Assert.Equal("#DIV/0!", formulas.Values[1][0]);
+
+        await _fixture.SaveAndReopenAsync();
+
+        var persisted = RequireSuccess(_commands.GetFormulas(batch, sheetName, "A3"));
+        Assert.Equal("=A1+A2", persisted.Formulas[0][0]);
+        Assert.Equal(30.0, Convert.ToDouble(persisted.Values[0][0], CultureInfo.InvariantCulture));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FormulaCompatibility_WriteFailure_DoesNotDowngradeSession(bool protectSheet)
+    {
+        var batch = _fixture.BatchToken;
+        var sheetName = _fixture.CreateTestSheet(batch);
+        RequireSuccess(_commands.SetFormulas(batch, sheetName, "A1", [["=42"]]));
+        var supported = _fixture.ExecuteRawVerification(
+            (ctx, ct) => ctx.Capabilities.SupportsFormula2);
+
+        void SetProtection(bool protect) =>
+            _fixture.ExecuteRawVerification((ctx, ct) =>
+            {
+                Excel.Worksheet? sheet = null;
+                try
+                {
+                    sheet = ComUtilities.FindSheet(ctx.Book, sheetName);
+                    Assert.NotNull(sheet);
+                    if (protect)
+                    {
+                        sheet.Protect();
+                    }
+                    else
+                    {
+                        sheet.Unprotect();
+                    }
+                }
+                finally
+                {
+                    ComUtilities.Release(ref sheet);
+                }
+            });
+
+        if (protectSheet)
+        {
+            SetProtection(true);
+        }
+
+        try
+        {
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                _commands.SetFormulas(
+                    batch,
+                    sheetName,
+                    "A1",
+                    [[protectSheet ? "=43" : "=1+"]],
+                    overwritePolicy: OverwritePolicy.Allow));
+            Assert.Contains("COMException", error.Message, StringComparison.Ordinal);
+            var preserved = RequireSuccess(_commands.GetFormulas(batch, sheetName, "A1"));
+            Assert.Equal("=42", preserved.Formulas[0][0]);
+            Assert.Equal(42d, Convert.ToDouble(preserved.Values[0][0], CultureInfo.InvariantCulture));
+            Assert.Equal(
+                supported,
+                _fixture.ExecuteRawVerification(
+                    (ctx, ct) => ctx.Capabilities.SupportsFormula2));
+        }
+        finally
+        {
+            if (protectSheet)
+            {
+                SetProtection(false);
+            }
+        }
+
+        if (supported)
+        {
+            RequireSuccess(_commands.SetFormulas(batch, sheetName, "C1", [["=SEQUENCE(2)"]]));
+            var spilled = RequireSuccess(_commands.GetValues(batch, sheetName, "C1:C2"));
+            Assert.Equal(1.0, Convert.ToDouble(spilled.Values[0][0], CultureInfo.InvariantCulture));
+            Assert.Equal(2.0, Convert.ToDouble(spilled.Values[1][0], CultureInfo.InvariantCulture));
+        }
+    }
+}

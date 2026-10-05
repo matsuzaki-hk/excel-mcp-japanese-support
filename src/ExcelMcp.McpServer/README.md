@@ -37,11 +37,12 @@ Unlike file-parser libraries that rewrite `.xlsx` files directly, ExcelMcp drive
 **Primary — npm (no .NET runtime required):**
 
 ```powershell
-npx -y @sbroenne/mcp-server-excel
+npx -y @sbroenne/mcp-server-excel@latest
 ```
 
 Configure MCP clients with `command: "npx"` and
-`args: ["-y", "@sbroenne/mcp-server-excel"]`.
+`args: ["-y", "@sbroenne/mcp-server-excel@latest"]`. Requires Node.js 18+;
+npm resolves `@latest` at launch using its normal cache policy.
 
 **Standalone executable:**
 
@@ -70,9 +71,9 @@ dotnet tool install --global Sbroenne.ExcelMcp.McpServer
 
 ## 🛠️ What You Can Do
 
-**31 specialized tools with 326 operations** covering Power Query, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, Named Ranges, File/Session management, Calculation Mode, Slicers, Conditional Formatting, Screenshots, and Window Management.
+**31 specialized tools with 387 operations** covering Power Query, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, Named Ranges, File/Session management, Calculation Mode, Slicers, Conditional Formatting, Screenshots, and Window Management.
 
-📚 **[Complete Feature Reference →](https://github.com/sbroenne/mcp-server-excel/blob/main/FEATURES.md)** - Detailed documentation of all 326 operations, grouped by category
+📚 **[Feature Overview →](https://github.com/sbroenne/mcp-server-excel/blob/main/FEATURES.md)** - Capabilities grouped by goal. Current actions and inputs for all 387 operations are described by the server's tools.
 
 **AI-Powered Workflows:**
 - 💬 Natural language Excel commands through GitHub Copilot, Claude, or ChatGPT
@@ -83,6 +84,23 @@ dotnet tool install --global Sbroenne.ExcelMcp.McpServer
 
 
 ---
+
+## Session workflow
+
+List and match the intended workbook, reuse its session or open/create, perform
+the work, then list and check its `canClose`. Close only when authorized and
+choose `save: true` or `save: false` explicitly. Closing without saving discards
+all unsaved edits and has no tool-level undo.
+
+MCP inputs, open/create results, list entries, and session error context use
+`session_id`. The legacy `sessionId` input is rejected. CLI JSON keeps its
+`sessionId` convention; its sessions are separate.
+
+Calls within a session execute one at a time, but concurrent requests and
+responses have no guaranteed order. Wait for dependent calls. Writes attempt to
+restore the calculation mode; restoration can fail without failing the write.
+Use `get-settings` when subsequent work depends on the mode. Manual mode requires
+explicit calculation before relying on dependent values.
 
 ## 💡 Example Use Cases
 

@@ -19,6 +19,7 @@ namespace Sbroenne.ExcelMcp.CLI.Tests.Integration;
 [Trait("Category", "Integration")]
 [Trait("Feature", "ServiceDaemon")]
 [Trait("RequiresExcel", "false")]
+[Trait("AdapterTestKind", "System")]
 [Trait("Speed", "Medium")]
 public sealed class CliDaemonTests : IAsyncLifetime
 {
@@ -169,7 +170,9 @@ public sealed class CliDaemonTests : IAsyncLifetime
         Assert.Equal(1, result.ExitCode);
         Assert.False(json.RootElement.GetProperty("success").GetBoolean());
         Assert.Contains("ready", json.RootElement.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
-        Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(36));
+        Assert.InRange(stopwatch.Elapsed, TimeSpan.FromSeconds(29), TimeSpan.FromSeconds(36));
+        Assert.False(DaemonAutoStart.IsDaemonMutexHeld(_testPipeName));
+        Assert.False(DaemonAutoStart.IsDaemonStartupInProgress(_testPipeName));
     }
 
     [Fact]
@@ -543,7 +546,9 @@ public sealed class CliDaemonTests : IAsyncLifetime
     {
         var mutexName = DaemonAutoStart.GetDaemonMutexName(_testPipeName);
         using var sleeper = StartMutexHoldingProcess(mutexName);
-        await WaitForMutexAsync(mutexName);
+        var ready = await sleeper.StandardOutput.ReadLineAsync()
+            .WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal("ready", ready);
 
         DaemonProcessTracker.RegisterProcess(
             _testPipeName,
@@ -687,7 +692,7 @@ public sealed class CliDaemonTests : IAsyncLifetime
             StartInfo = new ProcessStartInfo
             {
                 FileName = "powershell",
-                Arguments = $"-NoLogo -NoProfile -NonInteractive -Command \"$created = $false; $m = New-Object System.Threading.Mutex($true, '{mutexName}', [ref]$created); if (-not $created) {{ exit 99 }}; try {{ Start-Sleep -Seconds 60 }} finally {{ $m.ReleaseMutex(); $m.Dispose() }}\"",
+                Arguments = $"-NoLogo -NoProfile -NonInteractive -Command \"$created = $false; $m = New-Object System.Threading.Mutex($true, '{mutexName}', [ref]$created); if (-not $created) {{ exit 99 }}; try {{ Write-Output 'ready'; Start-Sleep -Seconds 60 }} finally {{ $m.ReleaseMutex(); $m.Dispose() }}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -697,24 +702,6 @@ public sealed class CliDaemonTests : IAsyncLifetime
 
         process.Start();
         return process;
-    }
-
-    private static async Task WaitForMutexAsync(string mutexName, int maxRetries = 20, int delayMs = 250)
-    {
-        for (var i = 0; i < maxRetries; i++)
-        {
-            try
-            {
-                using var mutex = Mutex.OpenExisting(mutexName);
-                return;
-            }
-            catch (WaitHandleCannotBeOpenedException)
-            {
-                await Task.Delay(delayMs);
-            }
-        }
-
-        throw new TimeoutException($"Mutex '{mutexName}' was not acquired within {maxRetries * delayMs}ms");
     }
 
     private async Task WaitForDaemonReadyAsync(int maxRetries = 20, int delayMs = 500)

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Sbroenne.ExcelMcp.Service;
 
 namespace Sbroenne.ExcelMcp.McpServer.ServiceBridge;
@@ -12,61 +14,57 @@ internal interface IServiceBridgeBackend : IDisposable
 internal sealed class ExcelMcpServiceBackend(Service.ExcelMcpService service) : IServiceBridgeBackend
 {
     public Task<ServiceResponse> ProcessAsync(ServiceRequest request) => service.ProcessAsync(request);
-
     public bool ForceCloseSession(string sessionId) => service.SessionManager.CloseSession(sessionId, save: false, force: true);
-
     public void Dispose() => service.Dispose();
 }
 
-/// <summary>
-/// Bridge that holds the in-process ExcelMCP Service for direct method calls.
-/// No named pipe — MCP tools call the service directly (same process).
-/// </summary>
-public static class ServiceBridge
+/// <summary>Host-owned access to the in-process Excel service.</summary>
+public sealed class ServiceBridge : IDisposable
 {
-    private static readonly SemaphoreSlim _initLock = new(1, 1);
-    private static readonly Func<IServiceBridgeBackend> DefaultServiceFactory =
-        static () => new ExcelMcpServiceBackend(new Service.ExcelMcpService());
+    private readonly SemaphoreSlim _initLock = new(1, 1);
+    private readonly object _stateLock = new();
+    private readonly Func<IServiceBridgeBackend> _serviceFactory;
+    private readonly ILogger<ServiceBridge> _logger;
+    private ServiceInstance? _current;
+    private bool _disposed;
 
-    private static IServiceBridgeBackend? _service;
-    private static Func<IServiceBridgeBackend> _serviceFactory = DefaultServiceFactory;
-    private static Exception? _lastStartupException;
-    private static long _pendingTestOwnerToken;
-    private static long _serviceOwnerToken;
-
-    /// <summary>
-    /// JSON serializer options for deserializing service responses.
-    /// </summary>
-    public static readonly JsonSerializerOptions JsonOptions = ServiceProtocol.JsonOptions;
-
-    /// <summary>
-    /// Ensures the in-process ExcelMCP Service is created.
-    /// Called automatically on first request.
-    /// </summary>
-    public static async Task<bool> EnsureServiceAsync(CancellationToken cancellationToken = default)
+    internal ServiceBridge(Func<IServiceBridgeBackend> serviceFactory, ILogger<ServiceBridge>? logger = null)
     {
-        if (_service != null)
+        _serviceFactory = serviceFactory;
+        _logger = logger ?? NullLogger<ServiceBridge>.Instance;
+    }
+
+    private async Task<ServiceInstance> AcquireServiceAsync(CancellationToken cancellationToken)
+    {
+        lock (_stateLock)
         {
-            return true;
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_current is not null)
+                return _current;
         }
 
         await _initLock.WaitAsync(cancellationToken);
         try
         {
-            if (_service != null)
+            lock (_stateLock)
             {
-                return true;
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_current is not null)
+                    return _current;
             }
 
-            _service = _serviceFactory();
-            _serviceOwnerToken = Interlocked.Read(ref _pendingTestOwnerToken);
-            _lastStartupException = null;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _lastStartupException = ex;
-            return false;
+            var backend = _serviceFactory();
+            lock (_stateLock)
+            {
+                if (!_disposed)
+                {
+                    _current = new ServiceInstance(backend);
+                    return _current;
+                }
+            }
+
+            backend.Dispose();
+            throw new ObjectDisposedException(nameof(ServiceBridge));
         }
         finally
         {
@@ -74,26 +72,30 @@ public static class ServiceBridge
         }
     }
 
-    /// <summary>
-    /// Sends a command to the ExcelMCP Service directly (in-process, no pipe).
-    /// </summary>
-    public static async Task<ServiceResponse> SendAsync(
+    public async Task<ServiceResponse> SendAsync(
         string command,
         string? sessionId = null,
         object? args = null,
         int? timeoutSeconds = null,
         CancellationToken cancellationToken = default)
     {
-        if (!await EnsureServiceAsync(cancellationToken))
+        cancellationToken.ThrowIfCancellationRequested();
+        ServiceInstance instance;
+        try
         {
+            instance = await AcquireServiceAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not ObjectDisposedException)
+        {
+            _logger.LogError(ex, "Failed to start the in-process Excel service.");
             return new ServiceResponse
             {
                 Success = false,
                 Command = command,
                 SessionId = sessionId,
                 ErrorCategory = "ServiceStartup",
-                ErrorMessage = BuildServiceStartupErrorMessage(_lastStartupException),
-                ExceptionType = _lastStartupException?.GetType().Name
+                ErrorMessage = "Failed to start ExcelMCP Service in-process. See server logs for details.",
+                ExceptionType = ex.GetType().Name
             };
         }
 
@@ -101,240 +103,116 @@ public static class ServiceBridge
         {
             Command = command,
             SessionId = sessionId,
-            Args = args != null ? JsonSerializer.Serialize(args, JsonOptions) : null
+            Args = args is null ? null : JsonSerializer.Serialize(args, ServiceProtocol.JsonOptions)
         };
 
-        var service = _service!;
-        var processTask = Task.Run(async () => await service.ProcessAsync(request), CancellationToken.None);
-
-        if (!timeoutSeconds.HasValue && !cancellationToken.CanBeCanceled)
-        {
-            return await processTask;
-        }
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // Service dispatch includes synchronous COM waits. Keep those off the SDK's request loop.
+        var processTask = Task.Run(() => instance.Backend.ProcessAsync(request), CancellationToken.None);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (timeoutSeconds.HasValue)
-        {
-            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds.Value));
-        }
+            deadline.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds.Value));
 
         try
         {
-            return await processTask.WaitAsync(cts.Token);
+            var response = await processTask.WaitAsync(deadline.Token);
+            cancellationToken.ThrowIfCancellationRequested();
+            return response;
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
-            var completedResponse = await TryGetCompletedResponseAsync(processTask);
-            if (completedResponse != null)
-            {
-                return completedResponse;
-            }
+            if (!cancellationToken.IsCancellationRequested && processTask.IsCompleted)
+                return await processTask;
 
-            CleanupCancelledRequest(service, sessionId);
+            if (!string.IsNullOrWhiteSpace(sessionId))
+                CloseCancelledSession(instance, sessionId);
 
-            if (timeoutSeconds.HasValue && !cancellationToken.IsCancellationRequested)
-            {
-                return new ServiceResponse
-                {
-                    Success = false,
-                    Command = command,
-                    SessionId = sessionId,
-                    ErrorCategory = "Timeout",
-                    ErrorMessage = $"Operation timed out after {timeoutSeconds} seconds.",
-                    ExceptionType = nameof(TimeoutException)
-                };
-            }
-
+            // Open/create has no session ID until Excel finishes. Reclaim only its eventual session,
+            // not the whole service and unrelated workbooks. Also observe all late task failures.
+            _ = ObserveCancelledRequestAsync(instance, processTask, command);
+            cancellationToken.ThrowIfCancellationRequested();
             return new ServiceResponse
             {
                 Success = false,
                 Command = command,
                 SessionId = sessionId,
-                ErrorCategory = "Cancelled",
-                ErrorMessage = string.IsNullOrWhiteSpace(sessionId)
-                    ? "Operation was cancelled. The Excel MCP service was reset to avoid leaving a stuck Excel operation behind."
-                    : "Operation was cancelled and the session has been closed to avoid leaving a stuck Excel operation behind. Please reopen the file with a new session.",
-                ExceptionType = nameof(OperationCanceledException)
+                ErrorCategory = "Timeout",
+                ErrorMessage = $"Operation timed out after {timeoutSeconds} seconds.",
+                ExceptionType = nameof(TimeoutException)
             };
         }
     }
 
-    private static void CleanupCancelledRequest(IServiceBridgeBackend service, string? sessionId)
+    private async Task ObserveCancelledRequestAsync(
+        ServiceInstance instance, Task<ServiceResponse> task, string command)
     {
-        if (!string.IsNullOrWhiteSpace(sessionId))
+        try
         {
-            try
+            var response = await task;
+            if (command is "session.open" or "session.create" && response.Success)
             {
-                if (service.ForceCloseSession(sessionId))
-                {
-                    return;
-                }
+                using var result = JsonDocument.Parse(response.Result
+                    ?? throw new InvalidOperationException("Session creation returned no result."));
+                var sessionId = result.RootElement.GetProperty("sessionId").GetString();
+                if (string.IsNullOrWhiteSpace(sessionId))
+                    throw new InvalidOperationException("Session creation returned no session ID.");
+                CloseCancelledSession(instance, sessionId);
             }
-            catch (Exception)
+            else if (!response.Success)
             {
-                // Fall back to resetting the entire service below.
+                _logger.LogWarning("Cancelled {Command} finished with error category {ErrorCategory}.",
+                    command, response.ErrorCategory);
             }
         }
-
-        Dispose();
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Cleanup of cancelled {Command} failed.", command);
+        }
     }
 
-    private static async Task<ServiceResponse?> TryGetCompletedResponseAsync(Task<ServiceResponse> processTask)
+    private void CloseCancelledSession(ServiceInstance instance, string sessionId)
     {
-        if (processTask.IsCompleted)
+        try
         {
-            return await processTask;
+            if (instance.Backend.ForceCloseSession(sessionId))
+                return;
+            _logger.LogWarning("Forced session cleanup failed; retiring the affected service instance.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Forced session cleanup failed; retiring the affected service instance.");
         }
 
-        var completedTask = await Task.WhenAny(
-            processTask,
-            Task.Delay(TimeSpan.FromMilliseconds(50))).ConfigureAwait(false);
-
-        if (completedTask == processTask)
+        lock (_stateLock)
         {
-            return await processTask.ConfigureAwait(false);
+            if (ReferenceEquals(_current, instance))
+                _current = null;
         }
-
-        return null;
+        instance.Dispose();
     }
 
-    /// <summary>
-    /// Sends a session-scoped command to the service.
-    /// </summary>
-    public static async Task<ServiceResponse> WithSessionAsync(
-        string sessionId,
-        string command,
-        object? args = null,
-        int? timeoutSeconds = null,
-        CancellationToken cancellationToken = default)
+    public void Dispose()
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
+        ServiceInstance? instance;
+        lock (_stateLock)
         {
-            return new ServiceResponse
-            {
-                Success = false,
-                Command = command,
-                ErrorCategory = "InvalidInput",
-                ErrorMessage = "sessionId is required. Use file 'open' action to start a session."
-            };
+            if (_disposed)
+                return;
+            _disposed = true;
+            instance = _current;
+            _current = null;
         }
-
-        return await SendAsync(command, sessionId, args, timeoutSeconds, cancellationToken);
+        instance?.Dispose();
     }
 
-    /// <summary>
-    /// Opens a session via the service.
-    /// </summary>
-    public static async Task<ServiceResponse> OpenSessionAsync(
-        string excelPath,
-        bool show = false,
-        int? timeoutSeconds = null,
-        CancellationToken cancellationToken = default)
+    private sealed class ServiceInstance(IServiceBridgeBackend backend) : IDisposable
     {
-        return await SendAsync("session.open", null, new
+        private int _disposed;
+        internal IServiceBridgeBackend Backend { get; } = backend;
+
+        public void Dispose()
         {
-            filePath = excelPath,
-            show,
-            timeoutSeconds
-        }, timeoutSeconds, cancellationToken);
-    }
-
-    /// <summary>
-    /// Creates a new file and opens a session via the service.
-    /// </summary>
-    public static async Task<ServiceResponse> CreateSessionAsync(
-        string excelPath,
-        bool? macroEnabled = null,
-        bool show = false,
-        int? timeoutSeconds = null,
-        CancellationToken cancellationToken = default)
-    {
-        return await SendAsync("session.create", null, new
-        {
-            filePath = excelPath,
-            macroEnabled,
-            show,
-            timeoutSeconds
-        }, timeoutSeconds, cancellationToken);
-    }
-
-    /// <summary>
-    /// Closes a session via the service.
-    /// </summary>
-    public static async Task<ServiceResponse> CloseSessionAsync(
-        string sessionId,
-        bool save = false,
-        CancellationToken cancellationToken = default)
-    {
-        return await SendAsync("session.close", sessionId, new { save }, cancellationToken: cancellationToken);
-    }
-
-    /// <summary>
-    /// Lists active sessions via the service.
-    /// </summary>
-    public static async Task<ServiceResponse> ListSessionsAsync(CancellationToken cancellationToken = default)
-    {
-        return await SendAsync("session.list", cancellationToken: cancellationToken);
-    }
-
-    /// <summary>
-    /// Tests if a file can be opened via the service.
-    /// </summary>
-    public static async Task<ServiceResponse> TestFileAsync(
-        string excelPath,
-        CancellationToken cancellationToken = default)
-    {
-        return await SendAsync("session.test", null, new { filePath = excelPath }, cancellationToken: cancellationToken);
-    }
-
-    /// <summary>
-    /// Disposes the in-process ExcelMCP Service, auto-saving all sessions before shutdown.
-    /// Must be called when the MCP server process exits to prevent silent data loss.
-    /// </summary>
-    public static void Dispose()
-    {
-        var service = Interlocked.Exchange(ref _service, null);
-        Interlocked.Exchange(ref _serviceOwnerToken, 0);
-        service?.Dispose();
-        _lastStartupException = null;
-    }
-
-    internal static void SetTestOwnerToken(long ownerToken)
-    {
-        Interlocked.Exchange(ref _pendingTestOwnerToken, ownerToken);
-    }
-
-    internal static bool DisposeIfOwnedBy(long ownerToken)
-    {
-        if (ownerToken == 0 || Interlocked.Read(ref _serviceOwnerToken) != ownerToken)
-        {
-            return false;
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                Backend.Dispose();
         }
-
-        Dispose();
-        return true;
-    }
-
-    internal static void SetServiceFactoryForTests(Func<IServiceBridgeBackend> serviceFactory)
-    {
-        Dispose();
-        _serviceFactory = serviceFactory;
-    }
-
-    internal static void ResetForTests()
-    {
-        Dispose();
-        Interlocked.Exchange(ref _pendingTestOwnerToken, 0);
-        _serviceFactory = DefaultServiceFactory;
-    }
-
-    private static string BuildServiceStartupErrorMessage(Exception? exception)
-    {
-        if (exception == null)
-        {
-            return "Failed to start ExcelMCP Service in-process.";
-        }
-
-        return $"Failed to start ExcelMCP Service in-process: {exception.GetType().Name}: {exception.Message}";
     }
 }

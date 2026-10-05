@@ -137,12 +137,12 @@ tests/
 **During Development (Fast Feedback):**
 ```powershell
 # Quick validation - run tests for specific feature
-dotnet test tests\ExcelMcp.Core.Tests\ExcelMcp.Core.Tests.csproj --filter "Feature=PowerQuery&RunType!=OnDemand"
-dotnet test tests\ExcelMcp.Core.Tests\ExcelMcp.Core.Tests.csproj --filter "Feature=DataModel&RunType!=OnDemand"
+& .\scripts\Test-ExcelBehavior.ps1 -Project Service -Filter 'Feature=PowerQuery&RunType!=OnDemand'
+& .\scripts\Test-ExcelBehavior.ps1 -Project Service -Filter 'Feature=DataModel&RunType!=OnDemand'
 ```
 
 **Before Commit:** Rerun the affected tests and applicable repository checks.
-Follow the [repository validation requirements](../.github/copilot-instructions.md#build-and-validation)
+Follow the [repository validation requirements](../AGENTS.md#build-and-validation)
 for runtime E2E. Do not run the full Excel integration suite during iteration.
 Use a hard execution timeout for every Excel-dependent test run.
 
@@ -155,17 +155,16 @@ dotnet test tests\ExcelMcp.ComInterop.Tests\ExcelMcp.ComInterop.Tests.csproj --f
 ### **Test Categories & Guidelines**
 
 Use real Excel integration tests for COM behavior and focused non-COM tests for
-pure parsing, mapping, serialization, and generation. The blanket unit-test ban
-in [ADR-001](ADR-001-NO-UNIT-TESTS.md) is superseded by the
-[current testing strategy](../.github/instructions/testing-strategy.instructions.md).
+pure parsing, mapping, serialization, and generation.
+[ADR-001](ADR-001-TESTING-STRATEGY.md) explains the choice;
+the [testing instructions](../tests/AGENTS.md) define how to apply it.
 
 **Integration Tests (`Category=Integration`)**
 - ✅ Test business logic with real Excel COM interaction
-- ✅ Medium speed (10-20 minutes for full suite)
+- ✅ Run time depends on the selected cases and local Excel installation
 - ✅ Requires Excel installation
 - ✅ Mocks do not establish Excel COM behavior
 - ✅ Run specific features during development
-- ✅ Slow execution (3-10 minutes each)
 - ✅ Verifies actual Excel state changes
 - ✅ Comprehensive scenario coverage
 
@@ -193,7 +192,7 @@ Before creating a PR, ensure:
 
 ```powershell
 # Example: select the project and feature affected by the change
-dotnet test tests\ExcelMcp.Core.Tests\ExcelMcp.Core.Tests.csproj --filter "Feature=PowerQuery&RunType!=OnDemand"
+& .\scripts\Test-ExcelBehavior.ps1 -Project Service -Filter 'Feature=PowerQuery&RunType!=OnDemand'
 
 # Code builds without warnings
 dotnet build -c Release
@@ -300,42 +299,64 @@ routing only when a tool owns additional metadata or atomic operations that do
 not require a session. MCP calls the shared service in-process; it does not
 connect to the CLI daemon.
 
-For a manual tool, scope the SDK cancellation token, enter the shared execution
-boundary, and delegate to the generated route. For example, this helper lists
+The official SDK registers tools with `WithToolsFromAssembly` and supplies
+dependencies and cancellation tokens. For a manual tool, enter the shared async
+execution boundary and delegate to the generated route. For example, this helper lists
 worksheets through the existing Sheet route:
 
 ```csharp
-public static string ListWorksheets(
+public static Task<CallToolResult> ListWorksheets(
+    ServiceBridge.ServiceBridge bridge,
     string session_id,
     CancellationToken cancellationToken = default)
 {
-    using var cancellationScope =
-        ExcelToolsBase.PushCancellationToken(cancellationToken);
-
-    return ExcelToolsBase.ExecuteToolAction(
+    return ExcelToolsBase.ExecuteToolActionAsync(
         "worksheet",
         ServiceRegistry.Sheet.ToActionString(SheetAction.List),
         () => ServiceRegistry.Sheet.RouteAction(
             SheetAction.List,
             session_id,
-            ExcelToolsBase.ForwardToServiceFunc));
+            (command, id, args) =>
+                ExcelToolsBase.ForwardToServiceAsync(bridge, command, id, args, cancellationToken)),
+        cancellationToken);
 }
 ```
 
-`ExecuteToolAction` supplies common telemetry and error handling. Use shared
-`JsonOptions` for additional payloads. Tool execution failures return structured
-JSON with `success: false` and `isError: true`; preserve Service categories,
-HRESULTs, inner context, and retry information. Invalid input or unknown actions
-may use the established argument/protocol exception path.
+`ExecuteToolActionAsync` supplies common telemetry and result conversion. Use shared
+`JsonOptions` for additional payloads. Tool failures set the actual SDK
+`CallToolResult.IsError` and return structured JSON as well as JSON text; preserve
+Service categories, HRESULTs, inner context, and retry information. Unexpected
+exceptions and cancellation propagate to the SDK. Request filters reject unknown,
+misspelled, and action-inapplicable arguments, including explicitly supplied nulls
+and defaults; the SDK still owns binding and injected parameters.
+
+Each host owns its bridge through dependency injection. Ordinary shutdown attempts
+to save remaining sessions. Explicit `file close` defaults to `save:false` and
+discards edits. A cancelled open/create reclaims its eventual workbook without
+resetting unrelated sessions. Cancellation is not a transaction or undo.
+
+Protocol cancellation tests send `notifications/cancelled` explicitly and verify
+the server's cleanup. Cancelling an SDK client's local wait alone does not prove
+that it sent this notification: the 2.2.0 client was observed to stop waiting
+without sending it. Keep this client-side limitation separate from server cleanup
+and do not replace the SDK's server cancellation handling with a custom protocol.
 
 Tool and parameter descriptions should explain server-specific behavior,
 constraints, and differences between overlapping tools. Types and enum values
 already appear in the schema. Keep destructive/read-only metadata accurate.
+Core XML documentation is passed to the MCP generator as an MSBuild additional
+file so compiled interface references retain their parameter descriptions.
+Known top-level parameter names are rendered in MCP snake_case; nested JSON
+keys and enum values keep their contract spelling. Do not delete Core XML
+documentation before downstream builds. Published MCP output still excludes it.
 All MCP stdio diagnostics, including bootstrap/startup output, go to stderr;
 stdout is reserved for JSON-RPC.
 
-For generated skill and prompt content, see
-[Maintaining skills and MCP prompts](../skills/README.md#maintaining-skills-and-mcp-prompts).
+The server exposes tools, not prompts or resources, and sends no MCP elicitation
+requests. Consent advice in descriptions and instructions must be handled by
+the client; it is not an enforced server dialog. For generated
+skills and minimal server instructions, see
+[Maintaining skills and server guidance](../docs/AGENT-SKILLS.md#authoring-and-packaging).
 
 ## 📋 **MCP Registry Manifest**
 
@@ -408,11 +429,11 @@ cd ExcelMcp
 # Install dependencies
 dotnet restore
 
-# Run all tests
-dotnet test
-
 # Build release version
 dotnet build -c Release
+
+# Ordered local acceptance with discovery and saved results (requires Excel).
+& .\scripts\Test-ExcelBehavior.ps1 -Full
 
 # Test the built executable
 .\src\ExcelMcp.CLI\bin\Release\net10.0\excelcli.exe --version
@@ -420,7 +441,10 @@ dotnet build -c Release
 
 ## 📊 **Application Insights / Telemetry Setup**
 
-ExcelMcp uses Azure Application Insights (Classic SDK with WorkerService integration) for anonymous usage telemetry and crash reporting. Telemetry is **opt-out** (enabled by default in release builds).
+ExcelMcp uses Azure Application Insights for anonymous usage telemetry. The MCP
+Server uses WorkerService integration and also reports sanitized crashes; the CLI
+uses the base SDK for command telemetry. Telemetry is **opt-out** (enabled by
+default in release builds).
 
 ### **How It Works**
 
@@ -433,17 +457,12 @@ The Application Insights connection string is **embedded at build time** via MSB
 
 ### **What is Tracked**
 
-- **Tool invocations**: Tool name, action, duration (ms), success/failure
-- **Unhandled exceptions**: Exception type, approved source, and project-owned
+- **Tool invocations**: Tool name, action, CLI or MCP Server entry point,
+  duration (ms), success/failure
+- **Unhandled exceptions (MCP Server only)**: Exception type, approved source, and project-owned
   failure site; messages and stack traces are not transmitted
 - **User ID**: SHA256 hash of machine identity (anonymous, 16 chars)
 - **Session ID**: Random GUID per process (8 chars)
-- **Session alias compatibility**: A fixed event when a declared session-bound
-  action uses the top-level `sessionId` fallback. Its custom properties contain
-  only tool, declared action, alias name, and application version. Standard
-  telemetry context also carries the anonymous user ID, random MCP server
-  process telemetry session ID, role, role instance, and component version.
-
 ### **What is NOT Tracked**
 
 - File paths, file names, or file contents
@@ -477,11 +496,12 @@ Copy-Item "Directory.Build.props.user.template" "Directory.Build.props.user"
 # 2. Edit Directory.Build.props.user and add your connection string
 # <AppInsightsConnectionString>InstrumentationKey=xxx;IngestionEndpoint=...</AppInsightsConnectionString>
 
-# 3. Build - connection string is embedded at compile time
-dotnet build src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj
+# 3. Build - connection string is embedded into both entry points at compile time
+dotnet build Sbroenne.ExcelMcp.sln
 
-# 4. Run - telemetry is automatically sent to Azure
+# 4. Run either entry point - telemetry is automatically sent to Azure
 dotnet run --project src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj
+dotnet run --project src/ExcelMcp.CLI/ExcelMcp.CLI.csproj -- session list --quiet
 ```
 
 **Note:** `Directory.Build.props.user` is gitignored - your connection string won't be committed.
@@ -546,11 +566,11 @@ Build Time:
   MSBuild → reads AppInsightsConnectionString → generates TelemetryConfig.g.cs
 
 Runtime:
-  MCP Tool Invocation
+  CLI or MCP Tool Invocation
       │
       ▼
-  ExcelMcpTelemetry.TrackToolInvocation()
-      │ (tracks: tool, action, duration, success)
+  CliTelemetry / ExcelMcpTelemetry
+      │ (tracks: tool, action, entry point, duration, success)
       ▼
   Allowlisted telemetry construction
       │ (exception messages and stacks are omitted)
@@ -563,9 +583,10 @@ Runtime:
 | File | Purpose |
 |------|---------|
 | `Telemetry/ExcelMcpTelemetry.cs` | Static helper for tracking events |
+| `ExcelMcp.CLI/Telemetry/CliTelemetry.cs` | CLI command telemetry and lifecycle |
 | `Telemetry/SensitiveDataRedactor.cs` | Redacts sensitive local diagnostic text |
-| `Program.cs` | Application Insights WorkerService configuration |
-| `ExcelMcp.McpServer.csproj` | MSBuild target that generates TelemetryConfig.g.cs |
+| Entry-point `Program.cs` files | Application Insights lifecycle configuration |
+| CLI and MCP Server project files | MSBuild targets that generate `TelemetryConfig.g.cs` |
 | `Directory.Build.props.user.template` | Template for local dev connection string |
 | `infrastructure/azure/appinsights-resources.bicep` | Azure resources and ingestion privacy transforms |
 | `infrastructure/azure/deploy-appinsights.ps1` | Deployment script |

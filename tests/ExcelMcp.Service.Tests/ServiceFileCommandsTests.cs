@@ -1,0 +1,97 @@
+using System.Text.Json;
+using Sbroenne.ExcelMcp.Core.Models;
+using Xunit;
+
+namespace Sbroenne.ExcelMcp.Service.Tests;
+
+/// <summary>
+/// Integration tests for read-only workbook validation through the Service.
+/// Each test uses a unique Excel file for complete test isolation.
+/// The transport response and nested FileValidationInfo have separate success flags.
+/// </summary>
+[Trait("Layer", "Service")]
+[Trait("Category", "Integration")]
+[Trait("Speed", "Medium")]
+[Trait("Feature", "Files")]
+[Trait("RequiresExcel", "true")]
+[Collection("ServiceWorkflow")]
+public sealed partial class ServiceFileCommandsTests :
+    IClassFixture<ServiceFileTestFixture>
+{
+    private readonly ServiceFileCommands _fileCommands;
+    private readonly ServiceFileTestFixture _fixture;
+
+    public ServiceFileCommandsTests(ServiceFileTestFixture fixture)
+    {
+        _fileCommands = fixture.Commands;
+        _fixture = fixture;
+    }
+}
+
+public sealed class ServiceFileTestFixture : IDisposable
+{
+    private readonly string _tempDir =
+        Path.Combine(Path.GetTempPath(), $"ServiceFileTests_{Guid.NewGuid():N}");
+    private readonly ExcelMcpService _service = new();
+
+    public ServiceFileTestFixture()
+    {
+        Directory.CreateDirectory(_tempDir);
+        Commands = new ServiceFileCommands(_service);
+    }
+
+    internal ServiceFileCommands Commands { get; }
+    internal string TempDir => _tempDir;
+    internal int SessionCount => _service.SessionCount;
+
+    internal string CreateTestFile()
+    {
+        var source = Path.Combine(
+            AppContext.BaseDirectory,
+            "TestFiles",
+            "batch-test-static.xlsx");
+        var destination = Path.Combine(_tempDir, $"{Guid.NewGuid():N}.xlsx");
+        File.Copy(source, destination);
+        return destination;
+    }
+
+    public void Dispose()
+    {
+        PersistentServiceCleanupFailures.Run(_service.Dispose, () =>
+        {
+            if (Directory.Exists(_tempDir))
+                Directory.Delete(_tempDir, recursive: true);
+        });
+    }
+}
+
+internal sealed class ServiceFileCommands(ExcelMcpService service)
+{
+    internal FileValidationInfo Test(string filePath)
+    {
+        var response = TestRaw(filePath);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.True(string.IsNullOrEmpty(response.ErrorMessage));
+        Assert.False(string.IsNullOrWhiteSpace(response.Result));
+        return JsonSerializer.Deserialize<FileValidationInfo>(
+                response.Result,
+                ServiceProtocol.JsonOptions)
+            ?? throw new InvalidOperationException(
+                "session.test returned no file validation result.");
+    }
+
+    internal ServiceResponse TestRaw(string filePath)
+    {
+        var response = service.ProcessAsync(new ServiceRequest
+        {
+            Command = "session.test",
+            Args = JsonSerializer.Serialize(
+                new { filePath },
+                ServiceProtocol.JsonOptions),
+            Source = "service-file-tests"
+        }).GetAwaiter().GetResult();
+        Assert.Equal(0, service.SessionCount);
+        return response;
+    }
+}

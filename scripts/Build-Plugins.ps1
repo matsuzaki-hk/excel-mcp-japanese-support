@@ -5,19 +5,18 @@
 .DESCRIPTION
     1. Copy canonical plugin templates from .github/plugins/
     2. Strip any runtime payloads from plugin bin/ roots
-    3. Update runtime-bootstrap metadata in plugin.json and version.txt
+    3. Update release metadata in plugin.json and version.txt
     4. Synchronize complete Agent Skill directories from source
     5. Validate Agent Plugins 1.0 and Agent Skills layout requirements
 
-    RUNTIME BOOTSTRAP MODEL:
-    - Published plugins ship wrapper/download logic and metadata only
-    - Self-contained Windows runtimes are downloaded from the latest GitHub release on first use
+    NPM LAUNCH MODEL:
+    - Published plugins use the public npm packages through npx
     - No committed .exe/.dll runtime payloads should survive into the published plugin repo
 
     OUTPUT:
     plugins/
-      excel-mcp/     → MCP plugin (wrapper/bootstrap assets + updated version + fresh skills)
-      excel-cli/     → CLI plugin (wrapper/bootstrap assets + updated version + fresh skills)
+      excel-mcp/     → MCP plugin (npx config + updated version + fresh skills)
+      excel-cli/     → CLI plugin (argument-safe npx wrapper + updated version + fresh skills)
 
 .PARAMETER Version
     Plugin version. Required for distributable builds.
@@ -30,12 +29,14 @@
 #>
 param(
     [string]$Version = $null,
-    [string]$OutputDir = "plugins"
+    [string]$OutputDir = "plugins",
+    [string]$SkillsDirectory
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$SkillsDir = Join-Path $RepoRoot "skills"
+. (Join-Path $PSScriptRoot 'PackageHelpers.ps1')
+$SkillsDir = if ($SkillsDirectory) { [IO.Path]::GetFullPath($SkillsDirectory, $RepoRoot) } else { Join-Path $RepoRoot 'artifacts\generated-skills' }
 $PluginSourceDir = Join-Path $RepoRoot ".github\plugins"
 $AgentPluginSchema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 $AgentPluginMcpSchema = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
@@ -44,17 +45,6 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     throw "Version is required. Pass -Version <version>."
 }
 $Version = $Version.Trim()
-
-$BootstrapScriptPath = Join-Path $RepoRoot "scripts\Build-BootstrapScripts.ps1"
-if (-not (Test-Path $BootstrapScriptPath)) {
-    throw "Bootstrap generator script not found: $BootstrapScriptPath"
-}
-
-Write-Host "Rendering canonical plugin bootstrap scripts from the shared template..." -ForegroundColor Cyan
-& $BootstrapScriptPath -OutputRoot $PluginSourceDir
-if ($LASTEXITCODE -ne 0) {
-    throw "Bootstrap script generation failed."
-}
 
 function Remove-PackagedRuntimePayload {
     param(
@@ -233,9 +223,9 @@ function Assert-AgentPluginPackage {
         throw "$pluginJsonPath repository must be a string."
     }
 
-    $legacyCopilotHelper = Join-Path $PluginDir "bin\install-global.ps1"
-    if (Test-Path $legacyCopilotHelper) {
-        throw "Copilot-only files must be placed under com.github.copilot/: $legacyCopilotHelper"
+    $globalHelpers = @(Get-ChildItem -LiteralPath $PluginDir -Recurse -Force -File -Filter "install-global.ps1")
+    if ($globalHelpers.Count) {
+        throw "Global installation helpers are retired; use npx instead: $($globalHelpers.FullName -join ', ')"
     }
 
     $legacyMcpPath = Join-Path $PluginDir ".mcp.json"
@@ -285,12 +275,25 @@ Write-Host "Source:   $RepoRoot"
 Write-Host "Templates: $PluginSourceDir"
 Write-Host "Output:   $OutputDir`n"
 
-# Clean output
-if (Test-Path $OutputDir) {
-    Write-Host "Cleaning output: $OutputDir" -ForegroundColor Yellow
-    Remove-Item -Path $OutputDir -Recurse -Force
+$FinalOutput = [IO.Path]::GetFullPath($OutputDir, $RepoRoot)
+Assert-PackageOutputPath -Path $FinalOutput -RepoRoot $RepoRoot -Inputs @($SkillsDir)
+if ($FinalOutput -eq [IO.Path]::GetPathRoot($FinalOutput) -or $FinalOutput -eq $RepoRoot -or
+    ($FinalOutput.StartsWith("$RepoRoot\", [StringComparison]::OrdinalIgnoreCase) -and
+     -not $FinalOutput.StartsWith("$RepoRoot\artifacts\", [StringComparison]::OrdinalIgnoreCase) -and
+     $FinalOutput -ne "$RepoRoot\plugins")) {
+    throw "Unsafe plugin output directory: $FinalOutput"
 }
-New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+$ancestor = $FinalOutput
+while ($ancestor) {
+    if ((Test-Path -LiteralPath $ancestor) -and
+        ((Get-Item -LiteralPath $ancestor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Plugin output must not traverse a link: $ancestor"
+    }
+    $ancestor = Split-Path $ancestor -Parent
+}
+$OutputDir = Join-Path ([IO.Path]::GetTempPath()) "ExcelMcpPlugins-$([Guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Path $OutputDir | Out-Null
+try {
 
 # =============================================================================
 # Build: excel-mcp Plugin
@@ -321,12 +324,9 @@ Write-Host "  Updating version.txt to $Version..." -ForegroundColor Cyan
 Set-Content -Path (Join-Path $OutputMcp "version.txt") -Value $Version -Encoding UTF8 -NoNewline
 
 Write-Host "  Synchronizing complete excel-mcp skill directory..." -ForegroundColor Cyan
-$SourceSkillMcp = Join-Path $SkillsDir "excel-mcp"
-$DestSkillMcp = Join-Path $OutputMcp "skills\excel-mcp"
+$SourceSkillMcp = Join-Path $SkillsDir "excel-mcp-report-formatting"
+$DestSkillMcp = Join-Path $OutputMcp "skills\excel-mcp-report-formatting"
 Copy-AgentSkill -SourceDir $SourceSkillMcp -DestinationDir $DestSkillMcp -Version $Version
-
-Assert-AgentPluginPackage -PluginName "excel-mcp" -PluginDir $OutputMcp -ExpectedVersion $Version
-Write-Host "✅ excel-mcp plugin built" -ForegroundColor Green
 
 # =============================================================================
 # Build: excel-cli Plugin
@@ -345,6 +345,9 @@ if (-not (Test-Path $TemplateCli)) {
 Write-Host "  Copying canonical plugin template..." -ForegroundColor Cyan
 Copy-Item -Path $TemplateCli -Destination $OutputCli -Recurse -Force
 
+Assert-AgentPluginPackage -PluginName "excel-mcp" -PluginDir $OutputMcp -ExpectedVersion $Version
+Write-Host "✅ excel-mcp plugin built" -ForegroundColor Green
+
 Remove-PackagedRuntimePayload -PluginName "excel-cli" -PluginDir $OutputCli
 
 Write-Host "  Updating plugin.json version to $Version..." -ForegroundColor Cyan
@@ -357,12 +360,31 @@ Write-Host "  Updating version.txt to $Version..." -ForegroundColor Cyan
 Set-Content -Path (Join-Path $OutputCli "version.txt") -Value $Version -Encoding UTF8 -NoNewline
 
 Write-Host "  Synchronizing complete excel-cli skill directory..." -ForegroundColor Cyan
-$SourceSkillCli = Join-Path $SkillsDir "excel-cli"
-$DestSkillCli = Join-Path $OutputCli "skills\excel-cli"
+$SourceSkillCli = Join-Path $SkillsDir "excel-cli-report-formatting"
+$DestSkillCli = Join-Path $OutputCli "skills\excel-cli-report-formatting"
 Copy-AgentSkill -SourceDir $SourceSkillCli -DestinationDir $DestSkillCli -Version $Version
+
+Copy-AgentSkill -SourceDir (Join-Path $SkillsDir "excel-cli") `
+    -DestinationDir (Join-Path $OutputCli "skills\excel-cli") -Version $Version
 
 Assert-AgentPluginPackage -PluginName "excel-cli" -PluginDir $OutputCli -ExpectedVersion $Version
 Write-Host "✅ excel-cli plugin built" -ForegroundColor Green
+
+New-Item -ItemType Directory -Path $FinalOutput -Force | Out-Null
+foreach ($name in @('excel-cli', 'excel-mcp')) {
+    $destination = Join-Path $FinalOutput $name
+    if ((Test-Path -LiteralPath $destination) -and
+        ((Get-Item -LiteralPath $destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Plugin destination must not be a link: $destination"
+    }
+}
+foreach ($name in @('excel-cli', 'excel-mcp')) {
+    $destination = Join-Path $FinalOutput $name
+    Install-PackageOutput -Source (Join-Path $OutputDir $name) -Destination $destination
+}
+}
+finally { Remove-Item -LiteralPath $OutputDir -Recurse -Force }
+$OutputDir = $FinalOutput
 
 # =============================================================================
 # Summary
@@ -373,8 +395,8 @@ Write-Host "Version: $Version"
 Write-Host "Output:  $OutputDir"
 Write-Host ""
 Write-Host "Plugins:" -ForegroundColor Cyan
-Write-Host '  [ok] excel-mcp - bootstrap assets and skill' -ForegroundColor Green
-Write-Host '  [ok] excel-cli - bootstrap assets and skill' -ForegroundColor Green
+Write-Host '  [ok] excel-mcp - npx config and skill' -ForegroundColor Green
+Write-Host '  [ok] excel-cli - argument-safe npx wrapper and skill' -ForegroundColor Green
 Write-Host ""
 Write-Host "Test locally:" -ForegroundColor Yellow
 Write-Host "  copilot plugin install $OutputDir\excel-mcp"

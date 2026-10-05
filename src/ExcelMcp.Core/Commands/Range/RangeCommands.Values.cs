@@ -128,8 +128,9 @@ public partial class RangeCommands
     }
 
     /// <inheritdoc />
-    public OperationResult SetValues(IExcelBatch batch, string sheetName, string rangeAddress, List<List<object?>>? values = null, string? valuesFile = null)
+    public OperationResult SetValues(IExcelBatch batch, string sheetName, string rangeAddress, List<List<object?>>? values = null, string? valuesFile = null, OverwritePolicy overwritePolicy = OverwritePolicy.RejectNonempty)
     {
+        ValidateOverwritePolicy(overwritePolicy);
         // Resolve values from inline parameter or file
         var resolvedValues = ParameterTransforms.ResolveValuesOrFile(values, valuesFile);
 
@@ -141,7 +142,7 @@ public partial class RangeCommands
             var result = new OperationResult { FilePath = batch.WorkbookPath, Action = "set-values" };
 
             // Call SetFormulas internally to apply detected formulas
-            var formulaResult = SetFormulas(batch, sheetName, rangeAddress, detectedFormulas);
+            var formulaResult = SetFormulas(batch, sheetName, rangeAddress, detectedFormulas, overwritePolicy: overwritePolicy);
 
             // Copy result data and add detection message
             result.Success = formulaResult.Success;
@@ -170,6 +171,8 @@ public partial class RangeCommands
                 }
 
                 ValidateMergedCellsForWrite((Excel.Range)range, rangeAddress, ct);
+                ValidateContentWriteDimensions((Excel.Range)range, resolvedValues, nameof(values), "Value");
+                EnsureDestinationWritable(ctx, (Excel.Range)range, overwritePolicy, ct);
 
                 // Calculation suppressed here (not in ExcelWriteGuard) because Data Model ops need it enabled
                 originalCalculation = (int)ctx.App.Calculation;
@@ -183,8 +186,6 @@ public partial class RangeCommands
                 // Excel COM requires 1-based arrays for multi-cell ranges
                 int rows = resolvedValues.Count;
                 int cols = resolvedValues.Count > 0 ? resolvedValues[0].Count : 0;
-
-                ValidateRectangularRowWidths(resolvedValues, Convert.ToInt32(range.Columns.Count), nameof(values), "Value");
 
                 if (rows > 0 && cols > 0)
                 {
@@ -278,7 +279,8 @@ public partial class RangeCommands
         List<string> mergedRanges)
     {
         string rangeLabel = mergedRanges.Count == 1 ? "Merged range" : "Merged ranges";
-        throw new InvalidOperationException(
+        throw new OperationFailureException(
+            OperationFailureCategory.Conflict,
             $"Cannot write to range '{requestedRangeAddress}' because the write intersects merged cells. " +
             $"{rangeLabel}: {string.Join(", ", mergedRanges)}. " +
             "Write only to each merged range's top-left cell, or unmerge the affected range before writing.");

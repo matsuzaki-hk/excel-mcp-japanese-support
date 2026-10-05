@@ -289,7 +289,7 @@ public sealed class SessionManager : IDisposable
     private readonly object _filePathReservationLock = new();
     private readonly Polly.ResiliencePipeline _sessionCreationPipeline = ResiliencePipelines.CreateSessionCreationPipeline();
     private readonly ILogger<SessionManager> _logger;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     private object GetSessionLock(string sessionId) =>
         _sessionLocks.GetOrAdd(sessionId, static _ => new object());
@@ -298,6 +298,7 @@ public sealed class SessionManager : IDisposable
     {
         lock (_filePathReservationLock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             return _activeFilePaths.TryAdd(normalizedPath, sessionId);
         }
     }
@@ -311,6 +312,23 @@ public sealed class SessionManager : IDisposable
             {
                 _activeFilePaths.TryRemove(normalizedPath, out _);
             }
+        }
+    }
+
+    private void PublishSession(string sessionId, string normalizedPath, IExcelBatch batch, bool show, SessionOrigin origin)
+    {
+        // Publication and shutdown share a short lock; Excel startup and teardown stay outside it.
+        lock (_filePathReservationLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (!_activeSessions.TryAdd(sessionId, batch))
+                throw new InvalidOperationException($"Session ID collision: {sessionId}");
+            if (!_sessionFilePaths.TryAdd(sessionId, normalizedPath))
+                throw new InvalidOperationException($"Failed to record session metadata for: {sessionId}");
+            _activeOperationCounts[sessionId] = 0;
+            _showExcelFlags[sessionId] = show;
+            _sessionOrigins[sessionId] = origin;
+            _sessionCreatedAt[sessionId] = DateTime.UtcNow;
         }
     }
 
@@ -339,6 +357,25 @@ public sealed class SessionManager : IDisposable
     /// <para><b>Concurrency:</b> You can create multiple sessions for DIFFERENT files. Operations within each session execute serially.</para>
     /// </remarks>
     public string CreateSession(string filePath, bool show = false, TimeSpan? operationTimeout = null, SessionOrigin origin = SessionOrigin.Unknown)
+        => CreateSessionCore(filePath, show, operationTimeout, operationTimeout, origin);
+
+    /// <summary>
+    /// Test-only seam for operation timeout regressions that need a normal Excel startup allowance.
+    /// </summary>
+    internal string CreateSessionWithTimeouts(
+        string filePath,
+        bool show,
+        TimeSpan? operationTimeout,
+        TimeSpan? startupTimeout,
+        SessionOrigin origin = SessionOrigin.Unknown)
+        => CreateSessionCore(filePath, show, operationTimeout, startupTimeout, origin);
+
+    private string CreateSessionCore(
+        string filePath,
+        bool show,
+        TimeSpan? operationTimeout,
+        TimeSpan? startupTimeout,
+        SessionOrigin origin)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -372,25 +409,14 @@ public sealed class SessionManager : IDisposable
 
             // Create batch session using Core API with retry for transient COM failures
             // (e.g., CO_E_SERVER_EXEC_FAILURE when system resources are constrained)
-            batch = _sessionCreationPipeline.Execute(() => ExcelSession.BeginBatch(show, operationTimeout, filePath));
+            batch = _sessionCreationPipeline.Execute(
+                () => ExcelSession.BeginBatchWithTimeouts(
+                    show,
+                    operationTimeout,
+                    startupTimeout,
+                    filePath));
 
-            // Store in active sessions
-            if (!_activeSessions.TryAdd(sessionId, batch))
-            {
-                throw new InvalidOperationException($"Session ID collision: {sessionId}");
-            }
-
-            if (!_sessionFilePaths.TryAdd(sessionId, normalizedPath))
-            {
-                _activeSessions.TryRemove(sessionId, out _);
-                throw new InvalidOperationException($"Failed to record session metadata for: {sessionId}");
-            }
-
-            // Initialize operation counter and show flag
-            _activeOperationCounts[sessionId] = 0;
-            _showExcelFlags[sessionId] = show;
-            _sessionOrigins[sessionId] = origin;
-            _sessionCreatedAt[sessionId] = DateTime.UtcNow;
+            PublishSession(sessionId, normalizedPath, batch, show, origin);
 
             // Success - transfer ownership to dictionary
             var result = sessionId;
@@ -399,15 +425,51 @@ public sealed class SessionManager : IDisposable
         }
         catch (Exception ex)
         {
-            _activeSessions.TryRemove(sessionId, out _);
-            _sessionFilePaths.TryRemove(sessionId, out _);
-            ReleaseFilePathClaim(normalizedPath, sessionId);
+            RemoveSessionTracking(sessionId, removeSessionLock: true);
             throw new InvalidOperationException($"Failed to create session for '{filePath}': {ex.Message}", ex);
         }
         finally
         {
             // Dispose batch only if we didn't successfully add it to dictionary
             batch?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Validates that Excel can open a workbook without creating a public session.
+    /// The workbook is opened read-only and closed without saving.
+    /// </summary>
+    public void ValidateWorkbookOpen(string filePath, TimeSpan? operationTimeout = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var normalizedPath = Path.GetFullPath(filePath);
+        var reservationId = $"validation-{Guid.NewGuid():N}";
+        if (!TryClaimFilePath(normalizedPath, reservationId))
+        {
+            throw new InvalidOperationException(
+                $"File '{filePath}' is already open in another session or reserved for one.");
+        }
+
+        IExcelBatch? batch = null;
+        try
+        {
+            FileAccessValidator.ValidateFileNotLocked(normalizedPath);
+            batch = _sessionCreationPipeline.Execute(
+                () => ExcelSession.BeginReadOnlyValidation(
+                    normalizedPath,
+                    operationTimeout));
+        }
+        finally
+        {
+            try
+            {
+                batch?.Dispose();
+            }
+            finally
+            {
+                ReleaseFilePathClaim(normalizedPath, reservationId);
+            }
         }
     }
 
@@ -468,23 +530,7 @@ public sealed class SessionManager : IDisposable
             // Create new workbook and keep session open with retry for transient COM failures
             batch = _sessionCreationPipeline.Execute(() => ExcelBatch.CreateNewWorkbook(normalizedPath, isMacroEnabled, logger: null, show: show, operationTimeout: operationTimeout));
 
-            // Store in active sessions
-            if (!_activeSessions.TryAdd(sessionId, batch))
-            {
-                throw new InvalidOperationException($"Session ID collision: {sessionId}");
-            }
-
-            if (!_sessionFilePaths.TryAdd(sessionId, normalizedPath))
-            {
-                _activeSessions.TryRemove(sessionId, out _);
-                throw new InvalidOperationException($"Failed to record session metadata for: {sessionId}");
-            }
-
-            // Initialize operation counter and show flag
-            _activeOperationCounts[sessionId] = 0;
-            _showExcelFlags[sessionId] = show;
-            _sessionOrigins[sessionId] = origin;
-            _sessionCreatedAt[sessionId] = DateTime.UtcNow;
+            PublishSession(sessionId, normalizedPath, batch, show, origin);
 
             // Success - transfer ownership to dictionary
             var result = sessionId;
@@ -493,9 +539,7 @@ public sealed class SessionManager : IDisposable
         }
         catch (Exception ex)
         {
-            _activeSessions.TryRemove(sessionId, out _);
-            _sessionFilePaths.TryRemove(sessionId, out _);
-            ReleaseFilePathClaim(normalizedPath, sessionId);
+            RemoveSessionTracking(sessionId, removeSessionLock: true);
             throw new InvalidOperationException($"Failed to create session for new file '{filePath}': {ex.Message}", ex);
         }
         finally
@@ -1151,23 +1195,23 @@ public sealed class SessionManager : IDisposable
     /// <para><b>CRITICAL:</b> Sessions are disposed SEQUENTIALLY to avoid COM threading issues.</para>
     /// <para>Excel COM objects must be disposed on their STA threads. Parallel disposal causes deadlocks.</para>
     /// </remarks>
+    /// <exception cref="AggregateException">One or more sessions could not be saved or shut down.</exception>
     public void Dispose()
     {
-        if (_disposed)
+        KeyValuePair<string, IExcelBatch>[] sessions;
+        lock (_filePathReservationLock)
         {
-            return;
+            if (_disposed)
+                return;
+            _disposed = true;
+            sessions = _activeSessions.ToArray();
+            foreach (var sessionId in _activeSessions.Keys)
+                RemoveSessionTracking(sessionId, removeSessionLock: true);
+            _activeFilePaths.Clear();
         }
 
-        _disposed = true;
-
-        // Close all active sessions SEQUENTIALLY to avoid COM threading issues
-        // Excel COM objects must be disposed on their STA threads, parallel disposal causes deadlocks
-        var sessions = _activeSessions.Values.ToList();
-        _activeSessions.Clear();
-        _activeFilePaths.Clear();
-        _sessionFilePaths.Clear();
-
-        foreach (var session in sessions)
+        var failures = new List<Exception>();
+        foreach (var (sessionId, session) in sessions)
         {
             // Auto-save before disposal to prevent silent data loss.
             // This protects against the common scenario where the MCP client disconnects
@@ -1182,6 +1226,9 @@ public sealed class SessionManager : IDisposable
                 }
                 catch (Exception ex)
                 {
+                    failures.Add(new InvalidOperationException(
+                        $"Failed to auto-save session '{sessionId}': {ex.Message}",
+                        ex));
                     _logger.LogWarning(ex, "Failed to auto-save session for {Path} before shutdown (changes may be lost)", session.WorkbookPath);
                 }
             }
@@ -1192,10 +1239,18 @@ public sealed class SessionManager : IDisposable
                 // via ExcelShutdownService with proper timeouts and retry logic
                 session.Dispose();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Best-effort cleanup — continue with remaining sessions
+                var failure = new InvalidOperationException(
+                    $"Failed to dispose session '{sessionId}': {ex.Message}", ex);
+                failures.Add(failure);
+                _logger.LogError(ex, "Failed to dispose session {SessionId}", sessionId);
             }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("One or more Excel sessions failed to shut down.", failures);
         }
     }
 }

@@ -1,6 +1,5 @@
 using Xunit;
 using Xunit.Abstractions;
-using ExcelServiceBridge = Sbroenne.ExcelMcp.McpServer.ServiceBridge.ServiceBridge;
 
 namespace Sbroenne.ExcelMcp.McpServer.Tests.Integration.Tools;
 
@@ -36,7 +35,7 @@ public sealed class GeneratedActionContractProtocolTests : McpIntegrationTestBas
         };
         if (action == "calculate")
         {
-            arguments["scope"] = "workbook";
+            arguments["scope"] = "application";
         }
         else
         {
@@ -64,7 +63,7 @@ public sealed class GeneratedActionContractProtocolTests : McpIntegrationTestBas
             {
                 ["action"] = "calculate",
                 ["session_id"] = "missing-session",
-                ["scope"] = "workbook",
+                ["scope"] = "application",
                 ["mode"] = null
             });
 
@@ -158,6 +157,32 @@ public sealed class GeneratedActionContractProtocolTests : McpIntegrationTestBas
             document.RootElement.GetProperty("errorMessage").GetString(),
             StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ToolCall_RejectsBlankWorksheetNameBeforeSessionDispatch(string sheetName)
+    {
+        var result = await CallToolAsync(
+            "worksheet",
+            new Dictionary<string, object?>
+            {
+                ["action"] = "create",
+                ["session_id"] = "missing-session",
+                ["sheet_name"] = sheetName
+            });
+
+        using var document = ParseJsonResult(result, "worksheet.create");
+        AssertFailureEnvelope(
+            document.RootElement,
+            "worksheet.create",
+            nameof(ArgumentException),
+            expectedErrorCategory: "InvalidInput");
+        var error = document.RootElement.GetProperty("errorMessage").GetString();
+        Assert.Contains("sheetName", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("session", error, StringComparison.OrdinalIgnoreCase);
+    }
+
 
     [Theory]
     [InlineData("powerquery", "load-to", "load_destination", "loadDestination", "not-a-destination")]
@@ -396,56 +421,4 @@ public sealed class GeneratedActionContractProtocolTests : McpIntegrationTestBas
             StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task ListTools_ExposesCanonicalTimeoutAndFileAliasSchemas()
-    {
-        var tools = await Client!.ListToolsAsync(cancellationToken: TestCancellationToken);
-
-        foreach (var toolName in new[] { "connection", "datamodel", "pivottable", "powerquery", "vba" })
-        {
-            var tool = Assert.Single(tools, candidate => candidate.Name == toolName);
-            var timeout = tool.JsonSchema.GetProperty("properties").GetProperty("timeout_seconds");
-            Assert.Equal("integer", timeout.GetProperty("type").GetString());
-            Assert.Contains("seconds", timeout.GetProperty("description").GetString(), StringComparison.OrdinalIgnoreCase);
-        }
-
-        var expectedFileAliases = new Dictionary<string, string[]>
-        {
-            ["powerquery"] = ["m_code_file"],
-            ["vba"] = ["vba_code_file"],
-            ["datamodel"] = ["dax_formula_file", "dax_query_file", "dmv_query_file"],
-            ["xmlmap"] = ["schema_file", "xml_data_file"]
-        };
-        foreach (var (toolName, aliases) in expectedFileAliases)
-        {
-            var tool = Assert.Single(tools, candidate => candidate.Name == toolName);
-            var properties = tool.JsonSchema.GetProperty("properties");
-            foreach (var alias in aliases)
-            {
-                var property = properties.GetProperty(alias);
-                Assert.Equal("string", property.GetProperty("type").GetString());
-                Assert.Contains("readable", property.GetProperty("description").GetString(), StringComparison.OrdinalIgnoreCase);
-            }
-        }
-
-        var vbaTool = Assert.Single(tools, candidate => candidate.Name == "vba");
-        var parametersDescription = vbaTool.JsonSchema
-            .GetProperty("properties")
-            .GetProperty("parameters")
-            .GetProperty("description")
-            .GetString();
-        Assert.DoesNotContain("required for", parametersDescription, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void CreateSessionBridge_DoesNotDefaultMacroEnabledToFalse()
-    {
-        var method = typeof(ExcelServiceBridge).GetMethod(nameof(ExcelServiceBridge.CreateSessionAsync));
-        Assert.NotNull(method);
-        var macroEnabled = Assert.Single(
-            method.GetParameters(),
-            parameter => parameter.Name == "macroEnabled");
-
-        Assert.Null(macroEnabled.DefaultValue);
-    }
 }

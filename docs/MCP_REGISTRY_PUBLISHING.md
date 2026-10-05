@@ -60,7 +60,12 @@ The npm package at `npm-packages/mcp-server-excel/package.json` contains:
 
 ## Publishing Workflow
 
-The publishing process is automated as `publish-mcp-registry` job in `.github/workflows/release.yml`:
+The publishing process is automated by `.github/workflows/publish-mcp-registry.yml`,
+which the unified release workflow calls after NuGet and npm publication:
+
+Registry publication runs only as part of a release. There is no standalone
+manual retry. If registration fails, fix the cause and create a new patch
+release through the unified release workflow.
 
 ### 1. Version Update
 The workflow:
@@ -69,8 +74,19 @@ The workflow:
 
 ### 2. Wait for NuGet and npm Propagation
 - The MCP Registry offers both NuGet and npm deployment mechanisms
-- The job waits for the NuGet README and npm `mcpName` metadata to propagate
+- `scripts/Test-McpRegistryPublication.ps1` verifies the source `server.json`
+  identity and release version, including its NuGet and npm package entries
+- The job waits for the NuGet README's `mcp-name:` marker, NuGet package identity
+  and version, and the npm launcher's identity, version, and `mcpName` metadata
+- It also checks each required npm runtime's published identity and version,
+  and requires the launcher's corresponding `optionalDependencies` entry to
+  match the release version
+- Required runtimes come from the exact released source's launcher manifest,
+  passed through `-NpmLauncherManifestPath`: x64 is required, and ARM64 is
+  required when declared. Undeclared runtimes are not required
 - Polls up to 3 times with 10-minute intervals
+- Decodes the NuGet README response as UTF-8 when NuGet returns
+  `application/octet-stream`
 
 ### 3. MCP Registry Publishing
 - Downloads the MCP Publisher CLI tool
@@ -86,6 +102,9 @@ Uses **GitHub OIDC**:
 - No secrets required
 - Automatic authentication via `mcp-publisher login github-oidc`
 - Works for `io.github.*` namespaces
+- The publish job uses the protected `mcp-registry` environment. Repository
+  settings must keep its custom deployment branch policy restricted to `main`
+  and require approval from the repository owner before the OIDC token is issued.
 
 **Required Permissions:**
 The workflow has `id-token: write` permission enabled for OIDC authentication.
@@ -100,6 +119,21 @@ After release, verify publication:
 
 ## Troubleshooting
 
+### Package Metadata Is Not Ready
+
+**Issue**: The validation gate reports `Published package metadata is not ready`
+or `Published x64/arm64 npm runtime metadata is not ready`.
+
+**Solution**:
+- Check that the NuGet package and npm launcher have the requested release
+  version and ownership metadata described above
+- Check that each runtime required by that release's launcher manifest is
+  published at the same version, and that the published launcher's matching
+  `optionalDependencies` entries reference that version
+- Allow package metadata to propagate and resolve any metadata errors before
+  creating a new patch release. Registration uses that release's exact launcher
+  manifest, not a newer branch's manifest
+
 ### MCP Registry Publishing Fails
 
 **Issue**: "Authentication failed" or OIDC error
@@ -107,7 +141,10 @@ After release, verify publication:
 **Solution**: 
 - Verify `id-token: write` permission is set in the workflow job
 - Ensure repository is configured for GitHub OIDC
-- Resolve the failure and rerun the workflow after confirming the registry state
+- Resolve the failure, then create a new patch release through the unified
+  release workflow. Automatic registration verifies the release tag belongs
+  to protected `main` and validates its published NuGet and npm packages.
+  Existing releases and their tags are not modified.
 
 ### Version Not Updated
 
@@ -116,4 +153,4 @@ After release, verify publication:
 **Solution**: 
 - Check the `publish-mcp-registry` job logs
 - Confirm the top-level, NuGet, and npm `server.json` versions were stamped with the release version
-  before rerunning the workflow or publishing manually
+  before creating a new patch release

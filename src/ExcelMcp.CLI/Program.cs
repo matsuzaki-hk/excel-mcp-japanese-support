@@ -2,6 +2,7 @@ using System.Reflection;
 using Sbroenne.ExcelMcp.CLI.Commands;
 using Sbroenne.ExcelMcp.CLI.Generated;
 using Sbroenne.ExcelMcp.CLI.Infrastructure;
+using Sbroenne.ExcelMcp.CLI.Telemetry;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -12,21 +13,45 @@ internal sealed class Program
 {
     private static readonly string[] VersionFlags = ["--version", "-v"];
     private static readonly string[] QuietFlags = ["--quiet", "-q"];
+    private static readonly HashSet<string> StdinSentinelOptions = new(
+        ["--input", "-i", "--values", "--formulas", "--formats", "--rows"],
+        StringComparer.OrdinalIgnoreCase);
 
     private static async Task<int> Main(string[] args)
     {
-        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        CliTelemetry.Initialize();
+        try
+        {
+            return await RunAsync(args);
+        }
+        finally
+        {
+            CliTelemetry.Flush();
+        }
+    }
+
+    internal static async Task<int> RunAsync(
+        string[] args,
+        CliCommandRuntime? runtime = null)
+    {
+        if (runtime is null)
+        {
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+        }
+
+        using var runtimeScope = CliCommandRuntime.Push(runtime ?? CliCommandRuntime.Current);
 
         // Determine if we should show the banner:
         // - Not when --quiet/-q flag is passed
         // - Not when output is redirected (piped to another process or file)
         var isQuiet = args.Any(arg => QuietFlags.Contains(arg, StringComparer.OrdinalIgnoreCase));
-        var isPiped = Console.IsOutputRedirected;
+        var isPiped = CliCommandRuntime.Current.IsOutputRedirected;
         var showBanner = !isQuiet && !isPiped;
         var jsonOutputMode = isQuiet || isPiped;
 
-        // Remove --quiet/-q from args before passing to Spectre.Console.Cli
-        var filteredArgs = args.Where(arg => !QuietFlags.Contains(arg, StringComparer.OrdinalIgnoreCase)).ToArray();
+        // Remove quiet flags and normalize standalone dash option values before Spectre parsing.
+        var filteredArgs = NormalizeStandaloneDashOptionValues(
+            args.Where(arg => !QuietFlags.Contains(arg, StringComparer.OrdinalIgnoreCase)).ToArray());
 
         if (filteredArgs.Length == 0)
         {
@@ -64,6 +89,7 @@ internal sealed class Program
 
         app.Configure(config =>
         {
+            config.ConfigureConsole(CreateOutputConsole());
             config.SetApplicationName("excelcli");
             config.SetApplicationVersion(GetCurrentVersion());
             config.Settings.StrictParsing = true;
@@ -120,7 +146,13 @@ internal sealed class Program
 
         try
         {
-            return app.Run(filteredArgs);
+            var telemetryObserver = CliCommandRuntime.Current.TelemetryObserver;
+            return telemetryObserver == null
+                ? CliTelemetry.TrackCliInvocation(filteredArgs, () => app.Run(filteredArgs))
+                : CliTelemetry.TrackCliInvocation(
+                    filteredArgs,
+                    () => app.Run(filteredArgs),
+                    telemetryObserver);
         }
         catch (CommandRuntimeException ex)
         {
@@ -149,6 +181,27 @@ internal sealed class Program
         }
     }
 
+    internal static string[] NormalizeStandaloneDashOptionValues(string[] args)
+    {
+        var normalized = new List<string>(args.Length);
+        for (var index = 0; index < args.Length; index++)
+        {
+            var argument = args[index];
+            if (index + 1 < args.Length
+                && StdinSentinelOptions.Contains(argument)
+                && string.Equals(args[index + 1], "-", StringComparison.Ordinal))
+            {
+                normalized.Add($"{argument}=-");
+                index++;
+                continue;
+            }
+
+            normalized.Add(argument);
+        }
+
+        return [.. normalized];
+    }
+
     private static void RenderHeader()
     {
         // Write banner to stderr so it never pollutes JSON output on stdout,
@@ -166,7 +219,7 @@ internal sealed class Program
     private static async Task<int> HandleVersionAsync()
     {
         var currentVersion = GetCurrentVersion();
-        var latestVersion = await NuGetVersionChecker.GetLatestVersionAsync();
+        var latestVersion = await CliCommandRuntime.Current.LatestVersionProvider();
         var updateAvailable = latestVersion != null && CompareVersions(currentVersion, latestVersion) < 0;
 
         // Always show banner for version output
@@ -175,17 +228,20 @@ internal sealed class Program
         // Show friendly update message if available
         if (updateAvailable)
         {
-            AnsiConsole.MarkupLine($"[yellow]⚠ Update available:[/] [dim]{currentVersion}[/] → [green]{latestVersion}[/]");
-            AnsiConsole.MarkupLine($"[cyan]Download:[/] [blue]https://github.com/sbroenne/mcp-server-excel/releases/latest[/]");
+            var output = CreateOutputConsole();
+            output.MarkupLine($"[yellow]⚠ Update available:[/] [dim]{currentVersion}[/] → [green]{latestVersion}[/]");
+            output.MarkupLine($"[cyan]Download:[/] [blue]https://github.com/sbroenne/mcp-server-excel/releases/latest[/]");
         }
         else if (latestVersion != null)
         {
-            AnsiConsole.MarkupLine($"[green]✓ You're running the latest version:[/] [white]{currentVersion}[/]");
+            CreateOutputConsole().MarkupLine(
+                $"[green]✓ You're running the latest version:[/] [white]{currentVersion}[/]");
         }
         else
         {
-            AnsiConsole.MarkupLine($"[yellow]⚠ Could not check for updates[/]");
-            AnsiConsole.MarkupLine($"[dim]Current version: {currentVersion}[/]");
+            var output = CreateOutputConsole();
+            output.MarkupLine("[yellow]⚠ Could not check for updates[/]");
+            output.MarkupLine($"[dim]Current version: {currentVersion}[/]");
         }
 
         return 0;
@@ -198,7 +254,18 @@ internal sealed class Program
 
     private static IAnsiConsole CreateErrorConsole()
     {
-        return AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(Console.Error) });
+        return AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(CliCommandRuntime.Current.Error)
+        });
+    }
+
+    private static IAnsiConsole CreateOutputConsole()
+    {
+        return AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(CliCommandRuntime.Current.Output)
+        });
     }
 
     private static string GetCurrentVersion()

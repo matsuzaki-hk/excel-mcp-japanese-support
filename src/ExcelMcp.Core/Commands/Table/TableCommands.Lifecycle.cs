@@ -29,110 +29,45 @@ public partial class TableCommands
                     {
                         sheet = sheets.Item(i);
                         listObjects = sheet.ListObjects;
-                        string sheetName = sheet.Name?.ToString() ?? string.Empty;
+                        string sheetName = sheet.Name;
 
-                        // Check if listObjects is valid
-                        if (listObjects == null)
-                        {
-                            continue;
-                        }
-
-                        // Try to get count to verify listObjects is accessible
-                        int tableCount;
-                        try
-                        {
-                            tableCount = Convert.ToInt32(listObjects.Count);
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Cannot get listObjects.Count for sheet '{sheetName}': {ex.Message}");
-                            continue;
-                        }
-
-                        if (tableCount == 0)
-                        {
-                            continue;
-                        }
-
-                        // Use indexed access with proper error handling
-                        for (int j = 1; j <= tableCount; j++)
+                        for (int j = 1; j <= listObjects.Count; j++)
                         {
                             dynamic? table = null;
                             dynamic? headerRowRange = null;
                             dynamic? dataBodyRange = null;
+                            dynamic? tableRange = null;
+                            dynamic? listColumns = null;
+                            dynamic? dataRows = null;
                             try
                             {
                                 table = listObjects.Item(j);
-
-                                // Check if table is null or invalid type
-                                if (table == null)
-                                {
-                                    continue;
-                                }
-
-                                // Handle potential type binding issues with dynamic COM objects
-                                string tableName;
-                                string rangeAddress;
-                                bool showHeaders;
-                                bool showTotals;
-                                string tableStyleName;
-
-                                try
-                                {
-                                    // Try to access properties safely
-                                    var nameObj = table.Name;
-                                    tableName = nameObj?.ToString() ?? string.Empty;
-
-                                    var rangeObj = table.Range;
-                                    rangeAddress = rangeObj?.Address ?? string.Empty;
-
-                                    showHeaders = table.ShowHeaders;
-                                    showTotals = table.ShowTotals;
-
-                                    var styleObj = table.TableStyle;
-                                    var styleNameObj = styleObj?.Name;
-                                    tableStyleName = styleNameObj?.ToString() ?? "";
-                                }
-                                catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex)
-                                {
-                                    // Log the error and skip this table
-                                    System.Diagnostics.Debug.WriteLine($"RuntimeBinderException for table at index {j}: {ex.Message}");
-                                    continue;
-                                }
-                                catch (System.Runtime.InteropServices.COMException ex)
-                                {
-                                    // Log COM errors and skip this table
-                                    System.Diagnostics.Debug.WriteLine($"COMException for table at index {j}: {ex.Message}");
-                                    continue;
-                                }
+                                string tableName = table.Name;
+                                tableRange = table.Range;
+                                string rangeAddress = tableRange.Address;
+                                bool showHeaders = table.ShowHeaders;
+                                bool showTotals = table.ShowTotals;
+                                string tableStyleName = GetTableStyleName(table);
 
                                 // Get column count and names
-                                int columnCount = table.ListColumns.Count;
+                                listColumns = table.ListColumns;
+                                int columnCount = listColumns.Count;
                                 var columns = new List<string>();
 
                                 if (showHeaders)
                                 {
-                                    dynamic? listColumns = null;
-                                    try
+                                    for (int k = 1; k <= listColumns.Count; k++)
                                     {
-                                        listColumns = table.ListColumns;
-                                        for (int k = 1; k <= listColumns.Count; k++)
+                                        dynamic? column = null;
+                                        try
                                         {
-                                            dynamic? column = null;
-                                            try
-                                            {
-                                                column = listColumns.Item(k);
-                                                columns.Add(column.Name?.ToString() ?? string.Empty);
-                                            }
-                                            finally
-                                            {
-                                                ComUtilities.Release(ref column);
-                                            }
+                                            column = listColumns.Item(k);
+                                            columns.Add(column.Name);
                                         }
-                                    }
-                                    finally
-                                    {
-                                        ComUtilities.Release(ref listColumns);
+                                        finally
+                                        {
+                                            ComUtilities.Release(ref column);
+                                        }
                                     }
                                 }
 
@@ -144,11 +79,13 @@ public partial class TableCommands
                                     dataBodyRange = table.DataBodyRange;
                                     if (dataBodyRange != null)
                                     {
-                                        rowCount = dataBodyRange.Rows.Count;
+                                        dataRows = dataBodyRange.Rows;
+                                        rowCount = dataRows.Count;
                                     }
                                 }
                                 finally
                                 {
+                                    ComUtilities.Release(ref dataRows);
                                     ComUtilities.Release(ref dataBodyRange);
                                 }
 
@@ -167,6 +104,8 @@ public partial class TableCommands
                             }
                             finally
                             {
+                                ComUtilities.Release(ref listColumns);
+                                ComUtilities.Release(ref tableRange);
                                 ComUtilities.Release(ref headerRowRange);
                                 ComUtilities.Release(ref table);
                             }
@@ -261,9 +200,8 @@ public partial class TableCommands
     /// <inheritdoc />
     public OperationResult Rename(IExcelBatch batch, string tableName, string newName)
     {
-        // Security: Validate table names
-        ValidateTableName(tableName);
-        ValidateTableName(newName);
+        ValidateRequiredTableName(tableName);
+        ValidateRequiredTableName(newName);
 
         return batch.Execute((ctx, ct) =>
         {
@@ -291,8 +229,7 @@ public partial class TableCommands
     /// <inheritdoc />
     public OperationResult Delete(IExcelBatch batch, string tableName)
     {
-        // Security: Validate table name
-        ValidateTableName(tableName);
+        ValidateRequiredTableName(tableName);
 
         return batch.Execute((ctx, ct) =>
         {
@@ -332,8 +269,7 @@ public partial class TableCommands
     /// <inheritdoc />
     public TableInfoResult Read(IExcelBatch batch, string tableName)
     {
-        // Security: Validate table name
-        ValidateTableName(tableName);
+        ValidateRequiredTableName(tableName);
 
         var result = new TableInfoResult { FilePath = batch.WorkbookPath };
         return batch.Execute((ctx, ct) =>
@@ -342,44 +278,40 @@ public partial class TableCommands
             dynamic? sheet = null;
             dynamic? dataBodyRange = null;
             dynamic? headerRowRange = null;
+            dynamic? tableRange = null;
+            dynamic? listColumns = null;
+            dynamic? dataRows = null;
             try
             {
                 table = FindTable(ctx.Book, tableName);
 
                 sheet = table.Parent;
-                string sheetName = sheet.Name?.ToString() ?? string.Empty;
-                string rangeAddress = table.Range?.Address ?? string.Empty;
+                string sheetName = sheet.Name;
+                tableRange = table.Range;
+                string rangeAddress = tableRange.Address;
                 bool showHeaders = table.ShowHeaders;
                 bool showTotals = table.ShowTotals;
-                string tableStyleName = table.TableStyle?.Name?.ToString() ?? "";
+                string tableStyleName = GetTableStyleName(table);
 
                 // Get column count and names
-                int columnCount = table.ListColumns.Count;
+                listColumns = table.ListColumns;
+                int columnCount = listColumns.Count;
                 var columns = new List<string>();
 
                 if (showHeaders)
                 {
-                    dynamic? listColumns = null;
-                    try
+                    for (int i = 1; i <= listColumns.Count; i++)
                     {
-                        listColumns = table.ListColumns;
-                        for (int i = 1; i <= listColumns.Count; i++)
+                        dynamic? column = null;
+                        try
                         {
-                            dynamic? column = null;
-                            try
-                            {
-                                column = listColumns.Item(i);
-                                columns.Add(column.Name);
-                            }
-                            finally
-                            {
-                                ComUtilities.Release(ref column);
-                            }
+                            column = listColumns.Item(i);
+                            columns.Add(column.Name);
                         }
-                    }
-                    finally
-                    {
-                        ComUtilities.Release(ref listColumns);
+                        finally
+                        {
+                            ComUtilities.Release(ref column);
+                        }
                     }
                 }
 
@@ -391,11 +323,13 @@ public partial class TableCommands
                     dataBodyRange = table.DataBodyRange;
                     if (dataBodyRange != null)
                     {
-                        rowCount = dataBodyRange.Rows.Count;
+                        dataRows = dataBodyRange.Rows;
+                        rowCount = dataRows.Count;
                     }
                 }
                 finally
                 {
+                    ComUtilities.Release(ref dataRows);
                     ComUtilities.Release(ref dataBodyRange);
                 }
 
@@ -417,6 +351,8 @@ public partial class TableCommands
             }
             finally
             {
+                ComUtilities.Release(ref listColumns);
+                ComUtilities.Release(ref tableRange);
                 ComUtilities.Release(ref headerRowRange);
                 ComUtilities.Release(ref dataBodyRange);
                 ComUtilities.Release(ref sheet);
@@ -424,5 +360,24 @@ public partial class TableCommands
             }
         });
     }
+    private static string GetTableStyleName(dynamic table)
+    {
+        object? tableStyle = null;
+        try
+        {
+            tableStyle = table.TableStyle;
+            return tableStyle switch
+            {
+                // Excel can represent a cleared style as a single NUL character.
+                null or "\0" => "",
+                string styleName => styleName,
+                // Reason: Excel returns a COM TableStyle object or a string when no style is applied.
+                _ => ((dynamic)tableStyle).Name?.ToString() ?? ""
+            };
+        }
+        finally
+        {
+            ComUtilities.Release(ref tableStyle);
+        }
+    }
 }
-

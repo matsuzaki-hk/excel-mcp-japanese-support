@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Microsoft.CSharp.RuntimeBinder;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
+using Sbroenne.ExcelMcp.Core.Utilities;
 using Excel = Microsoft.Office.Interop.Excel;
 
 namespace Sbroenne.ExcelMcp.Core.Commands;
@@ -174,7 +175,7 @@ public partial class PowerQueryCommands
                     for (int lo = 1; lo <= listObjects.Count; lo++)
                     {
                         dynamic? listObject = null;
-                        dynamic? queryTable = null;
+                        Excel.QueryTable? queryTable = null;
                         try
                         {
                             listObject = listObjects.Item(lo);
@@ -202,6 +203,8 @@ public partial class PowerQueryCommands
                                 connection,
                                 queryName))
                             {
+                                // Also repair bindings in tables loaded by older server versions.
+                                queryTable.PreserveColumnInfo = true;
                                 // Keep synchronous refresh semantics for worksheet queries.
                                 // QueryTable.Refresh(false) is the only reliable path that propagates
                                 // Power Query formula errors for worksheet-loaded queries.
@@ -216,20 +219,18 @@ public partial class PowerQueryCommands
 
                                 // INSTRUMENTATION: Trace QueryTable refresh entry and exit
                                 SessionDiagnostics.WriteStdErr($"[DIAG-PQ-QT-REFRESH-ENTER] Query='{queryName}' WorksheetIndex={ws}");
-                                OleMessageFilter.SetPendingCancellationToken(cancellationToken);
                                 try
                                 {
-                                    queryTable.Refresh(false);
+                                    QueryTableRefreshHelper.RefreshSynchronously(
+                                        queryTable,
+                                        cancellationToken,
+                                        $"Power Query refresh for '{queryName}'");
                                     SessionDiagnostics.WriteStdErr($"[DIAG-PQ-QT-REFRESH-EXIT-SUCCESS] Query='{queryName}'");
                                 }
                                 catch (Exception ex)
                                 {
                                     SessionDiagnostics.WriteStdErr($"[DIAG-PQ-QT-REFRESH-EXIT-EXCEPTION] Query='{queryName}' ExceptionType={ex.GetType().Name} Message={ex.Message}");
                                     throw;
-                                }
-                                finally
-                                {
-                                    OleMessageFilter.ClearPendingCancellationToken();
                                 }
                                 return true;
                             }
@@ -338,8 +339,11 @@ public partial class PowerQueryCommands
 
             try
             {
-                _ = connection.Refreshing;
-                supportsRefreshing = true;
+                supportsRefreshing = oleDbConnection != null;
+                if (supportsRefreshing)
+                {
+                    _ = oleDbConnection.Refreshing;
+                }
             }
             catch (RuntimeBinderException)
             {
@@ -357,7 +361,7 @@ public partial class PowerQueryCommands
                     {
                         try
                         {
-                            return connection.Refreshing;
+                            return oleDbConnection.Refreshing;
                         }
                         catch (RuntimeBinderException)
                         {
@@ -372,7 +376,7 @@ public partial class PowerQueryCommands
                     {
                         try
                         {
-                            connection.CancelRefresh();
+                            oleDbConnection.CancelRefresh();
                         }
                         catch (RuntimeBinderException)
                         {

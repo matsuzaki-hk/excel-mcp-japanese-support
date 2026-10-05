@@ -16,6 +16,17 @@ public static class ExcelShutdownService
     private static readonly ResiliencePipeline _quitPipeline = ResiliencePipelines.CreateExcelQuitPipeline();
 
     /// <summary>
+    /// Closes an internally owned, unsaved calculation workbook on the calling STA.
+    /// Unlike application shutdown, failure to close is an operation failure.
+    /// The caller retains responsibility for releasing the workbook reference.
+    /// </summary>
+    /// <param name="workbook">Internally owned workbook; never the session workbook</param>
+    public static void CloseTemporaryWorkbook(Excel.Workbook workbook)
+    {
+        _quitPipeline.Execute(() => workbook.Close(SaveChanges: false));
+    }
+
+    /// <summary>
     /// Saves an Excel workbook on the calling STA thread.
     /// Must be called from within <c>ExcelBatch.Execute()</c> so the Save() COM call
     /// runs on the correct STA thread. Timeout protection is provided by the surrounding
@@ -112,11 +123,11 @@ public static class ExcelShutdownService
     /// <para><b>Shutdown Order:</b></para>
     /// <list type="number">
     /// <item>If save=true: Call workbook.Save()</item>
+    /// <item>Drain unreachable dynamic-binder metadata while Excel can answer COM releases</item>
     /// <item>Close workbook with Close(save) - save param controls Excel's save prompt</item>
     /// <item>Release workbook COM reference</item>
     /// <item>Quit Excel application with exponential backoff retry (6 attempts, 200ms base delay)</item>
     /// <item>Release Excel COM reference</item>
-    /// <item>Force GC collection to release final COM proxies</item>
     /// </list>
     /// <para><b>Resilience:</b> Retries Quit() on COM busy errors (RPC_E_SERVERCALL_RETRYLATER, RPC_E_CALL_REJECTED)</para>
     /// <para><b>Timeout:</b> No overall timeout - relies on retry exhaustion. Non-retriable errors bubble immediately.</para>
@@ -140,6 +151,13 @@ public static class ExcelShutdownService
             {
                 SaveWorkbookWithTimeout(workbook, fileName, logger);
             }
+
+            // The dynamic COM binder creates ITypeInfo wrappers that callers never receive.
+            // Drain unreachable metadata while both workbook and application can still
+            // answer RemoteRelease calls. This does not replace explicit COM releases.
+            // Never wait for finalizers on the STA: their releases may need this apartment.
+            GC.Collect();
+            Marshal.CleanupUnusedObjectsInCurrentContext();
 
             // Step 2: Close workbook with retry for transient COM busy errors
             if (workbook != null)
@@ -192,7 +210,13 @@ public static class ExcelShutdownService
                 }
 
                 // Release workbook COM reference (moved out of individual catch blocks)
-                try { Marshal.ReleaseComObject(workbook); } catch { /* best effort */ }
+                try
+                {
+                    var remainingReferences = Marshal.ReleaseComObject(workbook);
+                    logger.LogDebug("Released workbook COM reference for {FileName}; remaining RCW references: {Count}",
+                        fileName, remainingReferences);
+                }
+                catch { /* best effort */ }
                 workbook = null;
             }
 
@@ -291,7 +315,10 @@ public static class ExcelShutdownService
                 finally
                 {
                     // Step 5: Release Excel COM reference (even if Quit failed/timed out)
-                    Marshal.ReleaseComObject(excel);
+                    logger.LogDebug("Releasing Excel application COM reference for {FileName}", fileName);
+                    var remainingReferences = Marshal.ReleaseComObject(excel);
+                    logger.LogDebug("Released Excel application COM reference for {FileName}; remaining RCW references: {Count}",
+                        fileName, remainingReferences);
                     excel = null;
                 }
 
@@ -310,12 +337,6 @@ public static class ExcelShutdownService
         }
         finally
         {
-            // Step 6: COM cleanup happens automatically via RCW finalizers
-            // Per Microsoft docs: "RCWs can be cleaned by the CLR without additional code"
-            // GC.Collect() is rarely needed and can decrease performance
-            // https://learn.microsoft.com/en-us/dotnet/standard/garbage-collection/induced
-            // https://learn.microsoft.com/en-us/dotnet/framework/performance/reliability-best-practices
-
             logger.LogDebug("Excel shutdown sequence completed for {FileName} in {Elapsed}ms",
                 fileName, stopwatch.ElapsedMilliseconds);
         }

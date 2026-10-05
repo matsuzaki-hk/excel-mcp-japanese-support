@@ -7,11 +7,13 @@ on:
       - ja-localization
     paths:
       - 'gh-pages/**'
+      - 'samples/world-bank-dashboard/**'
+      - 'videos/world-in-motion-demo/capture/assets/**'
       - 'FEATURES.md'
       - 'doc-counts.json'
       - 'docs/features/**'
       - 'docs/guides/**'
-      - 'skills/shared/**'
+      - 'docs/reference/**'
       - 'CHANGELOG.md'
       - 'PRIVACY.md'
       - 'docs/INSTALLATION.md'
@@ -23,7 +25,7 @@ on:
       - 'SECURITY.md'
       - 'src/ExcelMcp.McpServer/README.md'
       - 'src/ExcelMcp.CLI/README.md'
-      - 'skills/README.md'
+      - 'docs/AGENT-SKILLS.md'
       - '.github/workflows/deploy-gh-pages.yml'
       - '.github/star-history.csv'
       - '.github/usage-analytics.json'
@@ -47,7 +49,7 @@ jobs:
     # write access to the repository.
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       indexnow_urls: ${{ steps.indexnow-urls.outputs.urls }}
     env:
@@ -57,7 +59,7 @@ jobs:
       USAGE_ANALYTICS_PATH: .github/usage-analytics.json
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # hooks.py derives each sitemap <lastmod> from `git log`, so the full
           # history is required. A shallow clone would date every page to the
@@ -107,7 +109,7 @@ jobs:
             -OutputPath './gh-pages/docs/assets/images/star-history.svg'
 
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
           cache: pip
@@ -120,12 +122,19 @@ jobs:
         working-directory: gh-pages
         run: mkdocs build --strict --clean
 
+      - name: Unit test site generator and sample packaging
+        working-directory: gh-pages
+        run: python -m unittest discover -s tests
+
+      - name: Check sample data and build scripts
+        run: python -m unittest discover -s samples/world-bank-dashboard -p "test_*.py"
+
       - name: Audit built site
         working-directory: gh-pages
         run: python audit_site.py
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: 'gh-pages/_site'
 
@@ -145,14 +154,14 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Setup Pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
 
       - name: Notify IndexNow (Bing/Yandex)
         env:

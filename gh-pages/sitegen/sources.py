@@ -192,8 +192,8 @@ def rewrite_links(text: str, source_rel: str, repo_url: str) -> str:
     External links, anchors and site-absolute links are left alone.
     """
     repo_url = repo_url.rstrip("/")
-    github_blob = f"{repo_url}/blob/main/"
-    github_tree = f"{repo_url}/tree/main/"
+    github_blob = f"{repo_url}/blob/ja-localization/"
+    github_tree = f"{repo_url}/tree/ja-localization/"
     source_dir = posixpath.dirname(source_rel)
 
     def repl(match: re.Match) -> str:

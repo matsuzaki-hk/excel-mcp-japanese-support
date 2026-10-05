@@ -176,11 +176,7 @@ public partial class VbaCommands
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Interface implementation requires instance method")]
     public VbaExportResult Export(IExcelBatch batch, string[]? moduleNames, string? outputDirectory, bool overwrite = false)
     {
-        var (isValid, validationError) = ValidateVbaFile(batch.WorkbookPath);
-        if (!isValid)
-        {
-            throw new InvalidOperationException(validationError);
-        }
+        EnsureVbaFile(batch.WorkbookPath);
 
         // Check VBA trust BEFORE attempting operation
         if (!IsVbaTrustEnabled())

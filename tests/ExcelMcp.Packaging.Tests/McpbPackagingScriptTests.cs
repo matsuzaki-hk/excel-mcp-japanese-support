@@ -18,32 +18,37 @@ public sealed class McpbPackagingScriptTests
         "mcpb",
         "McpbPackaging.ps1");
 
-    [Fact(Skip = "Fork ships an exe-bundled MCPB (no npm publication); the upstream metadata-only direct-npx bundle contract does not apply.")]
+    [Fact]
     [Trait("Category", "Integration")]
     [Trait("Feature", "McpbPackaging")]
-    public async Task Build_CreatesMetadataOnlyBundleWithDirectNpxLatest()
+    public async Task Build_CreatesExecutableBundleWithForkMetadata()
     {
         var sandbox = CreateSandbox();
         try
         {
             var bundleRoot = StageMcpbInputs(sandbox);
 
+            // Fork: the bundle embeds the compiled server executable. Stub the
+            // publish step with a real executable so the --version smoke check runs.
             var result = await RunPowerShellAsync($$"""
-                function npm.cmd { throw 'The bundle must not install npm dependencies.' }
-                function npm { throw 'The bundle must not install npm dependencies.' }
-                function dotnet { throw 'The bundle must not publish a server executable.' }
+                function dotnet {
+                    $global:LASTEXITCODE = 0
+                    $out = $args[[Array]::IndexOf($args, '-o') + 1]
+                    New-Item -ItemType Directory -Path $out -Force | Out-Null
+                    Copy-Item (Get-Command node -CommandType Application).Source (Join-Path $out 'Sbroenne.ExcelMcp.McpServer.exe')
+                }
                 & '{{EscapePowerShellLiteral(Path.Combine(bundleRoot, "Build-McpBundle.ps1"))}}' -Version '1.2.3'
                 """);
             Assert.True(result.ExitCode == 0, result.CombinedOutput);
-            await AssertDirectNpxBundleAsync(Path.Combine(bundleRoot, "artifacts", "excel-mcp-1.2.3.mcpb"));
+            await AssertForkExeBundleAsync(Path.Combine(bundleRoot, "artifacts", "excel-mcp-ja-1.2.3.mcpb"));
         }
         finally { Directory.Delete(sandbox, recursive: true); }
     }
 
-    [Fact(Skip = "Fork ships an exe-bundled MCPB (no npm publication); the upstream metadata-only direct-npx bundle contract does not apply.")]
+    [Fact]
     [Trait("Category", "Integration")]
     [Trait("Feature", "McpbPackaging")]
-    public async Task AggregatePackaging_McpbCreatesMetadataOnlyBundleWithoutPublishingRuntime()
+    public async Task AggregatePackaging_McpbCreatesExecutableBundle()
     {
         var sandbox = CreateSandbox();
         try
@@ -51,15 +56,18 @@ public sealed class McpbPackagingScriptTests
             StageMcpbInputs(sandbox);
             var output = Path.Combine(sandbox, "artifacts", "packages");
             var result = await RunPowerShellAsync($$"""
-                function npm.cmd { throw 'The bundle must not install npm dependencies.' }
-                function npm { throw 'The bundle must not install npm dependencies.' }
-                function dotnet { throw 'The bundle must not publish a server executable.' }
+                function dotnet {
+                    $global:LASTEXITCODE = 0
+                    $out = $args[[Array]::IndexOf($args, '-o') + 1]
+                    New-Item -ItemType Directory -Path $out -Force | Out-Null
+                    Copy-Item (Get-Command node -CommandType Application).Source (Join-Path $out 'Sbroenne.ExcelMcp.McpServer.exe')
+                }
                 & '{{EscapePowerShellLiteral(Path.Combine(sandbox, "scripts", "Build-ReleasePackages.ps1"))}}' `
                     -Components Mcpb -Version '1.2.3' -OutputDirectory '{{EscapePowerShellLiteral(output)}}'
                 """);
 
             Assert.True(result.ExitCode == 0, result.CombinedOutput);
-            await AssertDirectNpxBundleAsync(Path.Combine(output, "mcpb", "excel-mcp-1.2.3.mcpb"));
+            await AssertForkExeBundleAsync(Path.Combine(output, "mcpb", "excel-mcp-ja-1.2.3.mcpb"));
             Assert.False(Directory.Exists(Path.Combine(output, "runtimes")));
             Assert.False(Directory.Exists(Path.Combine(output, "nuget")));
             Assert.False(Directory.Exists(Path.Combine(output, "npm")));
@@ -602,27 +610,29 @@ public sealed class McpbPackagingScriptTests
         return bundleRoot;
     }
 
-    private static async Task AssertDirectNpxBundleAsync(string path)
+    private static async Task AssertForkExeBundleAsync(string path)
     {
         using var archive = ZipFile.OpenRead(path);
-        var expectedEntries = new[] { "CHANGELOG.md", "LICENSE", "README.md", "icon-512.png", "manifest.json" };
-        Assert.Equal(
-            expectedEntries,
-            archive.Entries.Select(entry => entry.FullName).Order(StringComparer.Ordinal).ToArray());
+        foreach (var expected in new[]
+        {
+            "CHANGELOG.md", "LICENSE", "README.md", "icon-512.png",
+            "manifest.json", "server/excel-mcp-server.exe"
+        })
+        {
+            Assert.NotNull(archive.GetEntry(expected));
+        }
         var manifestEntry = archive.GetEntry("manifest.json");
         Assert.NotNull(manifestEntry);
         using var stream = manifestEntry.Open();
         using var manifest = await JsonDocument.ParseAsync(stream);
         Assert.Equal("1.2.3", manifest.RootElement.GetProperty("version").GetString());
+        Assert.Equal("excel-mcp-ja", manifest.RootElement.GetProperty("name").GetString());
         var server = manifest.RootElement.GetProperty("server");
-        Assert.Equal("node", server.GetProperty("type").GetString());
-        Assert.Equal("@sbroenne/mcp-server-excel", server.GetProperty("entry_point").GetString());
+        Assert.Equal("binary", server.GetProperty("type").GetString());
+        Assert.Equal("server/excel-mcp-server", server.GetProperty("entry_point").GetString());
         var config = server.GetProperty("mcp_config");
-        Assert.Equal("npx", config.GetProperty("command").GetString());
-        var expectedArgs = new[] { "-y", "@sbroenne/mcp-server-excel@latest" };
-        Assert.Equal(
-            expectedArgs,
-            config.GetProperty("args").EnumerateArray().Select(argument => argument.GetString()).ToArray());
+        Assert.Equal("${__dirname}/server/excel-mcp-server", config.GetProperty("command").GetString());
+        Assert.Empty(config.GetProperty("args").EnumerateArray());
         Assert.Empty(config.GetProperty("env").EnumerateObject());
     }
 

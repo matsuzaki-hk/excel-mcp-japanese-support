@@ -19,7 +19,7 @@ function createContext() {
 	return {
 		extensionPath,
 		extension: {
-			id: 'sbroenne.excel-mcp',
+			id: 'matsuzaki-hk.excel-mcp-ja',
 			extensionPath,
 			extensionUri: vscode.Uri.file(extensionPath),
 			isActive: true,
@@ -41,7 +41,7 @@ function createContext() {
 async function registeredProvider(context = createContext()) {
 	await activate(context);
 	const registration = vi.mocked(vscode.lm.registerMcpServerDefinitionProvider).mock.calls.at(-1);
-	expect(registration?.[0]).toBe('excel-mcp');
+	expect(registration?.[0]).toBe('excel-mcp-ja');
 	if (!registration) {
 		throw new Error('The extension did not register its MCP provider.');
 	}
@@ -75,7 +75,7 @@ describe('MCP registration and launch', () => {
 	it('registers the packaged version and preserves the bundled command', async () => {
 		const { context, provider } = await registeredProvider();
 		expect(await serverDefinition(provider)).toMatchObject({
-			label: 'excel-mcp',
+			label: 'excel-mcp-ja',
 			command: join(context.extensionPath, 'bin', 'Sbroenne.ExcelMcp.McpServer.exe'),
 			args: [],
 			env: {},
@@ -102,7 +102,7 @@ describe('MCP registration and launch', () => {
 	it('checks the executable and registration before allowing launch', async () => {
 		const { provider } = await registeredProvider();
 		const server = await resolveServer(provider);
-		expect(server?.label).toBe('excel-mcp');
+		expect(server?.label).toBe('excel-mcp-ja');
 		expect(probes.access).toHaveBeenCalledOnce();
 		expect(probes.query).toHaveBeenCalledOnce();
 		const [_command, args, options] = probes.query.mock.calls[0];
@@ -198,7 +198,7 @@ describe('First-run help', () => {
 		await vi.waitFor(() => expect(vscode.env.openExternal).toHaveBeenCalledOnce());
 		const [uri] = vi.mocked(vscode.env.openExternal).mock.calls[0];
 		expect(uri.toString()).toBe(
-			'https://excelmcpserver.dev/guides/'
+			'https://matsuzaki-hk.github.io/excel-mcp-japanese-support/guides/'
 		);
 	});
 
@@ -209,7 +209,7 @@ describe('First-run help', () => {
 		const message = vi.mocked(vscode.window.showInformationMessage).mock.calls[0]?.[0];
 		expect(message).toMatch(/Copilot/);
 		expect(message).toMatch(/excel-mcp/);
-		expect(message).toMatch(/starts excel-mcp automatically/i);
+		expect(message).toMatch(/starts excel-mcp-ja automatically/i);
 		expect(message).toMatch(/send an Excel request/i);
 		expect(message).toMatch(/when needed/i);
 		expect(message).toMatch(/if prompted/i);
@@ -243,7 +243,7 @@ describe('First-run help', () => {
 		context.globalState.get.mockReturnValue(false);
 		context.globalState.update.mockRejectedValue(new Error('Cannot save the welcome preference.'));
 		const { provider } = await registeredProvider(context);
-		expect(await resolveServer(provider)).toMatchObject({ label: 'excel-mcp' });
+		expect(await resolveServer(provider)).toMatchObject({ label: 'excel-mcp-ja' });
 		expect(output.appendLine).toHaveBeenCalledWith(
 			'Could not save the welcome preference. Getting-started help may appear again. Cannot save the welcome preference.'
 		);

@@ -264,7 +264,10 @@ public sealed class FileToolRecordingContractTests(
             result.RootElement.GetProperty("exceptionType").GetString());
         Assert.Equal("missing-session", result.RootElement.GetProperty("session_id").GetString());
         Assert.False(result.RootElement.TryGetProperty("sessionId", out _));
-        Assert.Equal(result.RootElement.GetRawText(), call.Result.StructuredContent!.Value.GetRawText());
+        // Fork: the relaxed JSON encoder leaves characters such as ' bare while the
+        // MCP transport re-encodes StructuredContent with the default encoder, so
+        // raw-text equality cannot hold; compare the decoded JSON values instead.
+        Assert.True(JsonElement.DeepEquals(result.RootElement, call.Result.StructuredContent!.Value));
     }
 
     [Fact]

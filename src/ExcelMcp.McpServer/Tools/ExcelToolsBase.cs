@@ -106,11 +106,7 @@ public static class ExcelToolsBase
 
     internal static CallToolResult CreateToolResult(string json, bool? isError = null)
     {
-        // Fork: keep the parsed document alive through RootElement so
-        // StructuredContent.GetRawText() returns the relaxed-encoder text
-        // (a Clone() would re-serialize with the default encoder and escape
-        // characters such as ' that UnsafeRelaxedJsonEscaping leaves bare).
-        var document = JsonDocument.Parse(json);
+        using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var failed = root.ValueKind == JsonValueKind.Object &&
             ((root.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.False) ||
@@ -121,7 +117,7 @@ public static class ExcelToolsBase
             Content = [new TextContentBlock { Text = json }],
             // Older MCP versions require an object here; retain existing text for scalar results.
             StructuredContent = root.ValueKind == JsonValueKind.Object
-                ? root
+                ? root.Clone()
                 : JsonSerializer.SerializeToElement(new { result = root }, JsonOptions)
         };
     }

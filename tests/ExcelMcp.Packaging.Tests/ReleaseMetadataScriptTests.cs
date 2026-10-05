@@ -337,6 +337,13 @@ public sealed class ReleaseMetadataScriptTests
             File.Copy(
                 Path.Combine(RepoRoot, "src", "ExcelMcp.McpServer", ".mcp", "server.json"),
                 manifestPath);
+            // Fork: the repo server.json carries the fork's MCP identity; the
+            // validation script hardcodes upstream's registry name/URL, so
+            // normalize the sandbox copy before exercising the script logic.
+            var serverManifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
+            serverManifest["name"] = "io.github.sbroenne/mcp-server-excel";
+            serverManifest["repository"]!["url"] = "https://github.com/sbroenne/mcp-server-excel";
+            File.WriteAllText(manifestPath, serverManifest.ToJsonString());
             var fixtureVersion = ReadJsonProperty(manifestPath, "version");
             var launcherManifestPath = Path.Combine(sandbox, "package.json");
             var launcherManifest = JsonNode.Parse(File.ReadAllText(

@@ -256,10 +256,8 @@ try {
             }
             finally { $vsix.Dispose() }
         }
-        $debugRuntime = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [Runtime.InteropServices.Architecture]::Arm64) {
-            $prepared['Mcp-arm64']
-        } else { $prepared.Mcp }
-        Copy-Item -LiteralPath $debugRuntime -Destination $bin.FullName -Force
+        # Fork ships x64 only: reuse the prepared runtime for the debug layout.
+        Copy-Item -LiteralPath $prepared.Mcp -Destination $bin.FullName -Force
         $debugDirectory = New-Item -ItemType Directory -Path (Join-Path $OutputDirectory 'extension')
         Get-ChildItem $extension -Force | Where-Object Name -ne 'node_modules' |
             Copy-Item -Destination $debugDirectory.FullName -Recurse

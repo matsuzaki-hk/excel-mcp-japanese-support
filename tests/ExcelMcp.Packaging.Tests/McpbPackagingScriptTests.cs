@@ -18,7 +18,7 @@ public sealed class McpbPackagingScriptTests
         "mcpb",
         "McpbPackaging.ps1");
 
-    [Fact]
+    [Fact(Skip = "Fork ships an exe-bundled MCPB (no npm publication); the upstream metadata-only direct-npx bundle contract does not apply.")]
     [Trait("Category", "Integration")]
     [Trait("Feature", "McpbPackaging")]
     public async Task Build_CreatesMetadataOnlyBundleWithDirectNpxLatest()
@@ -40,7 +40,7 @@ public sealed class McpbPackagingScriptTests
         finally { Directory.Delete(sandbox, recursive: true); }
     }
 
-    [Fact]
+    [Fact(Skip = "Fork ships an exe-bundled MCPB (no npm publication); the upstream metadata-only direct-npx bundle contract does not apply.")]
     [Trait("Category", "Integration")]
     [Trait("Feature", "McpbPackaging")]
     public async Task AggregatePackaging_McpbCreatesMetadataOnlyBundleWithoutPublishingRuntime()
@@ -68,16 +68,12 @@ public sealed class McpbPackagingScriptTests
     }
 
     [Theory]
-    [InlineData(false, true, null)]
-    [InlineData(true, true, null)]
-    [InlineData(false, false, null)]
-    [InlineData(true, false, null)]
-    [InlineData(false, true, "AGENTS.md")]
-    [InlineData(false, true, "CLAUDE.md")]
+    [InlineData(null)]
+    [InlineData("AGENTS.md")]
+    [InlineData("CLAUDE.md")]
     [Trait("Category", "Integration")]
     [Trait("Feature", "Packaging")]
-    public async Task AggregatePackaging_VsixTargetsRequireMatchingBundledRuntime(
-        bool corruptArm64Payload, bool reuseArm64Runtime, string? developerFile)
+    public async Task AggregatePackaging_VsixTargetsRequireMatchingBundledRuntime(string? developerFile)
     {
         var sandbox = CreateSandbox();
         try
@@ -102,12 +98,12 @@ public sealed class McpbPackagingScriptTests
             var skills = Directory.CreateDirectory(Path.Combine(sandbox, "prepared", "excel-mcp-report-formatting")).FullName;
             File.WriteAllText(Path.Combine(skills, "VERSION"), fixtureVersion);
             File.WriteAllText(Path.Combine(skills, "SKILL.md"), "Fixture skill");
-            foreach (var (architecture, machine) in new[] { ("x64", (ushort)0x8664), ("arm64", (ushort)0xaa64) })
-            {
-                var runtime = Directory.CreateDirectory(Path.Combine(sandbox, "runtimes", architecture)).FullName;
-                BitConverter.GetBytes(machine).CopyTo(runtimePayload, headerOffset + 4);
-                File.WriteAllBytes(Path.Combine(runtime, "Sbroenne.ExcelMcp.McpServer.exe"), runtimePayload);
-            }
+            // The fork bundles the source-managed Japanese skill from skills/ (not from prepared output).
+            var jaSkill = Directory.CreateDirectory(Path.Combine(sandbox, "skills", "excel-mcp-ja")).FullName;
+            File.WriteAllText(Path.Combine(jaSkill, "SKILL.md"), "Fixture skill");
+            BitConverter.GetBytes((ushort)0x8664).CopyTo(runtimePayload, headerOffset + 4);
+            var runtime = Directory.CreateDirectory(Path.Combine(sandbox, "runtimes", "x64")).FullName;
+            File.WriteAllBytes(Path.Combine(runtime, "Sbroenne.ExcelMcp.McpServer.exe"), runtimePayload);
             var output = Directory.CreateDirectory(Path.Combine(sandbox, "artifacts", "packages")).FullName;
             var result = await RunPowerShellAsync($$"""
                 $ErrorActionPreference = 'Stop'
@@ -115,13 +111,8 @@ public sealed class McpbPackagingScriptTests
                 $Version = '{{fixtureVersion}}'
                 $SkillsDirectory = Join-Path $root 'prepared'
                 $OutputDirectory = '{{EscapePowerShellLiteral(output)}}'
-                $runtimeRoot = Join-Path $OutputDirectory 'runtimes'
                 $prepared = @{
                     Mcp = Join-Path $root 'runtimes\x64\Sbroenne.ExcelMcp.McpServer.exe'
-                }
-                $reuseArm64Runtime = ${{reuseArm64Runtime.ToString().ToLowerInvariant()}}
-                if ($reuseArm64Runtime) {
-                    $prepared['Mcp-arm64'] = Join-Path $root 'runtimes\arm64\Sbroenne.ExcelMcp.McpServer.exe'
                 }
                 $script:runtimePublishCount = 0
                 . '{{EscapePowerShellLiteral(Path.Combine(RepoRoot, "scripts", "PackageHelpers.ps1"))}}'
@@ -139,17 +130,7 @@ public sealed class McpbPackagingScriptTests
                     . ([scriptblock]::Create($definition.Extent.Text))
                 }
                 function Publish-PackageRuntime {
-                    param([string]$Component, [string]$RepoRoot, [string]$Version, [string]$Architecture, [string]$OutputDirectory)
-                    if ($reuseArm64Runtime) { throw 'The prepared ARM64 runtime must be reused.' }
-                    if ($Component -ne 'Mcp' -or $Architecture -ne 'arm64' -or
-                        $RepoRoot -ne $root -or $Version -ne '{{fixtureVersion}}' -or
-                        $OutputDirectory -ne (Join-Path $runtimeRoot 'Mcp-arm64')) {
-                        throw 'Extension-only publication arguments are incorrect.'
-                    }
-                    $script:runtimePublishCount++
-                    New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-                    Copy-Item -LiteralPath (Join-Path $root 'runtimes\arm64\Sbroenne.ExcelMcp.McpServer.exe') -Destination $OutputDirectory
-                    $global:LASTEXITCODE = 0
+                    throw 'The fork must not publish extension-only runtimes.'
                 }
                 function npm.cmd {
                     $global:LASTEXITCODE = 0
@@ -165,12 +146,7 @@ public sealed class McpbPackagingScriptTests
                     try {
                         foreach ($file in Get-ChildItem -File -Recurse) {
                             $relative = [IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName).Replace('\', '/')
-                            $source = $file.FullName
-                            if (${{corruptArm64Payload.ToString().ToLowerInvariant()}} -and
-                                $target -eq 'win32-arm64' -and $relative -eq 'bin/Sbroenne.ExcelMcp.McpServer.exe') {
-                                $source = $prepared.Mcp
-                            }
-                            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $source, "extension/$relative") | Out-Null
+                            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, "extension/$relative") | Out-Null
                         }
                         $writer = [IO.StreamWriter]::new($archive.CreateEntry('extension.vsixmanifest').Open())
                         try {
@@ -201,41 +177,28 @@ public sealed class McpbPackagingScriptTests
                 Assert.Contains($"VSIX contains development files or the CLI: extension/{developerFile}",
                     result.CombinedOutput, StringComparison.Ordinal);
             }
-            else if (corruptArm64Payload)
-            {
-                Assert.NotEqual(0, result.ExitCode);
-                Assert.Contains("Runtime machine type 0x8664 does not match arm64", result.CombinedOutput, StringComparison.Ordinal);
-            }
             else
             {
                 Assert.True(result.ExitCode == 0, result.CombinedOutput);
-                foreach (var (architecture, fileName, machine) in new[]
+                // Fork contract: a single x64 VSIX named like the other fork artifacts.
+                using var archive = ZipFile.OpenRead(Path.Combine(output, $"excelmcp-ja-{fixtureVersion}.vsix"));
+                var entry = archive.GetEntry("extension/bin/Sbroenne.ExcelMcp.McpServer.exe");
+                Assert.NotNull(entry);
+                using var reader = new BinaryReader(entry.Open());
+                var expectedPayload = File.ReadAllBytes(Path.Combine(
+                    sandbox, "runtimes", "x64", "Sbroenne.ExcelMcp.McpServer.exe"));
+                var payload = reader.ReadBytes(expectedPayload.Length);
+                Assert.Equal((ushort)0x8664, BitConverter.ToUInt16(payload, headerOffset + 4));
+                Assert.Equal(expectedPayload, payload);
+                foreach (var skillName in new[] { "excel-mcp-ja", "excel-mcp-report-formatting" })
                 {
-                    ("x64", $"excel-mcp-{fixtureVersion}.vsix", (ushort)0x8664),
-                    ("arm64", $"excel-mcp-{fixtureVersion}-win32-arm64.vsix", (ushort)0xaa64)
-                })
-                {
-                    using var archive = ZipFile.OpenRead(Path.Combine(output, fileName));
-                    var entry = archive.GetEntry("extension/bin/Sbroenne.ExcelMcp.McpServer.exe");
-                    Assert.NotNull(entry);
-                    using var reader = new BinaryReader(entry.Open());
-                    var expectedPayload = File.ReadAllBytes(Path.Combine(
-                        sandbox, "runtimes", architecture, "Sbroenne.ExcelMcp.McpServer.exe"));
-                    var payload = reader.ReadBytes(expectedPayload.Length);
-                    Assert.Equal(machine, BitConverter.ToUInt16(payload, headerOffset + 4));
-                    Assert.Equal(expectedPayload, payload);
+                    Assert.NotNull(archive.GetEntry($"extension/skills/{skillName}/SKILL.md"));
+                    Assert.NotNull(archive.GetEntry($"extension/skills/{skillName}/VERSION"));
                 }
                 var debugRuntime = Path.Combine(output, "extension", "bin", "Sbroenne.ExcelMcp.McpServer.exe");
-                var expectedDebugMachine = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture ==
-                    System.Runtime.InteropServices.Architecture.Arm64 ? (ushort)0xaa64 : (ushort)0x8664;
-                Assert.Equal(expectedDebugMachine, BitConverter.ToUInt16(File.ReadAllBytes(debugRuntime), headerOffset + 4));
+                Assert.Equal((ushort)0x8664, BitConverter.ToUInt16(File.ReadAllBytes(debugRuntime), headerOffset + 4));
             }
-            Assert.Contains($"Runtime publication count: {(reuseArm64Runtime ? 0 : 1)}", result.CombinedOutput, StringComparison.Ordinal);
-            if (!reuseArm64Runtime)
-            {
-                var publishedRuntime = Path.Combine(output, "runtimes", "Mcp-arm64", "Sbroenne.ExcelMcp.McpServer.exe");
-                Assert.Equal(runtimePayload, File.ReadAllBytes(publishedRuntime));
-            }
+            Assert.Contains("Runtime publication count: 0", result.CombinedOutput, StringComparison.Ordinal);
             Assert.Empty(Directory.GetFiles(output, "*-server-inspection.exe"));
         }
         finally { Directory.Delete(sandbox, recursive: true); }
@@ -302,12 +265,12 @@ public sealed class McpbPackagingScriptTests
             await File.WriteAllTextAsync(previousPackage, "previous-good-package");
             await File.WriteAllTextAsync(unrelatedFile, "unrelated");
             var result = await RunPowerShellAsync($$"""
-                function Compress-Archive { throw 'archive-root-cause' }
+                function dotnet { throw 'publish-root-cause' }
                 & '{{EscapePowerShellLiteral(builder)}}' -Version '1.2.3'
                 exit $LASTEXITCODE
                 """);
             Assert.NotEqual(0, result.ExitCode);
-            Assert.Contains("archive-root-cause", result.Stdout + result.Stderr, StringComparison.Ordinal);
+            Assert.Contains("publish-root-cause", result.Stdout + result.Stderr, StringComparison.Ordinal);
             Assert.True(File.Exists(previousPackage), "A failed build must preserve the previous package.");
             Assert.Equal("previous-good-package", await File.ReadAllTextAsync(previousPackage));
             Assert.Equal("unrelated", await File.ReadAllTextAsync(unrelatedFile));

@@ -54,6 +54,7 @@ $ErrorActionPreference = "Stop"
 # Get script and project directories
 $McpbDir = $PSScriptRoot
 $RootDir = Split-Path $McpbDir -Parent
+. (Join-Path $RootDir 'scripts\PackageHelpers.ps1')
 $McpServerDir = Join-Path $RootDir "src/ExcelMcp.McpServer"
 
 Write-Host "🏗️  Building MCPB (MCP Bundle) package..." -ForegroundColor Cyan
@@ -72,16 +73,20 @@ if (-not $Version) {
 }
 Write-Host "📋 Version: $Version" -ForegroundColor Green
 
-# Create output directory (relative to mcpb directory)
-$OutputDir = Join-Path $McpbDir $OutputDir
-if (Test-Path $OutputDir) {
-    Remove-Item -Recurse -Force $OutputDir
+# Resolve output directory (absolute paths pass through, relative paths are
+# anchored at the mcpb directory)
+$OutputDir = [IO.Path]::GetFullPath($OutputDir, $McpbDir)
+Assert-PackageOutputPath -Path $OutputDir -RepoRoot $RootDir
+if ($OutputDir -eq [IO.Path]::GetPathRoot($OutputDir) -or $OutputDir -eq $RootDir -or $OutputDir -eq $McpbDir) {
+    throw "Unsafe package output directory: $OutputDir"
 }
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
-# Create temp staging directory
-$StagingDir = Join-Path $OutputDir "staging"
+# Stage in a temp directory so a failed build preserves existing artifacts;
+# the finished bundle is installed into the output at the end.
+$StagingDir = Join-Path ([IO.Path]::GetTempPath()) "ExcelMcpMcpb-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $StagingDir -Force | Out-Null
+try {
 
 Write-Host ""
 Write-Host "📦 Publishing self-contained executable..." -ForegroundColor Yellow
@@ -171,7 +176,7 @@ Write-Host "   ✓ Copied CHANGELOG.md" -ForegroundColor Green
 
 # Create mcpb file (zip with .mcpb extension)
 $McpbFileName = "excel-mcp-ja-$Version.mcpb"
-$McpbPath = Join-Path $OutputDir $McpbFileName
+$McpbPath = Join-Path $StagingDir $McpbFileName
 
 Write-Host ""
 Write-Host "📦 Creating MCPB bundle..." -ForegroundColor Yellow
@@ -196,25 +201,25 @@ if (Test-Path $McpMetaDir) {
 Compress-Archive -Path $FilesToZip -DestinationPath $McpbPath -Force
 Write-Host "   ✓ Created $McpbFileName" -ForegroundColor Green
 
-# Copy manifest to output dir for verification
-Copy-Item $ManifestDst (Join-Path $OutputDir "manifest.json") -Force
-
-# Clean up staging
-Remove-McpbStagingDirectory -Path $StagingDir
+# Install the finished bundle and manifest into the output directory;
+# Install-PackageOutput restores the previous file if the move fails.
+$McpbDestination = Join-Path $OutputDir $McpbFileName
+Install-PackageOutput -Source $McpbPath -Destination $McpbDestination
+Install-PackageOutput -Source $ManifestDst -Destination (Join-Path $OutputDir "manifest.json")
 
 # Show results
-$McpbSize = (Get-Item $McpbPath).Length / 1MB
+$McpbSize = (Get-Item $McpbDestination).Length / 1MB
 Write-Host ""
 Write-Host "✅ MCPB bundle created successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "📁 Output:" -ForegroundColor Cyan
-Write-Host "   $McpbPath" -ForegroundColor White
+Write-Host "   $McpbDestination" -ForegroundColor White
 Write-Host "   Size: $([math]::Round($McpbSize, 1)) MB" -ForegroundColor White
 Write-Host ""
 Write-Host "📋 Contents:" -ForegroundColor Cyan
 
 # List mcpb contents
-$McpbContents = [System.IO.Compression.ZipFile]::OpenRead($McpbPath)
+$McpbContents = [System.IO.Compression.ZipFile]::OpenRead($McpbDestination)
 try {
     foreach ($entry in $McpbContents.Entries) {
         $sizeKB = [math]::Round($entry.Length / 1KB, 1)
@@ -234,3 +239,9 @@ Write-Host "   1. Upload $McpbFileName to GitHub release" -ForegroundColor White
 Write-Host "   2. Users can download and double-click to install" -ForegroundColor White
 Write-Host "   3. Submit to Anthropic Directory for discoverability" -ForegroundColor White
 Write-Host ""
+}
+finally {
+    if ($StagingDir -and (Test-Path -LiteralPath $StagingDir)) {
+        Remove-McpbStagingDirectory -Path $StagingDir
+    }
+}

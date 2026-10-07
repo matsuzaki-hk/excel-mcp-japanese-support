@@ -350,6 +350,11 @@ jobs:
     - name: Update Extension Version
       run: |
         $version = $env:VERSION
+        # Build-ReleasePackages.ps1 (invoked by npm run package) derives the
+        # release version from the ROOT package.json, so stamp the fork
+        # -ja.N suffix there as well as on the extension manifest.
+        (Get-Content package.json -Raw) -replace '"version": "[^"]*"', "`"version`": `"$version`"" |
+          Set-Content package.json -Encoding utf8 -NoNewline
         cd vscode-extension
         npm version "$version" --no-git-tag-version
       shell: pwsh
@@ -375,12 +380,15 @@ jobs:
     - name: Rename VSIX
       run: |
         $version = $env:VERSION
-        cd vscode-extension
-        $vsix = Get-ChildItem -Filter "*.vsix" | Select-Object -First 1
+        # Build-ReleasePackages.ps1 stages packages under artifacts/packages/<guid>/
+        $vsix = Get-ChildItem -Path artifacts\packages -Recurse -Filter "excelmcp-ja-*.vsix" |
+          Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if (-not $vsix) { throw "VSIX not found under artifacts/packages." }
         $targetName = "excelmcp-ja-$version.vsix"
         if ($vsix.Name -ne $targetName) {
           Rename-Item $vsix.FullName -NewName $targetName
         }
+        Copy-Item (Join-Path $vsix.DirectoryName $targetName) "vscode-extension/$targetName" -Force
       shell: pwsh
 
     - name: Upload Artifact

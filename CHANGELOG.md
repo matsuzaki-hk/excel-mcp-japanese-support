@@ -11,6 +11,30 @@ This changelog covers all components:
 
 Entries are short and end-user-facing. Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses [Semantic Versioning](https://semver.org/). Starting with this file, entries are compiled automatically from [changesets](.changeset/README.md) at release time — see [Release Strategy](docs/RELEASE-STRATEGY.md#changelog-generation) for how to add one.
 
+## [2.3.6] - 2026-10-07
+
+### Patch Changes
+
+- [#1078](https://github.com/sbroenne/mcp-server-excel/pull/1078) [`c38fdac`](https://github.com/sbroenne/mcp-server-excel/commit/c38fdac668ce88c62367599eb1f7006fab1f3aad) Thanks [@sbroenne](https://github.com/sbroenne)! - Clarify the Excel MCP and CLI plugin and npm package descriptions so users can tell which integration fits their workflow and see the desktop Excel requirement.
+
+- [#1080](https://github.com/sbroenne/mcp-server-excel/pull/1080) [`7374c25`](https://github.com/sbroenne/mcp-server-excel/commit/7374c25e983d0d6da1ffd61f5ce776994b830599) Thanks [@sbroenne](https://github.com/sbroenne)! - **`set-values` no longer blanks other cells when one value starts with `=`** ([#1065](https://github.com/sbroenne/mcp-server-excel/issues/1065)). Writing a mix of numbers, text, dates, and formulas now keeps every value: only the cells starting with `=` become formulas. Before, every other cell in the range was silently cleared while the command reported success.
+
+  **`get-formulas` no longer reports text that starts with `=` as a formula.** Cells holding text such as `'=abc` now return an empty formula and their text as the value. The `set-values` result message now reads `Wrote N formula(s); other cells kept as values` when formulas are written.
+
+## [2.3.5] - 2026-10-07
+
+### Patch Changes
+
+- [#1076](https://github.com/sbroenne/mcp-server-excel/pull/1076) [`39f20a1`](https://github.com/sbroenne/mcp-server-excel/commit/39f20a13268ffc08df9838d9125dcbcd51ba0692) Thanks [@sbroenne](https://github.com/sbroenne)! - **Consistent command and timeout names** ([#1066](https://github.com/sbroenne/mcp-server-excel/issues/1066)): `excelcli batch` now accepts the same command group names as the CLI (`calculationmode`, `datamodelrelationship`, `worksheetstyle`). Timeouts are named `--timeout-seconds` in the CLI, `timeoutSeconds` in batch JSON, and `timeout_seconds` in MCP. MCP `file` and `file_read` now take `file_path` instead of `path`. Mistyped commands or arguments now return a list of the valid choices. These are breaking changes; see [Breaking Changes](https://github.com/sbroenne/mcp-server-excel/blob/main/docs/BREAKING-CHANGES.md).
+
+## [2.3.4] - 2026-10-07
+
+### Patch Changes
+
+- [#1070](https://github.com/sbroenne/mcp-server-excel/pull/1070) [`fb5b8a1`](https://github.com/sbroenne/mcp-server-excel/commit/fb5b8a1e346e532fefba4d994b4c111328322e9f) Thanks [@sbroenne](https://github.com/sbroenne)! - Charts can now use data made of separate cell blocks on one sheet, such as labels in M4:M29 and values in O4:S29 (`M4:M29,O4:S29`), when creating a chart or changing its source. Bad input for charts, drawing objects, PivotTables, slicers, timelines and conditional formats is now rejected before anything is added to the workbook. If Excel still fails after creating the object, the error now names what was left behind and where, instead of showing a bare Excel error code.
+
+- [#1069](https://github.com/sbroenne/mcp-server-excel/pull/1069) [`6126f0b`](https://github.com/sbroenne/mcp-server-excel/commit/6126f0bb79e60ed26ed33391096b93f88153b050) Thanks [@sbroenne](https://github.com/sbroenne)! - Power Query `refresh-all` now works on workbooks that contain parameter or connection-only queries: it skips them, refreshes every loaded query, and keeps going when one query fails. The result lists which queries were refreshed, skipped, and failed (with each failure's error), and reports `success: false` when any query failed. `excelcli` now exits with code 1 whenever a command's result reports `success: false`, matching how the MCP Server flags the same result as an error.
+
 ## [2.3.3] - 2026-10-06
 
 ### Patch Changes

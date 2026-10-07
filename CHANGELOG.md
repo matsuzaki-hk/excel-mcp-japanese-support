@@ -11,6 +11,36 @@ This changelog covers all components:
 
 Entries are short and end-user-facing. Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses [Semantic Versioning](https://semver.org/). Starting with this file, entries are compiled automatically from [changesets](.changeset/README.md) at release time — see [Release Strategy](docs/RELEASE-STRATEGY.md#changelog-generation) for how to add one.
 
+## [2.3.3] - 2026-10-06
+
+### Patch Changes
+
+- [#1062](https://github.com/sbroenne/mcp-server-excel/pull/1062) [`b1256d3`](https://github.com/sbroenne/mcp-server-excel/commit/b1256d342f22e488adcf625c84cc78da23f0f95f) Thanks [@sbroenne](https://github.com/sbroenne)! - Add a bounded workbook overview with worksheet, table, and named-range metadata plus optional limited value and formula previews.
+
+## [2.3.1] - 2026-10-05
+
+### Major Changes
+
+- [#1059](https://github.com/sbroenne/mcp-server-excel/pull/1059) [`2d459dc`](https://github.com/sbroenne/mcp-server-excel/commit/2d459dc749075bdee6d846670b7ae1f2413a661d) Thanks [@sbroenne](https://github.com/sbroenne)! - MCP tools that target an open workbook now use `workbook_session_id` instead of `session_id` in inputs and results. This works around a Claude Desktop bridge issue that can drop inputs named `session_id`. CLI session names are unchanged.
+
+### Patch Changes
+
+- [#1058](https://github.com/sbroenne/mcp-server-excel/pull/1058) [`54115a6`](https://github.com/sbroenne/mcp-server-excel/commit/54115a671e0021a1b429670f539eae223441e011) Thanks [@sbroenne](https://github.com/sbroenne)! - Protected workbooks now use the signed-in user's Excel editing permissions instead of always opening read-only. Workbook changes reject genuine read-only access, and saves and Save As report an error when Excel does not accept the save, leaving the session open for inspection.
+
+## [2.3.0] - 2026-10-05
+
+### Minor Changes
+
+- [#1052](https://github.com/sbroenne/mcp-server-excel/pull/1052) [`880eee5`](https://github.com/sbroenne/mcp-server-excel/commit/880eee54f7795331db23462082097ead414aa759) Thanks [@sbroenne](https://github.com/sbroenne)! - Give read-only MCP actions dedicated tools with accurate `readOnlyHint` metadata. Separate workbook session and worksheet listing from their write tools, and report the package's informational version in MCP server metadata.
+
+## [2.2.2] - 2026-10-05
+
+### Patch Changes
+
+- [#1050](https://github.com/sbroenne/mcp-server-excel/pull/1050) [`57e3423`](https://github.com/sbroenne/mcp-server-excel/commit/57e342328ec06eda6c882bf3bdedaff3cf159cfc) Thanks [@sbroenne](https://github.com/sbroenne)! - `vba run` now reports its requested execution timeout as a timeout rather than a
+  cancellation. Anonymous operation analytics also distinguish timeouts from
+  cancellations.
+
 ## [2.2.1] - 2026-10-04
 
 ### Patch Changes

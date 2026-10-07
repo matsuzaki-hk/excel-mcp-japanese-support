@@ -33,7 +33,7 @@ public sealed class RangeFormulaErrorProtocolTests(
             """;
 
         var valuesCall = await _fixture.CallToolAsync(
-            "range",
+            "range_read",
             RangeReadArguments("get-values"),
             RecordingToolTest.Success(responseJson),
             "range.get-values",
@@ -42,7 +42,7 @@ public sealed class RangeFormulaErrorProtocolTests(
         AssertCanonicalReferenceError(valuesCall.JsonResult);
 
         var formulasCall = await _fixture.CallToolAsync(
-            "range",
+            "range_read",
             RangeReadArguments("get-formulas"),
             RecordingToolTest.Success(responseJson),
             "range.get-formulas",
@@ -55,7 +55,7 @@ public sealed class RangeFormulaErrorProtocolTests(
         string action) => new()
         {
             ["action"] = action,
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["sheet_name"] = "Sheet1",
             ["range_address"] = "A1"
         };

@@ -10,7 +10,7 @@
 > **Primary distribution: npm or standalone executable** — Run `npx -y @sbroenne/excelcli@latest --help` or download `excelcli.exe` from the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest). No .NET runtime required.
 > **Secondary distribution: NuGet .NET tool** — `dotnet tool install --global Sbroenne.ExcelMcp.CLI` (requires .NET 10 runtime).
 
-The CLI provides 31 feature command categories with 387 operations matching the MCP Server, plus `session`, `service`, and `batch` commands — the same capabilities without loading 31 tool schemas into context.
+The CLI provides 31 feature command categories with 388 operations matching the MCP Server, plus `session`, `service`, and `batch` commands — the same capabilities without loading 31 tool schemas into context.
 
 | Interface | Best For | Why |
 |-----------|----------|-----|
@@ -67,7 +67,7 @@ dotnet tool install --global Sbroenne.ExcelMcp.CLI
 
 ## 📋 What You Can Do
 
-ExcelMcp.CLI provides **387 operations** across 31 feature command categories including Power Query, Python in Excel, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, and Window Management.
+ExcelMcp.CLI provides **388 operations** across 31 feature command categories including Power Query, Python in Excel, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, and Window Management.
 
 Drives the **actual Excel application** via COM — not a file-format parser — so live operations (Power Query refresh, recalculation, DAX evaluation, VBA execution) run for real and existing workbooks stay intact.
 
@@ -143,11 +143,17 @@ excelcli session open "D:\Docs\Protected.xlsx" --show --timeout 120
 ```
 
 `session test` reports `canOpen`, `isIrmProtected`, `willOpenReadOnly`, and
-`requiresVisibleSession` using the same result model as MCP `file test`. Protected
+`requiresVisibleSession` using the same result model as MCP `file_read` action `test`. Protected
 files report `canOpen:false` until interactive Excel authentication occurs. Use
 `--show` whenever hidden automation would block on a sign-in, consent, or
 information-protection prompt. Ordinary files are opened read-only in a temporary
 Excel session and closed without saving.
+
+Protection detection does not force read-only access. After visible authentication,
+Excel decides the signed-in user's editing rights. `willOpenReadOnly:false` is not
+a guarantee of edit access; inspect `readOnly` with `excelcli workbook get-info`
+(MCP: `workbook_read` action `get-info`) before editing. Failed saves return an
+error and leave the session open with any unsaved changes available for inspection.
 
 ### Daemon Status and Session Discovery
 
@@ -178,6 +184,12 @@ foreach ($file in $files) {
     excelcli -q session close --session $sessionId --save
 }
 ```
+
+Each command prints a JSON result and exits with code 0 on success. It exits
+with code 1 when the command fails or its result reports `success: false` (for
+example, a `powerquery refresh-all` where one query failed), so scripts can
+check `$LASTEXITCODE`. In `batch` output, such a line has `success: false`, and
+`--stop-on-error` stops there.
 
 ### CI/CD Integration
 

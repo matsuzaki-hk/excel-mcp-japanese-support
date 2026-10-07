@@ -71,9 +71,9 @@ dotnet tool install --global Sbroenne.ExcelMcp.McpServer
 
 ## 🛠️ What You Can Do
 
-**31 specialized tools with 387 operations** covering Power Query, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, Named Ranges, File/Session management, Calculation Mode, Slicers, Conditional Formatting, Screenshots, and Window Management.
+**60 MCP tools across 31 feature areas, with 388 operations** covering Power Query, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, Named Ranges, File/Session management, Calculation Mode, Slicers, Conditional Formatting, Screenshots, and Window Management.
 
-📚 **[Feature Overview →](https://github.com/sbroenne/mcp-server-excel/blob/main/FEATURES.md)** - Capabilities grouped by goal. Current actions and inputs for all 387 operations are described by the server's tools.
+📚 **[Feature Overview →](https://github.com/sbroenne/mcp-server-excel/blob/main/FEATURES.md)** - Capabilities grouped by goal. Current actions and inputs for all 388 operations are described by the server's tools.
 
 **AI-Powered Workflows:**
 - 💬 Natural language Excel commands through GitHub Copilot, Claude, or ChatGPT
@@ -92,8 +92,9 @@ the work, then list and check its `canClose`. Close only when authorized and
 choose `save: true` or `save: false` explicitly. Closing without saving discards
 all unsaved edits and has no tool-level undo.
 
-MCP inputs, open/create results, list entries, and session error context use
-`session_id`. The legacy `sessionId` input is rejected. CLI JSON keeps its
+MCP tools that target an open workbook use `workbook_session_id` for both
+inputs and results. This works around a Claude Desktop bridge issue that can
+drop inputs named `session_id`; no alias is exposed. CLI JSON keeps its
 `sessionId` convention; its sessions are separate.
 
 Calls within a session execute one at a time, but concurrent requests and

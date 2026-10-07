@@ -41,7 +41,7 @@
 ### Documentation
 
 - Update README, skill files, and upstream snapshot docs when user-facing behavior changes.
-- Keep tool/operation counts consistent (31 tools / 387 operations as of v2.2.1; canonical source is `doc-counts.json`).
+- Keep tool/operation counts consistent (31 tools / 388 operations as of v2.3.3; canonical source is `doc-counts.json`).
 
 ### Japanese Fork Specifics
 

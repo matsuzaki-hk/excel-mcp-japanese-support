@@ -24,7 +24,7 @@ public sealed class WorksheetPageSetupToolTests(
             new Dictionary<string, object?>
             {
                 ["action"] = "set-page-setup",
-                ["session_id"] = sessionId,
+                ["workbook_session_id"] = sessionId,
                 ["sheet_name"] = "PageSetupSheet",
                 ["orientation"] = "landscape",
                 ["fit_to_pages_wide"] = 1,
@@ -50,11 +50,11 @@ public sealed class WorksheetPageSetupToolTests(
         }
 
         var getCall = await _fixture.CallToolAsync(
-            "worksheet_style",
+            "worksheet_style_read",
             new Dictionary<string, object?>
             {
                 ["action"] = "get-page-setup",
-                ["session_id"] = sessionId,
+                ["workbook_session_id"] = sessionId,
                 ["sheet_name"] = "PageSetupSheet"
             },
             Success(
@@ -77,11 +77,11 @@ public sealed class WorksheetPageSetupToolTests(
     {
         const string sessionId = "recording-session";
         var call = await _fixture.CallToolAsync(
-            "worksheet_style",
+            "worksheet_style_read",
             new Dictionary<string, object?>
             {
                 ["action"] = "get-page-setup",
-                ["session_id"] = sessionId,
+                ["workbook_session_id"] = sessionId,
                 ["sheet_name"] = "AutomaticScale"
             },
             Success(

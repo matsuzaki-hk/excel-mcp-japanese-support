@@ -595,55 +595,37 @@ public sealed class ReleaseMetadataScriptTests
         Assert.Contains("ref: ${{ needs.resolve.outputs.commit }}", plugins, StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData("release.yml", "publish-plugins", "publish-plugins.yml")]
-    [InlineData("publish-plugins.yml", "update-awesome-copilot", "update-awesome-copilot.lock.yml")]
+    [Fact]
     [Trait("Feature", "ReleaseMetadata")]
-    public void PluginPublication_CallersAllowEveryCompiledUpdaterPermission(
-        string callerFile, string callerJob, string calleeFile)
+    public void PluginPublication_ReleaseChainNeverCallsManualListingUpdater()
     {
         var workflows = Path.Combine(RepoRoot, ".github", "workflows");
-        var caller = File.ReadAllText(Path.Combine(workflows, callerFile));
-        var callerBody = ExtractWorkflowJob(caller, callerJob);
-        Assert.Contains($"uses: ./.github/workflows/{calleeFile}", callerBody, StringComparison.Ordinal);
-        var granted = ExtractWorkflowPermissions(callerBody, 4)
-            ?? ExtractWorkflowPermissions(caller[..caller.IndexOf("\njobs:", StringComparison.Ordinal)], 0);
+        var release = File.ReadAllText(Path.Combine(workflows, "release.yml"));
+        var plugins = File.ReadAllText(Path.Combine(workflows, "publish-plugins.yml"));
+        var caller = ExtractWorkflowJob(release, "publish-plugins");
+        Assert.Contains("uses: ./.github/workflows/publish-plugins.yml", caller, StringComparison.Ordinal);
+        var granted = ExtractWorkflowPermissions(caller, 4);
         Assert.NotNull(granted);
+        Assert.Equal(["contents"], granted.Keys);
+        Assert.Equal("read", granted["contents"]);
 
-        var updater = File.ReadAllText(Path.Combine(workflows, "update-awesome-copilot.lock.yml"));
-        var inherited = ExtractWorkflowPermissions(updater[..updater.IndexOf("\njobs:", StringComparison.Ordinal)], 0);
-        Assert.NotNull(inherited);
-        var required = new HashSet<string>(StringComparer.Ordinal);
-        // GitHub validates every nested job, even when the opt-in condition skips it.
-        foreach (System.Text.RegularExpressions.Match job in System.Text.RegularExpressions.Regex.Matches(
-                     updater[(updater.IndexOf("\njobs:", StringComparison.Ordinal) + 1)..],
-                     @"(?m)^  ([a-z_][a-z_-]*):\r?$"))
+        foreach (var workflow in new[] { release, plugins })
         {
-            var permissions = ExtractWorkflowPermissions(ExtractWorkflowJob(updater, job.Groups[1].Value), 4)
-                ?? inherited;
-            foreach (var permission in permissions.Where(permission => permission.Value != "none"))
-            {
-                Assert.Equal("read", permission.Value);
-                required.Add(permission.Key);
-            }
+            Assert.DoesNotContain("update-awesome-copilot", workflow, StringComparison.Ordinal);
+            Assert.DoesNotContain("AWESOME_COPILOT", workflow, StringComparison.Ordinal);
+            Assert.DoesNotContain("COPILOT_GITHUB_TOKEN", workflow, StringComparison.Ordinal);
         }
-
-        Assert.Equal(["actions", "contents", "pull-requests"], required.Order(StringComparer.Ordinal));
-        foreach (var permission in required)
-        {
-            Assert.True(granted.TryGetValue(permission, out var access) && access == "read",
-                $"{callerFile} job '{callerJob}' must grant {permission}: read to the compiled updater.");
-        }
-        Assert.Equal(required.Order(StringComparer.Ordinal), granted.Keys.Order(StringComparer.Ordinal));
         Assert.Equal(["contents"], ExtractWorkflowPermissions(
-            caller[..caller.IndexOf("\njobs:", StringComparison.Ordinal)], 0)!.Keys);
-        if (callerFile == "publish-plugins.yml")
-        {
-            Assert.Contains("if: needs.publish.outputs.handoff == 'true' && vars.AWESOME_COPILOT_UPDATES_ENABLED == 'true'",
-                callerBody, StringComparison.Ordinal);
-            Assert.Null(ExtractWorkflowPermissions(ExtractWorkflowJob(caller, "resolve"), 4));
-            Assert.Null(ExtractWorkflowPermissions(ExtractWorkflowJob(caller, "publish"), 4));
-        }
+            plugins[..plugins.IndexOf("\njobs:", StringComparison.Ordinal)], 0)!.Keys);
+        Assert.Null(ExtractWorkflowPermissions(ExtractWorkflowJob(plugins, "resolve"), 4));
+        Assert.Null(ExtractWorkflowPermissions(ExtractWorkflowJob(plugins, "publish"), 4));
+
+        var updater = File.ReadAllText(Path.Combine(workflows, "update-awesome-copilot.md"));
+        var trigger = updater[..updater.IndexOf("\npermissions:", StringComparison.Ordinal)];
+        Assert.DoesNotContain("workflow_call:", trigger, StringComparison.Ordinal);
+        Assert.Contains("workflow_dispatch:", trigger, StringComparison.Ordinal);
+        Assert.Contains("published_tag:", trigger, StringComparison.Ordinal);
+        Assert.Contains("preview:", trigger, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -958,22 +940,24 @@ public sealed class ReleaseMetadataScriptTests
             var sourceReadme = await File.ReadAllTextAsync(Path.Combine(RepoRoot, "README.md"));
             var headline = System.Text.RegularExpressions.Regex.Match(
                 sourceReadme,
-                @"(?<tools>\d+) tools with (?<operations>\d+) operations");
+                @"(?<mcpTools>\d+) MCP tools across (?<tools>\d+) feature areas, with (?<operations>\d+) operations");
             Assert.True(headline.Success);
             var canonicalTools = int.Parse(headline.Groups["tools"].Value, System.Globalization.CultureInfo.InvariantCulture);
+            var canonicalMcpTools = int.Parse(headline.Groups["mcpTools"].Value, System.Globalization.CultureInfo.InvariantCulture);
             var canonicalOperations = int.Parse(
                 headline.Groups["operations"].Value,
                 System.Globalization.CultureInfo.InvariantCulture);
+            var canonicalHeadline = $"{canonicalMcpTools} MCP tools across {canonicalTools} feature areas, with {canonicalOperations} operations";
 
-            CopyDocumentationCountFiles(sandbox, canonicalTools, canonicalOperations);
+            CopyDocumentationCountFiles(sandbox, canonicalTools, canonicalMcpTools, canonicalOperations);
             var readmePath = Path.Combine(sandbox, "README.md");
             var llmOutputsPath = Path.Combine(sandbox, "gh-pages", "sitegen", "llm.py");
             await File.WriteAllTextAsync(
                 readmePath,
                 (await File.ReadAllTextAsync(readmePath))
                     .Replace(
-                        $"{canonicalTools} tools with {canonicalOperations} operations",
-                        "1 tools with 2 operations",
+                        canonicalHeadline,
+                        "1 MCP tools across 1 feature areas, with 2 operations",
                         StringComparison.Ordinal)
                     .Replace($"all {canonicalOperations} operations", "all 2 operations", StringComparison.Ordinal));
 
@@ -984,7 +968,7 @@ public sealed class ReleaseMetadataScriptTests
 
             Assert.True(update.ExitCode == 0, update.CombinedOutput);
             Assert.Contains(
-                $"{canonicalTools} tools with {canonicalOperations} operations",
+                canonicalHeadline,
                 await File.ReadAllTextAsync(readmePath),
                 StringComparison.Ordinal);
             Assert.Contains(
@@ -1010,12 +994,25 @@ public sealed class ReleaseMetadataScriptTests
                 sandbox);
             Assert.True(validation.ExitCode == 0, validation.CombinedOutput);
 
+            var generatedToolsPath = Path.Combine(sandbox, "src", "ExcelMcp.McpServer",
+                "obj", "GeneratedFiles", "Tools.g.cs");
+            var generatedTools = await File.ReadAllTextAsync(generatedToolsPath);
+            await File.WriteAllTextAsync(generatedToolsPath,
+                generatedTools.Replace("[McpServerTool(Name = \"tool-1_read\")]", "", StringComparison.Ordinal));
+            var missingReadEndpoint = await RunPowerShellScriptAsync(
+                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
+                ["-SkipBuild", "-AllowStaleAdvertisedCounts"],
+                sandbox);
+            Assert.NotEqual(0, missingReadEndpoint.ExitCode);
+            Assert.Contains("Missing: [tool-1_read]", missingReadEndpoint.CombinedOutput, StringComparison.Ordinal);
+            await File.WriteAllTextAsync(generatedToolsPath, generatedTools);
+
             await File.WriteAllTextAsync(
                 readmePath,
                 (await File.ReadAllTextAsync(readmePath))
                     .Replace(
-                        $"{canonicalTools} tools with {canonicalOperations} operations",
-                        "1 tools with 2 operations",
+                        canonicalHeadline,
+                        $"{canonicalMcpTools} MCP tools across 1 feature areas, with {canonicalOperations} operations",
                         StringComparison.Ordinal));
             var staleValidation = await RunPowerShellScriptAsync(
                 Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
@@ -1039,8 +1036,8 @@ public sealed class ReleaseMetadataScriptTests
                 readmePath,
                 (await File.ReadAllTextAsync(readmePath))
                     .Replace(
-                        "1 tools with 2 operations",
-                        $"{canonicalTools} tools with {canonicalOperations} operations",
+                        $"{canonicalMcpTools} MCP tools across 1 feature areas, with {canonicalOperations} operations",
+                        canonicalHeadline,
                         StringComparison.Ordinal));
             await File.WriteAllTextAsync(docCountsPath, "{\n  \"tools\": 1,\n  \"operations\": 2\n}\n");
 
@@ -1209,6 +1206,7 @@ public sealed class ReleaseMetadataScriptTests
     private static void CopyDocumentationCountFiles(
         string sandbox,
         int canonicalTools,
+        int canonicalMcpTools,
         int canonicalOperations)
     {
         var relativePaths = new[]
@@ -1269,15 +1267,21 @@ public sealed class ReleaseMetadataScriptTests
                 public const string Json = @"{""TotalCommands"":{{canonicalTools}},""TotalOperations"":{{canonicalOperations - 1}},""Commands"":[{""Name"":""diag"",""Actions"":[""self-test""]}]}";
             }
             """);
+        var toolNames = Enumerable.Range(1, canonicalTools - 1)
+            .Select(index => $"[McpServerTool(Name = \"tool-{index}\")]")
+            .Concat(Enumerable.Range(1, canonicalMcpTools - canonicalTools)
+                .Select(index => $"[McpServerTool(Name = \"tool-{index}_read\")]"))
+            .Append("[McpServerTool(Name = \"file\")]");
         WriteFile(
             sandbox,
-            Path.Combine("src", "ExcelMcp.McpServer", "Tools.cs"),
-            string.Join(
-                Environment.NewLine,
-                Enumerable.Range(1, canonicalTools - 1)
-                    .Select(index => $"[McpServerTool(Name = \"tool-{index}\")]")) +
-                Environment.NewLine +
-                "[McpServerTool(Name = \"file\")]");
+            Path.Combine("src", "ExcelMcp.McpServer", "obj", "GeneratedFiles", "Tools.g.cs"),
+            string.Join(Environment.NewLine, toolNames));
+        WriteFile(
+            sandbox,
+            Path.Combine("src", "ExcelMcp.Core", "obj", "GeneratedFiles", "ExcelMcp.Generators",
+                "Sbroenne.ExcelMcp.Generators.ServiceRegistryGenerator", "ServiceRegistry.Contracts.g.cs"),
+            string.Join(Environment.NewLine, Enumerable.Range(1, canonicalMcpTools - canonicalTools)
+                .Select(index => $"case \"tool-{index}_read\":")));
         WriteFile(
             sandbox,
             Path.Combine("src", "ExcelMcp.McpServer", "Program.cs"),

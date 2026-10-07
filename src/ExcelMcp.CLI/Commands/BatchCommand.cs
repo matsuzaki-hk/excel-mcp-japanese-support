@@ -35,7 +35,7 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
         public bool StopOnError { get; init; }
     }
 
-    protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         // Read commands from file or stdin
         List<BatchEntry> commands;
@@ -164,19 +164,26 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
                 activeSession = null;
             }
 
-            // Output result as NDJSON line
+            // Output result as NDJSON line. A delivered result reporting success:false
+            // is a failed item, matching single-command exit codes and MCP isError.
+            var negativeResult = ServiceResultOutcome.TryReadNegative(
+                response.Success ? response.Result : null,
+                out var resultErrorMessage,
+                out _);
+            var itemSucceeded = response.Success && !negativeResult;
             var output = new BatchResult
             {
                 Index = i,
                 Command = cmd.Command,
-                Success = response.Success,
+                Success = itemSucceeded,
                 Result = response.Success ? TryParseJsonElement(response.Result) : null,
-                Error = response.ErrorMessage
+                Error = response.ErrorMessage ?? resultErrorMessage ??
+                    (negativeResult ? "Command reported success: false; see result for details." : null)
             };
 
             CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(output, BatchJsonOptions));
 
-            if (!response.Success)
+            if (!itemSucceeded)
             {
                 hasErrors = true;
                 if (settings.StopOnError) break;

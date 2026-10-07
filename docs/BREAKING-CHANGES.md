@@ -6,14 +6,26 @@ For the complete release history, see [CHANGELOG.md](../CHANGELOG.md).
 AI assistants should discover the current contract through MCP `tools/list` or
 `excelcli --help` rather than relying on hardcoded parameter lists.
 
-## Unreleased - Consistent MCP Session Identifiers
+## Unreleased - MCP Read-Only Endpoints
 
-MCP session identifiers now use `session_id` in inputs, open/create results,
-file-list entries, and session error context. Update clients that read
-`sessionId` from file-list entries or errors.
+MCP actions marked read-only now appear on dedicated `<tool>_read` endpoints.
+Use each endpoint's schema to see its available actions. The original tool names
+remain for write actions; their descriptions cover only their retained actions.
+For example, use `file_read` for `list` and `test`,
+`file` for `open`, `create`, and `close`, and `worksheet_read` for listing sheets.
+The screenshot endpoint remains `screenshot`, now marked read-only.
+Python `get-result` remains on `pythoninexcel` because it starts calculation,
+which can execute cloud Python and pending formulas in other owned workbooks.
+Window `get-view` remains on `window` because it activates the requested window
+and worksheet. These actions are not inspection-only despite their names.
 
-The old `sessionId` input is no longer accepted, even when the same request also
-includes `session_id`. Use only `session_id` for session-based MCP actions.
+## Unreleased - MCP Workbook Session Input Workaround
+
+MCP tools that target an open workbook now use `workbook_session_id` instead
+of `session_id` in inputs and results. This is a workaround for a Claude
+Desktop bridge issue that can drop MCP inputs named `session_id`. No alias is
+exposed.
+
 CLI JSON still uses `sessionId`; CLI and MCP sessions remain separate.
 
 ## Unreleased - Compact Power Query List Model

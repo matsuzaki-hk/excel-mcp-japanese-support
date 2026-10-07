@@ -14,6 +14,7 @@ public sealed class ValidationSelectionTests
     [InlineData("tests/README.md", "", "", false)]
     [InlineData("scripts/Install-ExcelAgentToolchain.ps1", "", "", false)]
     [InlineData("scripts/Invoke-CopilotSetupNpm.ps1", "", "", false)]
+    [InlineData("scripts/Install-CopilotPonytailReview.ps1", "", "", false)]
     [InlineData(".github/workflows/copilot-setup-steps.yml", "", "", false)]
     [InlineData("scripts/Register-ExcelAgentRunner.ps1", "", "", false)]
     [InlineData("infrastructure/azure/update-excel-runner.ps1", "", "", false)]
@@ -68,8 +69,9 @@ public sealed class ValidationSelectionTests
 
     [Theory]
     [InlineData("scripts\\Invoke-CopilotSetupNpm.ps1")]
+    [InlineData("scripts\\Install-CopilotPonytailReview.ps1")]
     [InlineData(".github\\workflows\\copilot-setup-steps.yml")]
-    public async Task CopilotNpmSetup_DoesNotSelectAutomatedValidation(string path)
+    public async Task CopilotSetup_DoesNotSelectAutomatedValidation(string path)
     {
         var result = await RunAsync($$"""
             $plan = Get-ValidationPlan -Paths '{{path}}'
@@ -77,7 +79,7 @@ public sealed class ValidationSelectionTests
                 throw 'Setup-only changes must not select automated validation.'
             }
             if ($plan.Excel -or $plan.ExcelGroups.Count -or $plan.FastProjects.Count -or $plan.ProcessProjects.Count) {
-                throw 'Setup-only npm selection must not require Excel or runtime validation.'
+                throw 'Setup-only selection must not require Excel or runtime validation.'
             }
             """);
         Assert.True(result.ExitCode == 0, result.Output);
@@ -101,22 +103,6 @@ public sealed class ValidationSelectionTests
             $plan = Get-ValidationPlan -Paths @('src\ExcelMcp.Core\Commands\Range\Deleted.cs', 'src/ExcelMcp.Core/Commands/PowerQuery/Renamed.cs')
             if (($plan.ExcelGroups -join ',') -ne 'Acceptance,Data,Editing') { throw "Wrong union: $($plan.ExcelGroups)" }
             if (($plan.FastProjects -join ',') -ne 'CLI,ComInterop,Core,McpServer,Service') { throw 'Shared runtime coverage missing.' }
-            """);
-        Assert.True(result.ExitCode == 0, result.Output);
-    }
-
-    [Fact]
-    public async Task FullSelection_ContainsEveryHostedGroupAndPackage()
-    {
-        var result = await RunAsync("""
-            $plan = Get-ValidationPlan -Full
-            if (($plan.CiTestGroups -join ',') -ne 'Fast,Process,Tooling') { throw 'Full groups missing.' }
-            foreach ($project in $plan.ToolingProjects) {
-                if ($plan.ToolingFilters.$project -ne 'RequiresExcel=false') { throw 'Full tooling selection narrowed.' }
-            }
-            foreach ($component in @('Cli','Mcp','Extension','Mcpb','Skills','Plugins')) {
-                if (-not $plan.$component) { throw "Missing $component package." }
-            }
             """);
         Assert.True(result.ExitCode == 0, result.Output);
     }

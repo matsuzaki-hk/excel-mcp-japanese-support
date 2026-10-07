@@ -25,7 +25,7 @@ public sealed class CalculationSettingsProtocolTests(RecordingProgramTransportFi
         var call = await fixture.CallToolAsync("calculation_mode", new()
         {
             ["action"] = "set-settings",
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["iteration_enabled"] = false,
             ["maximum_iterations"] = 37,
             ["maximum_change"] = 0.0002,
@@ -44,7 +44,7 @@ public sealed class CalculationSettingsProtocolTests(RecordingProgramTransportFi
         var call = await fixture.CallToolAsync("calculation_mode", new()
         {
             ["action"] = "calculate",
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["scope"] = "application",
             ["kind"] = kind
         }, RecordingToolTest.Success("""{"success":true}"""), "calculation.calculate", expected);
@@ -64,7 +64,7 @@ public sealed class CalculationSettingsProtocolTests(RecordingProgramTransportFi
         var call = await fixture.CallToolAsync("calculation_mode", new()
         {
             ["action"] = "set-precision",
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["precision_as_displayed"] = enabled,
             ["allow_precision_loss"] = enabled
         }, RecordingToolTest.Success("""{"success":true}"""), "calculation.set-precision", expected);
@@ -81,7 +81,7 @@ public sealed class CalculationSettingsProtocolTests(RecordingProgramTransportFi
         Dictionary<string, object?> arguments = new()
         {
             ["action"] = "calculate",
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["scope"] = scope
         };
         if (sheetName is not null)
@@ -115,7 +115,7 @@ public sealed class CalculationSettingsProtocolTests(RecordingProgramTransportFi
         var result = await fixture.CallResultWithoutDispatchAsync("calculation_mode", new()
         {
             ["action"] = action,
-            ["session_id"] = "session-1"
+            ["workbook_session_id"] = "session-1"
         });
         Assert.True(result.IsError);
     }
@@ -126,7 +126,7 @@ public sealed class CalculationSettingsProtocolTests(RecordingProgramTransportFi
         var result = await fixture.CallResultWithoutDispatchAsync("calculation_mode", new()
         {
             ["action"] = "set-precision",
-            ["session_id"] = "session-1"
+            ["workbook_session_id"] = "session-1"
         });
         Assert.True(result.IsError);
     }
@@ -138,7 +138,8 @@ public sealed class CalculationSettingsProtocolTests(RecordingProgramTransportFi
         var tool = Assert.Single(tools, item => item.Name == "calculation_mode");
         Assert.Contains("ALL open workbooks", tool.Description, StringComparison.Ordinal);
         Assert.Contains("stored numeric precision is permanently lost", tool.Description, StringComparison.Ordinal);
-        Assert.Contains("get-settings", tool.Description, StringComparison.Ordinal);
+        var read = Assert.Single(tools, item => item.Name == "calculation_mode_read");
+        Assert.Contains("get-settings", read.Description, StringComparison.Ordinal);
         Assert.True(tool.JsonSchema.GetProperty("properties").TryGetProperty("maximum_change", out _));
         Assert.True(tool.JsonSchema.GetProperty("properties").TryGetProperty("allow_precision_loss", out _));
     }

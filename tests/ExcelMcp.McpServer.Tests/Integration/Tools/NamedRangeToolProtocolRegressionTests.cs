@@ -19,11 +19,11 @@ public sealed class NamedRangeToolProtocolRegressionTests(
     {
         const string sessionId = "recording-session";
         var listCall = await _fixture.CallToolAsync(
-            "namedrange",
+            "namedrange_read",
             new Dictionary<string, object?>
             {
                 ["action"] = "list",
-                ["session_id"] = sessionId
+                ["workbook_session_id"] = sessionId
             },
             RecordingToolTest.Success(
                 """{"success":true,"namedRanges":[{"name":"CsvFolder","refersTo":"=Sheet1!$B$4","value":"C:\\Data"}]}"""),
@@ -45,11 +45,11 @@ public sealed class NamedRangeToolProtocolRegressionTests(
         }
 
         var worksheetCall = await _fixture.CallToolAsync(
-            "worksheet",
+            "worksheet_read",
             new Dictionary<string, object?>
             {
                 ["action"] = "list",
-                ["session_id"] = sessionId
+                ["workbook_session_id"] = sessionId
             },
             RecordingToolTest.Success(
                 """{"success":true,"worksheets":[{"name":"Sheet1"}]}"""),

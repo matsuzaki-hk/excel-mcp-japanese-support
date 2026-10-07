@@ -32,11 +32,11 @@ public sealed class McpSessionLifetimeTests(ITestOutputHelper output)
         try
         {
             var first = await CallAsync(host.Client, "file", new() { ["action"] = "create", ["path"] = firstPath });
-            var firstId = first.GetProperty("session_id").GetString()!;
+            var firstId = first.GetProperty("workbook_session_id").GetString()!;
             await CallAsync(host.Client, "range", new()
             {
                 ["action"] = "set-values",
-                ["session_id"] = firstId,
+                ["workbook_session_id"] = firstId,
                 ["sheet_name"] = "Sheet1",
                 ["range_address"] = "A1",
                 ["values"] = new object[][] { ["keep"] }
@@ -69,13 +69,13 @@ public sealed class McpSessionLifetimeTests(ITestOutputHelper output)
             var closedId = await backend.Closed.Task.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.NotEqual(firstId, closedId);
 
-            var sessions = await CallAsync(host.Client, "file", new() { ["action"] = "list" });
+            var sessions = await CallAsync(host.Client, "file_read", new() { ["action"] = "list" });
             Assert.Equal(firstId, Assert.Single(sessions.GetProperty("sessions").EnumerateArray())
-                .GetProperty("session_id").GetString());
-            var values = await CallAsync(host.Client, "range", new()
+                .GetProperty("workbook_session_id").GetString());
+            var values = await CallAsync(host.Client, "range_read", new()
             {
                 ["action"] = "get-values",
-                ["session_id"] = firstId,
+                ["workbook_session_id"] = firstId,
                 ["sheet_name"] = "Sheet1",
                 ["range_address"] = "A1"
             });
@@ -115,17 +115,17 @@ public sealed class McpSessionLifetimeTests(ITestOutputHelper output)
         try
         {
             var created = await CallAsync(host.Client, "file", new() { ["action"] = "create", ["path"] = path });
-            var id = created.GetProperty("session_id").GetString()!;
+            var id = created.GetProperty("workbook_session_id").GetString()!;
             await CallAsync(host.Client, "range", new()
             {
                 ["action"] = "set-values",
-                ["session_id"] = id,
+                ["workbook_session_id"] = id,
                 ["sheet_name"] = "Sheet1",
                 ["range_address"] = "A1",
                 ["values"] = new object[][] { ["saved-on-shutdown"] }
             });
             if (discard)
-                await CallAsync(host.Client, "file", new() { ["action"] = "close", ["session_id"] = id, ["save"] = false });
+                await CallAsync(host.Client, "file", new() { ["action"] = "close", ["workbook_session_id"] = id, ["save"] = false });
         }
         finally
         {
@@ -139,10 +139,10 @@ public sealed class McpSessionLifetimeTests(ITestOutputHelper output)
         try
         {
             var opened = await CallAsync(reader.Client, "file", new() { ["action"] = "open", ["path"] = path });
-            var values = await CallAsync(reader.Client, "range", new()
+            var values = await CallAsync(reader.Client, "range_read", new()
             {
                 ["action"] = "get-values",
-                ["session_id"] = opened.GetProperty("session_id").GetString(),
+                ["workbook_session_id"] = opened.GetProperty("workbook_session_id").GetString(),
                 ["sheet_name"] = "Sheet1",
                 ["range_address"] = "A1"
             });

@@ -42,7 +42,7 @@ internal abstract class ServiceCommandBase<TSettings> : AsyncCommand<TSettings>
     /// Validates settings and executes the command.
     /// Returns early with error code if validation fails.
     /// </summary>
-    protected sealed override async Task<int> ExecuteAsync(CommandContext context, TSettings settings, CancellationToken cancellationToken)
+    public sealed override async Task<int> ExecuteAsync(CommandContext context, TSettings settings, CancellationToken cancellationToken)
     {
         // Session validation
         var sessionId = GetSessionId(settings);
@@ -100,6 +100,18 @@ internal abstract class ServiceCommandBase<TSettings> : AsyncCommand<TSettings>
             var result = !string.IsNullOrEmpty(response.Result)
                 ? response.Result
                 : JsonSerializer.Serialize(new { success = true }, ServiceProtocol.JsonOptions);
+
+            // A delivered result can still report a failed operation (success:false).
+            // Print it as-is so the details are visible, and exit nonzero like MCP's isError.
+            if (ServiceResultOutcome.TryReadNegative(result, out _, out var errorCategory))
+            {
+                if (!string.IsNullOrWhiteSpace(errorCategory))
+                {
+                    CliTelemetry.RecordFinalFailure(errorCategory);
+                }
+                CliCommandRuntime.Current.Output.WriteLine(result);
+                return 1;
+            }
 
             if (!string.IsNullOrEmpty(outputPath))
             {

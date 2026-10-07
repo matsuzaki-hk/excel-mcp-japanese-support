@@ -45,7 +45,7 @@ public static class ExcelToolsBase
             errorMessage,
             errorCategory = response.ErrorCategory,
             command = response.Command,
-            session_id = response.SessionId,
+            workbook_session_id = response.SessionId,
             exceptionType = response.ExceptionType,
             hresult = response.HResult,
             innerError = response.InnerError,
@@ -93,9 +93,13 @@ public static class ExcelToolsBase
         }
         catch (Exception ex)
         {
-            invocation = new(ToolInvocationOutcome.Failed, ex is JsonException
-                ? ToolFailureClass.InternalProductFault
-                : ClassifyFailure(OperationFailureClassifier.Classify(ex)));
+            var failureCategory = OperationFailureClassifier.Classify(ex);
+            invocation = new(
+                ToolInvocationOutcome.Failed,
+                ex is JsonException
+                    ? ToolFailureClass.InternalProductFault
+                    : ClassifyFailure(failureCategory),
+                ClassifyFailureCause(failureCategory));
             throw; // Let the SDK preserve cancellation and redact unexpected invocation errors.
         }
         finally
@@ -131,17 +135,27 @@ public static class ExcelToolsBase
 
         var negative = root.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.False;
         var error = root.TryGetProperty("isError", out var isError) && isError.ValueKind == JsonValueKind.True;
-        if (negative && !error && toolName == "file" && actionName == "test")
+        if (negative && !error && toolName == "file_read" && actionName == "test")
             return new(ToolInvocationOutcome.ExpectedNegative, null);
 
         if (negative || error)
         {
             var category = root.TryGetProperty("errorCategory", out var property)
                 && property.ValueKind == JsonValueKind.String ? property.GetString() : null;
-            return new(ToolInvocationOutcome.Failed, ClassifyFailure(category));
+            return new(
+                ToolInvocationOutcome.Failed,
+                ClassifyFailure(category),
+                ClassifyFailureCause(category));
         }
         return new(ToolInvocationOutcome.Succeeded, null);
     }
+
+    private static ToolFailureCause? ClassifyFailureCause(string? category) => category switch
+    {
+        "Timeout" => ToolFailureCause.Timeout,
+        "Cancelled" => ToolFailureCause.Cancellation,
+        _ => null
+    };
 
     private static ToolFailureClass ClassifyFailure(string? category) => category switch
     {

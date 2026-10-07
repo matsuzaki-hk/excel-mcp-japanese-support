@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
+using Sbroenne.ExcelMcp.Tests.Infrastructure;
 using Xunit;
 using Excel = Microsoft.Office.Interop.Excel;
 
@@ -7,59 +9,209 @@ namespace Sbroenne.ExcelMcp.Service.Tests;
 
 public sealed partial class PersistentServiceSheetTests
 {
+    private static readonly ConcurrentDictionary<(string? Sheet, bool DuplicateGuard), SavedWorkbookTemplateStore>
+        MarkedWorkbookTemplates = new();
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public void CrossFile_CancelledSave_ReportsExactPersistedState(bool move, bool cancelSource)
+    {
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(CrossFile_CancelledSave_ReportsExactPersistedState), "TransferSheet");
+        var sourceBytes = File.ReadAllBytes(sourceFile);
+        var targetBytes = File.ReadAllBytes(targetFile);
+        var cancelledPath = cancelSource ? sourceFile : targetFile;
+        var eventCount = 0;
+        var originalHook = ExcelBatch.AfterWorkbookOpenHookForTests;
+        try
+        {
+            ExcelBatch.AfterWorkbookOpenHookForTests = (application, openedWorkbook) =>
+            {
+                var app = (Excel.Application)application;
+                var workbook = (Excel.Workbook)openedWorkbook;
+                if (!string.Equals(workbook.FullName, targetFile, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                Excel.AppEvents_WorkbookBeforeSaveEventHandler? cancelSave = null;
+                cancelSave = (Excel.Workbook savingWorkbook, bool _, ref bool cancel) =>
+                {
+                    if (string.Equals(savingWorkbook.FullName, cancelledPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        eventCount++;
+                        cancel = true;
+                        app.WorkbookBeforeSave -= cancelSave;
+                    }
+                };
+                app.WorkbookBeforeSave += cancelSave;
+            };
+            var error = Assert.Throws<InvalidOperationException>(() =>
+            {
+                if (move)
+                {
+                    _sheetCommands.MoveToFile(sourceFile, "TransferSheet", targetFile);
+                }
+                else
+                {
+                    _sheetCommands.CopyToFile(sourceFile, "TransferSheet", targetFile);
+                }
+            });
+            ExcelBatch.AfterWorkbookOpenHookForTests = originalHook;
+
+            Assert.Equal(1, eventCount);
+            Assert.Contains("save was not confirmed", error.Message, StringComparison.Ordinal);
+            Assert.Contains("Temporary sessions will close without another save", error.Message, StringComparison.Ordinal);
+            if (move)
+            {
+                Assert.Contains(
+                    cancelSource ? "source save was not confirmed" : "Excel confirmed the source save",
+                    error.Message, StringComparison.Ordinal);
+                Assert.Contains("No rollback was performed", error.Message, StringComparison.Ordinal);
+            }
+            var sourceSaved = move && !cancelSource;
+            AssertWorkbookStates(
+                sourceFile, sourceSaved ? ["Sheet1"] : ["TransferSheet", "Sheet1"],
+                sourceSaved ? null : "TransferSheet",
+                targetFile, ["Sheet1"]);
+            if (!sourceSaved)
+            {
+                Assert.Equal(sourceBytes, File.ReadAllBytes(sourceFile));
+            }
+            Assert.Equal(targetBytes, File.ReadAllBytes(targetFile));
+        }
+        finally
+        {
+            ExcelBatch.AfterWorkbookOpenHookForTests = originalHook;
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public void CrossFile_ReadOnlyWorkbook_RejectsBeforeChangingEitherFile(
+        bool move, bool readOnlySource)
+    {
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(CrossFile_ReadOnlyWorkbook_RejectsBeforeChangingEitherFile),
+            "TransferSheet");
+        var sourceBytes = File.ReadAllBytes(sourceFile);
+        var targetBytes = File.ReadAllBytes(targetFile);
+        var readOnlyFile = readOnlySource ? sourceFile : targetFile;
+        var originalAttributes = File.GetAttributes(readOnlyFile);
+        var originalOpenHook = ExcelBatch.BeforeWorkbookOpenHook;
+        try
+        {
+            // Change permissions after filesystem preflight so Excel determines read-only access.
+            ExcelBatch.BeforeWorkbookOpenHook = (path, _) =>
+            {
+                if (string.Equals(path, readOnlyFile, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.SetAttributes(readOnlyFile, originalAttributes | FileAttributes.ReadOnly);
+                }
+            };
+            using (var batch = ExcelSession.BeginBatch(sourceFile, targetFile))
+            {
+                batch.Execute((_, _) =>
+                {
+                    Assert.Equal(readOnlySource, batch.GetWorkbook(sourceFile).ReadOnly);
+                    Assert.Equal(!readOnlySource, batch.GetWorkbook(targetFile).ReadOnly);
+                    Assert.True(batch.GetWorkbook(sourceFile).Saved);
+                    Assert.True(batch.GetWorkbook(targetFile).Saved);
+                });
+            }
+            File.SetAttributes(readOnlyFile, originalAttributes);
+
+            var error = Assert.Throws<InvalidOperationException>(() =>
+            {
+                if (move)
+                {
+                    _sheetCommands.MoveToFile(sourceFile, "TransferSheet", targetFile);
+                }
+                else
+                {
+                    _sheetCommands.CopyToFile(sourceFile, "TransferSheet", targetFile);
+                }
+            });
+
+            ExcelBatch.BeforeWorkbookOpenHook = originalOpenHook;
+            File.SetAttributes(readOnlyFile, originalAttributes);
+            Assert.Contains("Cannot change this workbook", error.Message, StringComparison.Ordinal);
+            Assert.Contains("read-only", error.Message, StringComparison.Ordinal);
+            Assert.Contains(
+                "This operation has not changed the workbook.", error.Message, StringComparison.Ordinal);
+            AssertWorkbookState(sourceFile, ["TransferSheet", "Sheet1"], "TransferSheet");
+            AssertWorkbookState(targetFile, ["Sheet1"]);
+            Assert.Equal(sourceBytes, File.ReadAllBytes(sourceFile));
+            Assert.Equal(targetBytes, File.ReadAllBytes(targetFile));
+        }
+        finally
+        {
+            ExcelBatch.BeforeWorkbookOpenHook = originalOpenHook;
+            File.SetAttributes(readOnlyFile, originalAttributes);
+        }
+    }
+
     [Fact]
     public void CopyToFile_WithTargetName_CopiesAndRenames()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(CopyToFile_WithTargetName_CopiesAndRenames), "Source", "SourceSheet");
-        var targetFile = CreateMarkedWorkbook(nameof(CopyToFile_WithTargetName_CopiesAndRenames), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(CopyToFile_WithTargetName_CopiesAndRenames), "SourceSheet");
 
         RequireSuccess(_sheetCommands.CopyToFile(sourceFile, "SourceSheet", targetFile, "CopiedSheet"));
 
-        AssertWorkbookState(targetFile, ["Sheet1", "CopiedSheet"], "CopiedSheet");
-        AssertWorkbookState(sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet");
+        AssertWorkbookStates(
+            sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet",
+            targetFile, ["Sheet1", "CopiedSheet"], "CopiedSheet");
     }
 
     [Fact]
     public void CopyToFile_NoTargetName_CopiesWithOriginalName()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(CopyToFile_NoTargetName_CopiesWithOriginalName), "Source", "SourceSheet");
-        var targetFile = CreateMarkedWorkbook(nameof(CopyToFile_NoTargetName_CopiesWithOriginalName), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(CopyToFile_NoTargetName_CopiesWithOriginalName), "SourceSheet");
 
         RequireSuccess(_sheetCommands.CopyToFile(sourceFile, "SourceSheet", targetFile));
 
-        AssertWorkbookState(targetFile, ["Sheet1", "SourceSheet"], "SourceSheet");
-        AssertWorkbookState(sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet");
+        AssertWorkbookStates(
+            sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet",
+            targetFile, ["Sheet1", "SourceSheet"], "SourceSheet");
     }
 
     [Fact]
     public void CopyToFile_WithBeforeSheet_PositionsCorrectly()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(CopyToFile_WithBeforeSheet_PositionsCorrectly), "Source", "SourceSheet");
-        var targetFile = CreateMarkedWorkbook(nameof(CopyToFile_WithBeforeSheet_PositionsCorrectly), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(CopyToFile_WithBeforeSheet_PositionsCorrectly), "SourceSheet");
 
         RequireSuccess(_sheetCommands.CopyToFile(sourceFile, "SourceSheet", targetFile, "Copied", beforeSheet: "Sheet1"));
 
-        AssertWorkbookState(targetFile, ["Copied", "Sheet1"], "Copied");
-        AssertWorkbookState(sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet");
+        AssertWorkbookStates(
+            sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet",
+            targetFile, ["Copied", "Sheet1"], "Copied");
     }
 
     [Fact]
     public void CopyToFile_WithAfterSheet_PositionsCorrectly()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(CopyToFile_WithAfterSheet_PositionsCorrectly), "Source", "SourceSheet");
-        var targetFile = CreateMarkedWorkbook(nameof(CopyToFile_WithAfterSheet_PositionsCorrectly), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(CopyToFile_WithAfterSheet_PositionsCorrectly), "SourceSheet");
 
         RequireSuccess(_sheetCommands.CopyToFile(sourceFile, "SourceSheet", targetFile, "Copied", afterSheet: "Sheet1"));
 
-        AssertWorkbookState(targetFile, ["Sheet1", "Copied"], "Copied");
-        AssertWorkbookState(sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet");
+        AssertWorkbookStates(
+            sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet",
+            targetFile, ["Sheet1", "Copied"], "Copied");
     }
 
     [Fact]
     public void CopyToFile_BothBeforeAndAfter_ThrowsException()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(CopyToFile_BothBeforeAndAfter_ThrowsException), "Source", "SourceSheet");
-        var targetFile = CreateMarkedWorkbook(nameof(CopyToFile_BothBeforeAndAfter_ThrowsException), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(CopyToFile_BothBeforeAndAfter_ThrowsException), "SourceSheet");
         var sourceBytes = File.ReadAllBytes(sourceFile);
         var targetBytes = File.ReadAllBytes(targetFile);
 
@@ -75,8 +227,9 @@ public sealed partial class PersistentServiceSheetTests
             "both beforeSheet and afterSheet",
             exception.Message,
             StringComparison.OrdinalIgnoreCase);
-        AssertWorkbookState(targetFile, ["Sheet1"]);
-        AssertWorkbookState(sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet");
+        AssertWorkbookStates(
+            sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet",
+            targetFile, ["Sheet1"]);
         Assert.Equal(sourceBytes, File.ReadAllBytes(sourceFile));
         Assert.Equal(targetBytes, File.ReadAllBytes(targetFile));
     }
@@ -131,12 +284,8 @@ public sealed partial class PersistentServiceSheetTests
     [InlineData("   ")]
     public void CopyToFile_InvalidTargetSheetName_RejectsBeforeChangingEitherFile(string invalidName)
     {
-        var sourceFile = CreateWorkbookWithSheet(
-            nameof(CopyToFile_InvalidTargetSheetName_RejectsBeforeChangingEitherFile),
-            "Source", "SourceSheet");
-        var targetFile = CreateMarkedWorkbook(
-            nameof(CopyToFile_InvalidTargetSheetName_RejectsBeforeChangingEitherFile),
-            "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(CopyToFile_InvalidTargetSheetName_RejectsBeforeChangingEitherFile), "SourceSheet");
         var sourceBytes = File.ReadAllBytes(sourceFile);
         var targetBytes = File.ReadAllBytes(targetFile);
 
@@ -144,8 +293,9 @@ public sealed partial class PersistentServiceSheetTests
             _sheetCommands.CopyToFile(sourceFile, "SourceSheet", targetFile, invalidName));
 
         Assert.Contains("Worksheet names must", error.Message, StringComparison.Ordinal);
-        AssertWorkbookState(sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet");
-        AssertWorkbookState(targetFile, ["Sheet1"]);
+        AssertWorkbookStates(
+            sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet",
+            targetFile, ["Sheet1"]);
         Assert.Equal(sourceBytes, File.ReadAllBytes(sourceFile));
         Assert.Equal(targetBytes, File.ReadAllBytes(targetFile));
     }
@@ -153,13 +303,9 @@ public sealed partial class PersistentServiceSheetTests
     [Fact]
     public void CopyToFile_ExistingTargetSheetName_RejectsWithoutChangingEitherFile()
     {
-        var sourceFile = CreateWorkbookWithSheet(
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
             nameof(CopyToFile_ExistingTargetSheetName_RejectsWithoutChangingEitherFile),
-            "Source",
-            "SourceSheet");
-        var targetFile = CreateMarkedWorkbook(
-            nameof(CopyToFile_ExistingTargetSheetName_RejectsWithoutChangingEitherFile),
-            "Target", "CopiedSheet", duplicateGuard: true);
+            "SourceSheet", "CopiedSheet", targetDuplicateGuard: true);
         var sourceBytes = File.ReadAllBytes(sourceFile);
         var targetBytes = File.ReadAllBytes(targetFile);
 
@@ -167,8 +313,9 @@ public sealed partial class PersistentServiceSheetTests
             _sheetCommands.CopyToFile(sourceFile, "SourceSheet", targetFile, "CopiedSheet"));
 
         Assert.Contains("already exists", error.Message, StringComparison.OrdinalIgnoreCase);
-        AssertWorkbookState(sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet");
-        AssertWorkbookState(targetFile, ["CopiedSheet", "Sheet1"], "CopiedSheet", duplicateGuard: true);
+        AssertWorkbookStates(
+            sourceFile, ["SourceSheet", "Sheet1"], "SourceSheet",
+            targetFile, ["CopiedSheet", "Sheet1"], "CopiedSheet", targetDuplicateGuard: true);
         Assert.Equal(sourceBytes, File.ReadAllBytes(sourceFile));
         Assert.Equal(targetBytes, File.ReadAllBytes(targetFile));
     }
@@ -176,44 +323,47 @@ public sealed partial class PersistentServiceSheetTests
     [Fact]
     public void MoveToFile_Default_MovesSheetSuccessfully()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(MoveToFile_Default_MovesSheetSuccessfully), "Source", "MoveMe");
-        var targetFile = CreateMarkedWorkbook(nameof(MoveToFile_Default_MovesSheetSuccessfully), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(MoveToFile_Default_MovesSheetSuccessfully), "MoveMe");
 
         RequireSuccess(_sheetCommands.MoveToFile(sourceFile, "MoveMe", targetFile));
 
-        AssertWorkbookState(targetFile, ["Sheet1", "MoveMe"], "MoveMe");
-        AssertWorkbookState(sourceFile, ["Sheet1"]);
+        AssertWorkbookStates(
+            sourceFile, ["Sheet1"], null,
+            targetFile, ["Sheet1", "MoveMe"], "MoveMe");
     }
 
     [Fact]
     public void MoveToFile_WithBeforeSheet_PositionsCorrectly()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(MoveToFile_WithBeforeSheet_PositionsCorrectly), "Source", "MoveMe");
-        var targetFile = CreateMarkedWorkbook(nameof(MoveToFile_WithBeforeSheet_PositionsCorrectly), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(MoveToFile_WithBeforeSheet_PositionsCorrectly), "MoveMe");
 
         RequireSuccess(_sheetCommands.MoveToFile(sourceFile, "MoveMe", targetFile, beforeSheet: "Sheet1"));
 
-        AssertWorkbookState(targetFile, ["MoveMe", "Sheet1"], "MoveMe");
-        AssertWorkbookState(sourceFile, ["Sheet1"]);
+        AssertWorkbookStates(
+            sourceFile, ["Sheet1"], null,
+            targetFile, ["MoveMe", "Sheet1"], "MoveMe");
     }
 
     [Fact]
     public void MoveToFile_WithAfterSheet_PositionsCorrectly()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(MoveToFile_WithAfterSheet_PositionsCorrectly), "Source", "MoveMe");
-        var targetFile = CreateMarkedWorkbook(nameof(MoveToFile_WithAfterSheet_PositionsCorrectly), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(MoveToFile_WithAfterSheet_PositionsCorrectly), "MoveMe");
 
         RequireSuccess(_sheetCommands.MoveToFile(sourceFile, "MoveMe", targetFile, afterSheet: "Sheet1"));
 
-        AssertWorkbookState(targetFile, ["Sheet1", "MoveMe"], "MoveMe");
-        AssertWorkbookState(sourceFile, ["Sheet1"]);
+        AssertWorkbookStates(
+            sourceFile, ["Sheet1"], null,
+            targetFile, ["Sheet1", "MoveMe"], "MoveMe");
     }
 
     [Fact]
     public void MoveToFile_BothBeforeAndAfter_ThrowsException()
     {
-        var sourceFile = CreateWorkbookWithSheet(nameof(MoveToFile_BothBeforeAndAfter_ThrowsException), "Source", "MoveMe");
-        var targetFile = CreateMarkedWorkbook(nameof(MoveToFile_BothBeforeAndAfter_ThrowsException), "Target");
+        var (sourceFile, targetFile) = CreateMarkedWorkbookPair(
+            nameof(MoveToFile_BothBeforeAndAfter_ThrowsException), "MoveMe");
         var sourceBytes = File.ReadAllBytes(sourceFile);
         var targetBytes = File.ReadAllBytes(targetFile);
 
@@ -228,8 +378,9 @@ public sealed partial class PersistentServiceSheetTests
             "both beforeSheet and afterSheet",
             exception.Message,
             StringComparison.OrdinalIgnoreCase);
-        AssertWorkbookState(targetFile, ["Sheet1"]);
-        AssertWorkbookState(sourceFile, ["MoveMe", "Sheet1"], "MoveMe");
+        AssertWorkbookStates(
+            sourceFile, ["MoveMe", "Sheet1"], "MoveMe",
+            targetFile, ["Sheet1"]);
         Assert.Equal(sourceBytes, File.ReadAllBytes(sourceFile));
         Assert.Equal(targetBytes, File.ReadAllBytes(targetFile));
     }
@@ -247,94 +398,151 @@ public sealed partial class PersistentServiceSheetTests
         Assert.Equal(before, File.ReadAllBytes(testFile));
     }
 
-    private string CreateWorkbookWithSheet(
+    private (string Source, string Target) CreateMarkedWorkbookPair(
         string scenario,
-        string suffix,
-        string sheetName) => CreateMarkedWorkbook(scenario, suffix, sheetName);
+        string sourceSheet,
+        string? targetSheet = null,
+        bool targetDuplicateGuard = false)
+    {
+        var sourceFile = CreateMarkedWorkbook(scenario, "Source", sourceSheet);
+        var targetFile = CreateMarkedWorkbook(scenario, "Target", targetSheet, targetDuplicateGuard);
+        return (sourceFile, targetFile);
+    }
 
     private string CreateMarkedWorkbook(
         string scenario, string suffix, string? additionalSheet = null, bool duplicateGuard = false)
     {
-        var path = _fixture.CreateBlankWorkbook(scenario, suffix);
-        using var batch = ExcelSession.BeginBatch(path);
-        batch.Execute((context, _) =>
+        var safeScenario = string.Concat(
+            scenario.Select(character =>
+                Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+        var path = Path.Combine(
+            Path.GetDirectoryName(_fixture.WorkbookPath)!,
+            $"{safeScenario}_{suffix}_{Guid.NewGuid():N}.xlsx");
+        var key = (additionalSheet, duplicateGuard);
+        var templates = MarkedWorkbookTemplates.GetOrAdd(
+            key,
+            static key => SavedWorkbookTemplates.CreateStore(
+                templatePath => CreateMarkedWorkbookTemplate(templatePath, key.Sheet, key.DuplicateGuard)));
+        templates.CopyTo(path, $"{additionalSheet ?? "base"}-{duplicateGuard}");
+        return path;
+    }
+
+    private static void CreateMarkedWorkbookTemplate(
+        string templatePath, string? additionalSheet, bool duplicateGuard)
+    {
+        using var manager = new SessionManager();
+        var sessionId = manager.CreateSessionForNewFile(templatePath, show: false);
+        var batch = manager.GetSession(sessionId)
+            ?? throw new InvalidOperationException("The marked workbook template session was not created.");
+        batch.Execute((context, _) => SeedWorkbook(context.Book, additionalSheet, duplicateGuard));
+        if (!manager.CloseSession(sessionId, save: true))
         {
-            Excel.Sheets? sheets = null;
-            Excel.Worksheet? sheet = null;
-            Excel.Range? values = null;
-            Excel.Range? formula = null;
-            try
-            {
-                sheets = context.Book.Worksheets;
-                sheet = (Excel.Worksheet)sheets.Item["Sheet1"];
-                values = sheet.Range["A1:B1"];
-                values.Value2 = new object[,] { { "retained workbook marker", 71d } };
-                formula = sheet.Range["C1"];
-                formula.Formula = "=B1+8";
-                if (additionalSheet is not null)
-                {
-                    ComUtilities.Release(ref formula);
-                    ComUtilities.Release(ref values);
-                    ComUtilities.Release(ref sheet);
-                    sheet = (Excel.Worksheet)sheets.Add();
-                    sheet.Name = additionalSheet;
-                    values = sheet.Range["A1:B1"];
-                    values.Value2 = duplicateGuard
-                        ? new object[,] { { "duplicate guard", 12d } }
-                        : new object[,] { { "transferred marker", 3d } };
-                    formula = sheet.Range["C1"];
-                    formula.Formula = duplicateGuard ? "=B1+3" : "=B1*2";
-                }
-            }
-            finally
+            throw new InvalidOperationException("The marked workbook template could not be saved.");
+        }
+    }
+
+    private static void SeedWorkbook(
+        Excel.Workbook workbook,
+        string? additionalSheet,
+        bool duplicateGuard = false)
+    {
+        Excel.Sheets? sheets = null;
+        Excel.Worksheet? sheet = null;
+        Excel.Range? values = null;
+        Excel.Range? formula = null;
+        try
+        {
+            sheets = workbook.Worksheets;
+            sheet = (Excel.Worksheet)sheets.Item["Sheet1"];
+            values = sheet.Range["A1:B1"];
+            values.Value2 = new object[,] { { "retained workbook marker", 71d } };
+            formula = sheet.Range["C1"];
+            formula.Formula = "=B1+8";
+            if (additionalSheet is not null)
             {
                 ComUtilities.Release(ref formula);
                 ComUtilities.Release(ref values);
                 ComUtilities.Release(ref sheet);
-                ComUtilities.Release(ref sheets);
+                sheet = (Excel.Worksheet)sheets.Add();
+                sheet.Name = additionalSheet;
+                values = sheet.Range["A1:B1"];
+                values.Value2 = duplicateGuard
+                    ? new object[,] { { "duplicate guard", 12d } }
+                    : new object[,] { { "transferred marker", 3d } };
+                formula = sheet.Range["C1"];
+                formula.Formula = duplicateGuard ? "=B1+3" : "=B1*2";
             }
-        });
-        batch.Save();
-        return path;
+        }
+        finally
+        {
+            ComUtilities.Release(ref formula);
+            ComUtilities.Release(ref values);
+            ComUtilities.Release(ref sheet);
+            ComUtilities.Release(ref sheets);
+        }
     }
 
     private static void AssertWorkbookState(
         string workbookPath, string[] expectedNames, string? additionalSheet = null, bool duplicateGuard = false)
     {
         using var batch = ExcelSession.BeginBatch(workbookPath);
-        batch.Execute((context, _) =>
+        batch.Execute((context, _) => AssertWorkbookState(
+            context.Book, expectedNames, additionalSheet, duplicateGuard));
+    }
+
+    private static void AssertWorkbookStates(
+        string sourcePath,
+        string[] sourceExpectedNames,
+        string? sourceSheet,
+        string targetPath,
+        string[] targetExpectedNames,
+        string? targetSheet = null,
+        bool targetDuplicateGuard = false)
+    {
+        using var batch = ExcelSession.BeginBatch(sourcePath, targetPath);
+        batch.Execute((_, _) =>
         {
-            Excel.Sheets? sheets = null;
-            try
+            AssertWorkbookState(batch.GetWorkbook(sourcePath), sourceExpectedNames, sourceSheet);
+            AssertWorkbookState(batch.GetWorkbook(targetPath), targetExpectedNames, targetSheet, targetDuplicateGuard);
+        });
+    }
+
+    private static void AssertWorkbookState(
+        Excel.Workbook workbook,
+        string[] expectedNames,
+        string? additionalSheet = null,
+        bool duplicateGuard = false)
+    {
+        Excel.Sheets? sheets = null;
+        try
+        {
+            sheets = workbook.Worksheets;
+            var names = new List<string>();
+            for (var index = 1; index <= sheets.Count; index++)
             {
-                sheets = context.Book.Worksheets;
-                var names = new List<string>();
-                for (var index = 1; index <= sheets.Count; index++)
+                Excel.Worksheet? sheet = null;
+                try
                 {
-                    Excel.Worksheet? sheet = null;
-                    try
-                    {
-                        sheet = (Excel.Worksheet)sheets[index];
-                        names.Add(sheet.Name);
-                    }
-                    finally { ComUtilities.Release(ref sheet); }
+                    sheet = (Excel.Worksheet)sheets[index];
+                    names.Add(sheet.Name);
                 }
-                Assert.Equal(expectedNames, names);
-                AssertSheetCells(sheets, "Sheet1", "retained workbook marker", 71, 79, "=B1+8");
-                if (additionalSheet is not null)
+                finally { ComUtilities.Release(ref sheet); }
+            }
+            Assert.Equal(expectedNames, names);
+            AssertSheetCells(sheets, "Sheet1", "retained workbook marker", 71, 79, "=B1+8");
+            if (additionalSheet is not null)
+            {
+                if (duplicateGuard)
                 {
-                    if (duplicateGuard)
-                    {
-                        AssertSheetCells(sheets, additionalSheet, "duplicate guard", 12, 15, "=B1+3");
-                    }
-                    else
-                    {
-                        AssertSheetCells(sheets, additionalSheet, "transferred marker", 3, 6, "=B1*2");
-                    }
+                    AssertSheetCells(sheets, additionalSheet, "duplicate guard", 12, 15, "=B1+3");
+                }
+                else
+                {
+                    AssertSheetCells(sheets, additionalSheet, "transferred marker", 3, 6, "=B1*2");
                 }
             }
-            finally { ComUtilities.Release(ref sheets); }
-        });
+        }
+        finally { ComUtilities.Release(ref sheets); }
     }
 
     private static void AssertSheetCells(

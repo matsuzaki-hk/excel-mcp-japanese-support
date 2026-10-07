@@ -22,7 +22,7 @@
 
 ファイルパーサーツールとは異なり、ExcelMcpは公式COM APIを通じて**実際のExcelアプリケーション**を駆動します。Power Queryの更新、数式の再計算、DAXの評価、VBAとPython `=PY()` の実行、そしてピボットテーブル、グラフ、マクロ、データモデル、ブックの書式を保持できます。
 
-**31 tools with 387 operations（31の専門ツール、387の操作）**で、Excel自動化の端到端をカバーします。
+**31の機能領域にわたる60のMCPツール（388の操作）**で、Excel自動化の端到端をカバーします。
 
 > [!IMPORTANT]
 > **Windows**、**Microsoft Excel 2016以降**、および対話型デスクトップが必要です。Linux、macOS、またはサーバー側のバッチ処理を目的としていません。
@@ -60,10 +60,10 @@
 
 ## 🎯 できること
 
-[全387操作の機能一覧](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/features/)。
+[全388操作の機能一覧](https://matsuzaki-hk.github.io/excel-mcp-japanese-support/features/)。
 コマンドの詳細は CLI ヘルプまたは MCP ツール説明を参照してください。
 
-[all 387 operations - 完全なリファレンス](FEATURES.md)
+[all 388 operations - 完全なリファレンス](FEATURES.md)
 
 ## 💬 プロンプト例
 

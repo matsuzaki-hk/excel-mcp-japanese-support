@@ -34,20 +34,20 @@ class RewriteLinksTests(unittest.TestCase):
     def test_relative_link_to_unpublished_file_points_at_github(self):
         self.assertEqual(
             self.rewrite("../../src/ExcelMcp.Core/Foo.cs"),
-            f"[x]({REPO_URL}/blob/main/src/ExcelMcp.Core/Foo.cs)",
+            f"[x]({REPO_URL}/blob/ja-localization/src/ExcelMcp.Core/Foo.cs)",
         )
 
     def test_relative_directory_link_uses_tree_url(self):
-        self.assertEqual(self.rewrite("../../scripts/"), f"[x]({REPO_URL}/tree/main/scripts)")
+        self.assertEqual(self.rewrite("../../scripts/"), f"[x]({REPO_URL}/tree/ja-localization/scripts)")
 
     def test_absolute_github_link_to_published_page_comes_back_to_site(self):
         self.assertEqual(
-            self.rewrite(f"{REPO_URL}/blob/main/CHANGELOG.md#v1", "src/ExcelMcp.CLI/README.md"),
+            self.rewrite(f"{REPO_URL}/blob/ja-localization/CHANGELOG.md#v1", "src/ExcelMcp.CLI/README.md"),
             "[x](/changelog/#v1)",
         )
 
     def test_absolute_github_link_to_unpublished_file_is_unchanged(self):
-        link = f"{REPO_URL}/blob/main/global.json"
+        link = f"{REPO_URL}/blob/ja-localization/global.json"
         self.assertEqual(self.rewrite(link), f"[x]({link})")
 
     def test_external_anchor_site_and_outside_repo_links_are_unchanged(self):

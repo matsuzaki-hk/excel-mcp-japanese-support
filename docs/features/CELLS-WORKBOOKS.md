@@ -20,7 +20,8 @@ current command details, and the linked guidance for workflow decisions.
 CLI and MCP sessions are separate. Reuse the matching session, wait for
 dependent operations, and close only after active work finishes. Discarding
 changes loses all unsaved edits, including earlier work; it is not targeted undo.
-IRM/AIP-protected files need visible Excel authentication and are opened read-only.
+IRM/AIP-protected files need visible Excel authentication. Excel determines the
+signed-in user's editing rights; protection alone does not force read-only access.
 
 [Session and saving guidance](../reference/behavioral-rules.md#sessions-and-failures)
 
@@ -81,6 +82,9 @@ Newer formula and comment capabilities depend on the installed Excel version.
 Deleting a worksheet removes its contents and can break dependent references.
 Moving a sheet to another file removes the source and saves both workbooks;
 closing another session without saving cannot reverse that transfer.
+If a cross-file save fails, the error identifies whether the source save was
+confirmed. Temporary sessions close without another save; inspect both files
+before retrying. These operations do not roll back earlier successful saves.
 
 Protection controls editing, not confidentiality. Some permissions still require
 unlocked cells, and automation-only protection is not retained after reopening.
@@ -91,9 +95,9 @@ open a modal preview.
 
 ---
 
-## Workbook (27 operations)
+## Workbook (28 operations)
 
-- **Inspect and describe:** Read workbook state and manage document properties, protection, and view settings.
+- **Inspect and describe:** Get a bounded worksheet/table/name overview with optional previews, read workbook state, and manage document properties, protection, and view settings.
 - **Use themes and styles:** Inspect or apply Office themes and create, inspect, update, or delete supported custom cell and Table styles.
 - **Save and publish:** Change supported file formats, save a requested copy, or export PDF/XPS output.
 - **Manage external links:** Inspect or refresh linked workbook sources, or deliberately replace linked formulas with their values.
@@ -107,7 +111,7 @@ Changing file formats can remove features; saving a macro-enabled workbook as
 saved. Printing and print preview are intentionally excluded from unattended
 automation.
 
-[Saving and external-link guidance](../reference/workbook.md) |
+[Workbook overview, saving, and external-link guidance](../reference/workbook.md) |
 [Reusable style guidance](../reference/range.md#reusable-cell-styles)
 
 ---

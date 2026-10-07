@@ -74,7 +74,7 @@ public sealed class WorksheetCommentToolTests(
         var arguments = new Dictionary<string, object?>
         {
             ["action"] = action,
-            ["session_id"] = sessionId,
+            ["workbook_session_id"] = sessionId,
             ["sheet_name"] = "CommentSheet",
             ["cell_address"] = "A1"
         };
@@ -84,7 +84,7 @@ public sealed class WorksheetCommentToolTests(
         }
 
         return _fixture.CallToolAsync(
-            "worksheet_style",
+            action == "get-comment" ? "worksheet_style_read" : "worksheet_style",
             arguments,
             RecordingToolTest.Success(result),
             expectedCommand,

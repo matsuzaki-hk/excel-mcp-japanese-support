@@ -41,11 +41,11 @@ public sealed class CollaborationImportToolTests(
             """{"sheetName":"Review","cellAddress":"B2","text":"Reviewed"}""");
 
         var listJson = await CallAsync(
-            "range_link",
+            "range_link_read",
             new()
             {
                 ["action"] = "list-threaded-comments",
-                ["session_id"] = SessionId,
+                ["workbook_session_id"] = SessionId,
                 ["sheet_name"] = "Review",
                 ["cell_address"] = "B2"
             },
@@ -80,7 +80,7 @@ public sealed class CollaborationImportToolTests(
         await AssertSuccessAsync("range_link", new()
         {
             ["action"] = "delete-threaded-comment",
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["sheet_name"] = "Review",
             ["cell_address"] = "B2"
         }, "rangelink.delete-threaded-comment",
@@ -119,11 +119,11 @@ public sealed class CollaborationImportToolTests(
             });
 
         var listJson = await CallAsync(
-            "querytable",
+            "querytable_read",
             new()
             {
                 ["action"] = "list",
-                ["session_id"] = SessionId
+                ["workbook_session_id"] = SessionId
             },
             "querytable.list",
             null,
@@ -149,7 +149,7 @@ public sealed class CollaborationImportToolTests(
         }
 
         var viewJson = await CallAsync(
-            "querytable",
+            "querytable_read",
             QueryTableIdentityArgs("view", "CsvImport"),
             "querytable.view",
             """{"sheetName":"Imports","queryTableName":"CsvImport"}""",
@@ -179,7 +179,7 @@ public sealed class CollaborationImportToolTests(
             new()
             {
                 ["action"] = "set-properties",
-                ["session_id"] = SessionId,
+                ["workbook_session_id"] = SessionId,
                 ["sheet_name"] = "Imports",
                 ["query_table_name"] = "CsvImport",
                 ["refresh_period"] = -1
@@ -195,7 +195,7 @@ public sealed class CollaborationImportToolTests(
         await AssertSuccessAsync("querytable", new()
         {
             ["action"] = "set-properties",
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["sheet_name"] = "Imports",
             ["query_table_name"] = "CsvImport",
             ["background_query"] = false,
@@ -219,7 +219,7 @@ public sealed class CollaborationImportToolTests(
             """{"sheetName":"Imports","queryTableName":"CsvImport"}""");
 
         var statusJson = await CallAsync(
-            "querytable",
+            "querytable_read",
             QueryTableIdentityArgs("get-refresh-status", "CsvImport"),
             "querytable.get-refresh-status",
             """{"sheetName":"Imports","queryTableName":"CsvImport"}""",
@@ -257,7 +257,7 @@ public sealed class CollaborationImportToolTests(
         await AssertSuccessAsync("querytable", new()
         {
             ["action"] = "create-web",
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["query_table_name"] = "HtmlImport",
             ["url"] = "file:///C:/adapter/rates.html",
             ["sheet_name"] = "Imports",
@@ -276,7 +276,7 @@ public sealed class CollaborationImportToolTests(
         });
 
         var webViewJson = await CallAsync(
-            "querytable",
+            "querytable_read",
             QueryTableIdentityArgs("view", "HtmlImport"),
             "querytable.view",
             """{"sheetName":"Imports","queryTableName":"HtmlImport"}""",
@@ -313,7 +313,7 @@ public sealed class CollaborationImportToolTests(
         await AssertSuccessAsync("connection", new()
         {
             ["action"] = "create",
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["connection_name"] = connectionName,
             ["connection_string"] = connectionString,
             ["command_text"] = "SELECT * FROM [Sheet1$]"
@@ -332,7 +332,7 @@ public sealed class CollaborationImportToolTests(
         });
 
         var statusJson = await CallAsync(
-            "connection",
+            "connection_read",
             ConnectionArgs("get-refresh-status", connectionName),
             "connection.get-refresh-status",
             """{"connectionName":"ProductsConnection"}""",
@@ -363,7 +363,7 @@ public sealed class CollaborationImportToolTests(
         }
 
         var missing = await _fixture.CallToolAsync(
-            "connection",
+            "connection_read",
             ConnectionArgs("get-refresh-status", "MissingConnection"),
             Failure(
                 "connection.get-refresh-status",
@@ -385,7 +385,7 @@ public sealed class CollaborationImportToolTests(
         string text) => new()
         {
             ["action"] = action,
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["sheet_name"] = "Review",
             ["cell_address"] = "B2",
             ["text"] = text
@@ -396,7 +396,7 @@ public sealed class CollaborationImportToolTests(
         string delimiter) => new()
         {
             ["action"] = "create-text",
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["query_table_name"] = "CsvImport",
             ["source_path"] = sourcePath,
             ["sheet_name"] = "Imports",
@@ -412,7 +412,7 @@ public sealed class CollaborationImportToolTests(
         string name) => new()
         {
             ["action"] = action,
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["sheet_name"] = "Imports",
             ["query_table_name"] = name
         };
@@ -422,7 +422,7 @@ public sealed class CollaborationImportToolTests(
         string name) => new()
         {
             ["action"] = action,
-            ["session_id"] = SessionId,
+            ["workbook_session_id"] = SessionId,
             ["connection_name"] = name
         };
 

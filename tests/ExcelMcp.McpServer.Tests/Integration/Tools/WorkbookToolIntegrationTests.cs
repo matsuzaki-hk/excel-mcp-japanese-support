@@ -23,7 +23,7 @@ public sealed class WorkbookToolIntegrationTests(
             new Dictionary<string, object?>
             {
                 ["action"] = "set-document-property",
-                ["session_id"] = sessionId,
+                ["workbook_session_id"] = sessionId,
                 ["property_name"] = "AutomationTag",
                 ["value"] = "mcp-value",
                 ["scope"] = "custom"
@@ -44,11 +44,11 @@ public sealed class WorkbookToolIntegrationTests(
         }
 
         var getCall = await _fixture.CallToolAsync(
-            "workbook",
+            "workbook_read",
             new Dictionary<string, object?>
             {
                 ["action"] = "get-document-property",
-                ["session_id"] = sessionId,
+                ["workbook_session_id"] = sessionId,
                 ["property_name"] = "AutomationTag",
                 ["scope"] = "custom"
             },
@@ -78,7 +78,7 @@ public sealed class WorkbookToolIntegrationTests(
             new Dictionary<string, object?>
             {
                 ["action"] = "save-as",
-                ["session_id"] = sessionId,
+                ["workbook_session_id"] = sessionId,
                 ["target_path"] = targetPath,
                 ["format"] = format
             },

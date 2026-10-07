@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Sbroenne.ExcelMcp.CLI.Commands;
 using Sbroenne.ExcelMcp.CLI.Infrastructure;
 using Sbroenne.ExcelMcp.Core.Commands.Chart;
 using Sbroenne.ExcelMcp.Generated;
@@ -16,6 +17,117 @@ namespace Sbroenne.ExcelMcp.CLI.Tests.Unit;
 [Collection("Sequential")]
 public sealed class InProcessCliCommandTests
 {
+    [Fact]
+    public async Task RunAsync_ReturnsBeforePendingCommandCompletesAndTracksFinalOutcome()
+    {
+        var response = new TaskCompletionSource<ServiceResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new RecordingClientFactory { PendingResponse = response.Task };
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var telemetry = new List<(string Command, bool Succeeded, string? ErrorCategory)>();
+        var runtime = CreateRuntime(
+            factory, output, error,
+            telemetryObserver: (command, _, succeeded, category, _) =>
+                telemetry.Add((command, succeeded, category)));
+        var execution = Task.Run(() =>
+        {
+            var invocation = Program.RunAsync(
+                ["--quiet", "session", "open", @"C:\workbooks\book.xlsx"], runtime);
+            returned.SetResult();
+            return invocation;
+        });
+
+        bool returnedBeforeCompletion;
+        try
+        {
+            await factory.RequestSent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            returnedBeforeCompletion = await Task.WhenAny(returned.Task, Task.Delay(TimeSpan.FromSeconds(2))) == returned.Task;
+            Assert.False(execution.IsCompleted);
+            Assert.Empty(telemetry);
+        }
+        finally
+        {
+            response.SetResult(new ServiceResponse { Success = true, Result = """{"sessionId":"pending"}""" });
+        }
+
+        Assert.Equal(0, await execution.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(returnedBeforeCompletion, "RunAsync blocked until the command completed.");
+        Assert.Equal([("session.open", true, null)], telemetry);
+        using var result = JsonDocument.Parse(output.ToString());
+        Assert.Equal("pending", result.RootElement.GetProperty("sessionId").GetString());
+        Assert.Empty(error.ToString());
+    }
+
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData("range", 0)]
+    [InlineData("unknown", 1)]
+    public void ListActions_WritesJsonToInjectedOutput(string? command, int expectedExitCode)
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+        using var scope = CliCommandRuntime.Push(CreateRuntime(new RecordingClientFactory(), output, error));
+
+        var exitCode = new ListActionsCommand().Execute(
+            null!, new ListActionsCommand.Settings { CommandName = command }, CancellationToken.None);
+
+        Assert.Equal(expectedExitCode, exitCode);
+        using var result = JsonDocument.Parse(output.ToString());
+        Assert.Equal(expectedExitCode == 0, result.RootElement.GetProperty("success").GetBoolean());
+        if (command == "range")
+        {
+            Assert.Equal("range", result.RootElement.GetProperty("command").GetString());
+            Assert.Contains("get-values", result.RootElement.GetProperty("actions").EnumerateArray().Select(value => value.GetString()));
+        }
+        else if (command == null)
+        {
+            Assert.True(result.RootElement.GetProperty("commands").TryGetProperty("session", out _));
+        }
+        else
+        {
+            Assert.Equal("Unknown command 'unknown'.", result.RootElement.GetProperty("error").GetString());
+        }
+        Assert.Empty(error.ToString());
+    }
+
+    [Theory]
+    [InlineData("status")]
+    [InlineData("stop")]
+    public async Task StoppedService_WritesJsonToInjectedOutput(string action)
+    {
+        var previousPipe = Environment.GetEnvironmentVariable("EXCELMCP_CLI_PIPE");
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var factory = new RecordingClientFactory();
+        try
+        {
+            Environment.SetEnvironmentVariable("EXCELMCP_CLI_PIPE", $"excelmcp-output-{Guid.NewGuid():N}");
+            var exitCode = await Program.RunAsync(
+                ["--quiet", "service", action], CreateRuntime(factory, output, error));
+
+            Assert.Equal(0, exitCode);
+            using var result = JsonDocument.Parse(output.ToString());
+            Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+            if (action == "status")
+            {
+                Assert.Equal("stopped", result.RootElement.GetProperty("daemonState").GetString());
+                Assert.False(result.RootElement.GetProperty("running").GetBoolean());
+                Assert.Equal(0, result.RootElement.GetProperty("processId").GetInt32());
+            }
+            else
+            {
+                Assert.Equal("Service not running.", result.RootElement.GetProperty("message").GetString());
+            }
+            Assert.Empty(factory.Requests);
+            Assert.Empty(error.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("EXCELMCP_CLI_PIPE", previousPipe);
+        }
+    }
+
     public static IEnumerable<object[]> GeneratedCommandNames =>
         _CliCategoryMetadata.ValidActionsByCommand.Keys
             .Order(StringComparer.Ordinal)
@@ -433,6 +545,118 @@ public sealed class InProcessCliCommandTests
     }
 
     [Fact]
+    public async Task ServiceCommand_ResultReportsSuccessFalse_PrintsResultAndExitsNonzero()
+    {
+        const string result = """{"success":false,"errorMessage":"1 of 2 queries failed to refresh: 'Broken'.","refreshedQueries":["Good"],"skippedQueries":[],"failedQueries":[{"queryName":"Broken","errorCategory":"Expression","errorMessage":"[Expression.Error] bad","exceptionType":"COMException","hresult":"0x800A03EC"}]}""";
+        var telemetry = new List<(string Command, bool Succeeded, string? ErrorCategory, bool ExpectedNegative)>();
+        var factory = new RecordingClientFactory(new ServiceResponse { Success = true, Result = result });
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["--quiet", "powerquery", "refresh-all", "--session", "session-1"],
+            CreateRuntime(factory, output, error,
+                telemetryObserver: (command, _, succeeded, errorCategory, expectedNegative) =>
+                    telemetry.Add((command, succeeded, errorCategory, expectedNegative))));
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(error.ToString());
+        Assert.Equal("powerquery.refresh-all", Assert.Single(factory.Requests).Command);
+        Assert.Equal(result, output.ToString().Trim());
+        var tracked = Assert.Single(telemetry);
+        Assert.False(tracked.Succeeded);
+        Assert.False(tracked.ExpectedNegative);
+    }
+
+    [Fact]
+    public async Task ServiceCommand_ResultReportsSuccessFalseWithOutputPath_DoesNotReportWrittenFile()
+    {
+        const string result = """{"success":false,"errorMessage":"Range is empty."}""";
+        var factory = new RecordingClientFactory(new ServiceResponse { Success = true, Result = result });
+        var output = new StringWriter();
+        var outputPath = Path.Combine(Path.GetTempPath(), $"excelcli-negative-{Guid.NewGuid():N}.json");
+
+        try
+        {
+            var exitCode = await Program.RunAsync(
+                ["--quiet", "powerquery", "refresh-all", "--session", "session-1", "--output", outputPath],
+                CreateRuntime(factory, output, new StringWriter()));
+
+            Assert.Equal(1, exitCode);
+            Assert.False(File.Exists(outputPath));
+            Assert.Equal(result, output.ToString().Trim());
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
+    public async Task Batch_ResultReportsSuccessFalse_MarksLineFailedAndHonorsStopOnError()
+    {
+        const string negative = """{"success":false,"errorMessage":"1 of 1 queries failed to refresh: 'Broken'.","errorCategory":"Expression"}""";
+        var factory = new RecordingClientFactory(
+            new ServiceResponse { Success = true, Result = negative },
+            new ServiceResponse { Success = true, Result = """{"success":true}""" });
+        var output = new StringWriter();
+        var runtime = CreateRuntime(
+            factory,
+            output,
+            new StringWriter(),
+            """
+            {"command":"powerquery.refresh-all","sessionId":"session-1"}
+            {"command":"diag.echo","args":{"message":"after"}}
+            """);
+
+        var exitCode = await Program.RunAsync(["--quiet", "batch", "--stop-on-error"], runtime);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal("powerquery.refresh-all", Assert.Single(factory.Requests).Command);
+        using var line = JsonDocument.Parse(Assert.Single(
+            output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)));
+        Assert.False(line.RootElement.GetProperty("success").GetBoolean());
+        Assert.False(line.RootElement.GetProperty("result").GetProperty("success").GetBoolean());
+        Assert.Equal(
+            "1 of 1 queries failed to refresh: 'Broken'.",
+            line.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Batch_FileTestCanOpenFalse_MarksLineFailedAndContinues()
+    {
+        var factory = new RecordingClientFactory(
+            new ServiceResponse { Success = true, Result = """{"success":false,"canOpen":false}""" },
+            new ServiceResponse { Success = true, Result = """{"success":true}""" });
+        var output = new StringWriter();
+        var runtime = CreateRuntime(
+            factory,
+            output,
+            new StringWriter(),
+            """
+            {"command":"session.test","args":{"filePath":"C:\\workbooks\\missing.xlsx"}}
+            {"command":"diag.echo","args":{"message":"after"}}
+            """);
+
+        var exitCode = await Program.RunAsync(["--quiet", "batch"], runtime);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(2, factory.Requests.Count);
+        var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(2, lines.Length);
+        using (var first = JsonDocument.Parse(lines[0]))
+        {
+            Assert.False(first.RootElement.GetProperty("success").GetBoolean());
+            Assert.False(first.RootElement.GetProperty("result").GetProperty("canOpen").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(first.RootElement.GetProperty("error").GetString()));
+        }
+        using (var second = JsonDocument.Parse(lines[1]))
+        {
+            Assert.True(second.RootElement.GetProperty("success").GetBoolean());
+        }
+    }
+
+    [Fact]
     public async Task SessionTest_CanOpenFalse_TracksExpectedNegative()
     {
         var telemetry = new List<(string Command, bool Succeeded, string? ErrorCategory, bool ExpectedNegative)>();
@@ -682,6 +906,8 @@ public sealed class InProcessCliCommandTests
         private readonly Queue<ServiceResponse> _responses = new(responses);
 
         internal List<ServiceRequest> Requests { get; } = [];
+        internal Task<ServiceResponse>? PendingResponse { get; init; }
+        internal TaskCompletionSource RequestSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task<ICliRequestClient> ConnectAsync(CancellationToken cancellationToken)
         {
@@ -695,7 +921,8 @@ public sealed class InProcessCliCommandTests
                 CancellationToken cancellationToken)
             {
                 owner.Requests.Add(request);
-                return Task.FromResult(owner._responses.Dequeue());
+                owner.RequestSent.TrySetResult();
+                return owner.PendingResponse ?? Task.FromResult(owner._responses.Dequeue());
             }
 
             public void Dispose()

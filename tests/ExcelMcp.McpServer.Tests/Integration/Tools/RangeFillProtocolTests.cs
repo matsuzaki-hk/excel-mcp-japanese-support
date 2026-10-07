@@ -28,7 +28,7 @@ public sealed class RangeFillProtocolTests(RecordingProgramTransportFixture fixt
         var call = await fixture.CallToolAsync("range_edit", new()
         {
             ["action"] = "fill",
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["sheet_name"] = "Sheet1",
             ["range_address"] = "A1:B3",
             ["direction"] = direction
@@ -49,7 +49,7 @@ public sealed class RangeFillProtocolTests(RecordingProgramTransportFixture fixt
         var call = await fixture.CallToolAsync("range_edit", new()
         {
             ["action"] = "auto-fill",
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["sheet_name"] = "Sheet1",
             ["source_range"] = "A1:A2",
             ["destination_range"] = "A1:A10",
@@ -76,7 +76,7 @@ public sealed class RangeFillProtocolTests(RecordingProgramTransportFixture fixt
         var call = await fixture.CallToolAsync("range_edit", new()
         {
             ["action"] = "create-series",
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["sheet_name"] = "Sheet1",
             ["range_address"] = "A1:A10",
             ["orientation"] = "columns",
@@ -98,7 +98,7 @@ public sealed class RangeFillProtocolTests(RecordingProgramTransportFixture fixt
         Dictionary<string, object?> arguments = new()
         {
             ["action"] = action,
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["sheet_name"] = "Sheet1",
             ["range_address"] = "B1",
             ["reference_style"] = "r1c1"
@@ -115,7 +115,8 @@ public sealed class RangeFillProtocolTests(RecordingProgramTransportFixture fixt
             arguments["formulas"] = formulas;
             expected["formulas"] = formulas;
         }
-        var call = await fixture.CallToolAsync("range", arguments,
+        var toolName = action == "get-formulas" ? "range_read" : "range";
+        var call = await fixture.CallToolAsync(toolName, arguments,
             RecordingToolTest.Success("""{"success":true}"""), $"range.{action}",
             JsonSerializer.Serialize(expected, ServiceProtocol.JsonOptions));
         Assert.False(call.Result.IsError);
@@ -132,8 +133,9 @@ public sealed class RangeFillProtocolTests(RecordingProgramTransportFixture fixt
         Assert.True(properties.TryGetProperty("direction", out _));
         Assert.True(properties.TryGetProperty("source_range", out _));
         Assert.True(properties.TryGetProperty("stop_value", out _));
-        var range = Assert.Single(tools, tool => tool.Name == "range");
-        Assert.Contains("range addresses stay A1", range.Description, StringComparison.Ordinal);
-        Assert.True(range.JsonSchema.GetProperty("properties").TryGetProperty("reference_style", out _));
+        var writeRange = Assert.Single(tools, tool => tool.Name == "range");
+        Assert.Contains("range addresses stay A1", writeRange.Description, StringComparison.Ordinal);
+        var readRange = Assert.Single(tools, tool => tool.Name == "range_read");
+        Assert.True(readRange.JsonSchema.GetProperty("properties").TryGetProperty("reference_style", out _));
     }
 }

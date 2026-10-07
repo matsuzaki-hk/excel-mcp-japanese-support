@@ -72,7 +72,7 @@ dotnet tool install --global Sbroenne.ExcelMcp.CLI
 
 ## What You Can Do
 
-**31 feature command categories with 387 operations** for comprehensive Excel automation:
+**31 feature command categories with 388 operations** for comprehensive Excel automation:
 
 - **Power Query** (12 ops) — Create, update, refresh queries; M code management
 - **Data Model/DAX** (20 ops) — Measures, relationships, source metadata, EVALUATE queries
@@ -106,7 +106,7 @@ dotnet tool install --global Sbroenne.ExcelMcp.CLI
 | Interface | Best For | Token Efficiency |
 |-----------|----------|------------------|
 | **CLI** (`excelcli`) | Coding agents | **64% fewer tokens** — single tool + skill |
-| **MCP Server** | Conversational AI (Claude Desktop) | 31 tool schemas loaded into context |
+| **MCP Server** | Conversational AI (Claude Desktop) | 60 tool schemas loaded into context |
 
 **Use CLI when:** Your agent needs to script Excel operations without consuming context with large tool definitions.
 

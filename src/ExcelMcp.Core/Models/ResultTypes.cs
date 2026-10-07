@@ -1078,14 +1078,15 @@ public class FileValidationInfo
 
     /// <summary>
     /// Whether the file is IRM/AIP-protected (OLE2 compound document format).
-    /// IRM-protected files are opened as read-only with Excel made visible so the user
-    /// can authenticate through the Information Rights Management credential prompt.
-    /// Use <c>show=true</c> when opening—this is set automatically by ExcelBatch when IRM is detected.
+    /// IRM-protected files require show=true for visible authentication.
+    /// Excel determines the signed-in user's editing permissions; protection alone
+    /// does not force read-only access.
     /// </summary>
     public bool IsIrmProtected { get; set; }
 
     /// <summary>
-    /// Whether ExcelMcp will open the workbook read-only
+    /// Whether normal opening forces read-only access. False does not guarantee
+    /// editing rights; inspect workbook readOnly after Excel opens it.
     /// </summary>
     public bool WillOpenReadOnly { get; set; }
 
@@ -1663,6 +1664,94 @@ public class PowerQueryRefreshResult : ResultBase
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LoadedToSheet { get; set; }
+}
+
+/// <summary>
+/// Result for refreshing every Power Query in a workbook. Each query appears in exactly
+/// one of the refreshed, skipped, or failed lists. Failures are not rolled back: queries
+/// listed as refreshed keep their new data even when the result is unsuccessful.
+/// </summary>
+public class PowerQueryRefreshAllResult : OperationResult
+{
+    /// <summary>
+    /// Queries whose worksheet, Data Model, or workbook connection loads were refreshed.
+    /// </summary>
+    public List<string> RefreshedQueries { get; set; } = [];
+
+    /// <summary>
+    /// Queries with nothing to refresh on their own, such as parameter and
+    /// connection-only staging queries.
+    /// </summary>
+    public List<PowerQueryRefreshSkip> SkippedQueries { get; set; } = [];
+
+    /// <summary>
+    /// Queries whose refresh failed. The operation continued with the remaining queries.
+    /// </summary>
+    public List<PowerQueryRefreshFailure> FailedQueries { get; set; } = [];
+
+    /// <summary>
+    /// Failure category shared by every failed query; omitted when no query failed or
+    /// the failed queries have different (or unknown) categories.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ErrorCategory
+    {
+        get
+        {
+            var categories = FailedQueries.Select(f => f.ErrorCategory).Distinct().ToList();
+            return categories.Count == 1 ? categories[0] : null;
+        }
+    }
+}
+
+/// <summary>
+/// A query that refresh-all did not refresh because it has nothing to refresh on its own.
+/// </summary>
+public class PowerQueryRefreshSkip
+{
+    /// <summary>
+    /// Name of the skipped query
+    /// </summary>
+    public string QueryName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Why the query was skipped
+    /// </summary>
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A query whose refresh failed during refresh-all.
+/// </summary>
+public class PowerQueryRefreshFailure
+{
+    /// <summary>
+    /// Name of the failed query
+    /// </summary>
+    public string QueryName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Classified failure category (for example Expression, Privacy, Connectivity), when known
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ErrorCategory { get; set; }
+
+    /// <summary>
+    /// Error message reported for this query
+    /// </summary>
+    public string ErrorMessage { get; set; } = string.Empty;
+
+    /// <summary>
+    /// .NET exception type that reported the failure
+    /// </summary>
+    public string ExceptionType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// HRESULT from the underlying Excel/COM failure, when available
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("hresult")]
+    public string? HResult { get; set; }
 }
 
 /// <summary>

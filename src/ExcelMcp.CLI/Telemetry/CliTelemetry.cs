@@ -8,6 +8,7 @@ using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.Channel;
 using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.ApplicationInsights.Extensibility;
+using Sbroenne.ExcelMcp.CLI.Infrastructure;
 using Sbroenne.ExcelMcp.Core.Models;
 using Sbroenne.ExcelMcp.Core.Utilities;
 using Sbroenne.ExcelMcp.Generated;
@@ -87,7 +88,14 @@ internal static class CliTelemetry
         {
             stopwatch.Stop();
             var invocationTelemetry = CurrentInvocationTelemetry.Value;
-            var trackedFailureCategory = response?.ErrorCategory ?? failureCategory;
+            string? resultErrorCategory = null;
+            var negativeResult = response?.Success == true &&
+                ServiceResultOutcome.TryReadNegative(response.Result, out _, out resultErrorCategory);
+            var expectedNegative = IsExpectedNegative(request, response);
+            var succeeded = response?.Success == true && (!negativeResult || expectedNegative);
+            var trackedFailureCategory = response?.ErrorCategory
+                ?? (expectedNegative ? null : resultErrorCategory)
+                ?? failureCategory;
             if (invocationTelemetry != null && response?.Success != true)
             {
                 invocationTelemetry.FailureCategory ??= trackedFailureCategory;
@@ -99,11 +107,10 @@ internal static class CliTelemetry
                 {
                     invocationTelemetry.RequestTracked = true;
                 }
-                var expectedNegative = IsExpectedNegative(request, response);
                 trackInvocation(
                     request.Command,
                     stopwatch.ElapsedMilliseconds,
-                    response?.Success == true,
+                    succeeded,
                     trackedFailureCategory,
                     expectedNegative);
             }
@@ -188,11 +195,20 @@ internal static class CliTelemetry
     internal static int TrackCliInvocation(
         string[] args,
         Func<int> operation,
+        Action<string, long, bool, string?, bool> trackInvocation) =>
+        TrackCliInvocationAsync(args, () => Task.FromResult(operation()), trackInvocation).GetAwaiter().GetResult();
+
+    internal static Task<int> TrackCliInvocationAsync(string[] args, Func<Task<int>> operation) =>
+        TrackCliInvocationAsync(args, operation, TrackCommandInvocation);
+
+    internal static async Task<int> TrackCliInvocationAsync(
+        string[] args,
+        Func<Task<int>> operation,
         Action<string, long, bool, string?, bool> trackInvocation)
     {
         if (args.Any(arg => HelpFlags.Contains(arg, StringComparer.OrdinalIgnoreCase)))
         {
-            return operation();
+            return await operation();
         }
 
         var isBatch = IsBatchCommand(args);
@@ -205,7 +221,7 @@ internal static class CliTelemetry
         var operationThrew = false;
         try
         {
-            exitCode = operation();
+            exitCode = await operation();
             return exitCode;
         }
         catch (Exception ex)
@@ -338,6 +354,16 @@ internal static class CliTelemetry
         if (!succeeded)
         {
             properties["FailureClass"] = ClassifyFailure(errorCategory);
+            var failureCause = errorCategory switch
+            {
+                "Timeout" => "timeout",
+                "Cancelled" => "cancellation",
+                _ => null
+            };
+            if (failureCause != null)
+            {
+                properties["FailureCause"] = failureCause;
+            }
         }
 
         var eventTelemetry = new EventTelemetry(operationName);

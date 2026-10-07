@@ -16,7 +16,7 @@ public sealed class WorkbookThemeProtocolTests(RecordingProgramTransportFixture 
         var call = await fixture.CallToolAsync("workbook", new Dictionary<string, object?>
         {
             ["action"] = "apply-theme",
-            ["session_id"] = "session-1",
+            ["workbook_session_id"] = "session-1",
             ["theme_path"] = "selected.thmx"
         }, RecordingToolTest.Success("""{"success":true}"""), "workbook.apply-theme",
             """{"themePath":"selected.thmx"}""");
@@ -28,9 +28,10 @@ public sealed class WorkbookThemeProtocolTests(RecordingProgramTransportFixture 
     {
         var tools = await fixture.ListToolsAsync();
         var workbook = Assert.Single(tools, tool => tool.Name == "workbook");
-        Assert.Contains("get-theme", workbook.Description, StringComparison.Ordinal);
         Assert.Contains("theme-sensitive", workbook.Description, StringComparison.Ordinal);
-        Assert.Contains("no fallback font", workbook.Description, StringComparison.Ordinal);
+        var read = Assert.Single(tools, tool => tool.Name == "workbook_read");
+        Assert.Contains("get-theme", read.Description, StringComparison.Ordinal);
+        Assert.Contains("no fallback font", read.Description, StringComparison.Ordinal);
         Assert.True(workbook.JsonSchema.GetProperty("properties").TryGetProperty("theme_path", out _));
     }
 }

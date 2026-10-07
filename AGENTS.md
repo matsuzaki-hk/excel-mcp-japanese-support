@@ -31,7 +31,7 @@ Paths are relative to the repository root.
 | Core or ComInterop C# | [COM safety](docs/agents/rules/excel-com-interop.md) |
 | Connection commands/sanitizer or connection tests/helpers/fixtures | [Connections](docs/agents/rules/excel-connection-types-guide.md) |
 | `tests/**/*.cs` | [Testing strategy](tests/AGENTS.md) |
-| Workflows, project files, SDK/build configuration, PowerShell scripts | [Build and release](docs/agents/rules/development-workflow.md) |
+| Workflows, project files, SDK/build configuration, PowerShell scripts, `.changeset/**` | [Build and release](docs/agents/rules/development-workflow.md) |
 | README/index files, FEATURES, CHANGELOG, SECURITY, PRIVACY, docs, specs, skills, or website | [Documentation](docs/agents/rules/documentation-structure.md) |
 | Skill sources, Core command metadata, generators, MCP, or Build-AgentSkills.ps1 | [Product agent guidance](docs/agents/rules/mcp-llm-guidance.md) |
 | MCP Server or MCP generator | [MCP boundaries](docs/agents/rules/mcp-server-guide.md) |
@@ -82,8 +82,11 @@ Build with zero warnings. Use targeted tests; see the
 [testing strategy](tests/AGENTS.md). Run every Excel-dependent test command
 sequentially; never overlap Excel test fixtures, test hosts, or E2E runs.
 Runtime changes in Core, ComInterop, Service, CLI, MCP, or their generators also
-require `scripts\Test-E2E.ps1` locally with Excel. Report it as not run when
-Excel is unavailable; build-only checks do not cover COM.
+require `scripts\Test-E2E.ps1` locally with Excel, once against the final PR
+source, after the last runtime-affecting change. Rerun it if later commits
+change runtime behavior. During development, use focused checks; the commit hook
+does not repeat full E2E on every commit. Report final E2E as not run when Excel is unavailable;
+build-only checks do not cover COM.
 
 The Python evaluation suite under `llm-tests/` is on-demand only, not part of the
 normal development lifecycle. This includes offline checks, Excel fixture checks,
@@ -111,6 +114,12 @@ Otherwise omit it. PRs record the root cause, affected contracts, and validation
 Report high-confidence defects introduced by the change, not style or unrelated
 cleanup. These checks apply to review tasks; they do not require installing
 dependencies, running builds, or editing code unless requested.
+
+When `ponytail-review` is available, use it as an additional review pass for
+concrete, behavior-preserving simplifications introduced by the change. It must
+not replace correctness or security review. Required Excel COM cleanup,
+validation, error handling, tests, generated contracts, and matching MCP/CLI
+behavior are not unnecessary complexity.
 
 - Typed PIAs first, except documented runtime gaps (`Application.Run`, VBE,
   Office-core). Do not reintroduce unavailable dependencies. Dynamic COM numeric
@@ -150,6 +159,8 @@ dependencies, running builds, or editing code unless requested.
   leave review comments unanswered or unresolved.
 - User-visible changes require a changeset; internal/docs/tests/CI changes use
   the `skip-changelog` PR label. Versions and `CHANGELOG.md` are release-generated.
+  Follow [.changeset/README.md](.changeset/README.md) for package names and
+  validate the fragment against the PR's actual base before pushing.
 - Plugin publication changes must follow
   `.github/workflows/docs/publish-plugins-setup.md#maintenance-and-updates`;
   the published repository is output-only.
@@ -207,7 +218,7 @@ dependencies, running builds, or editing code unless requested.
 ### カウントと監査
 
 - 公開サーフェスは upstream の `doc-counts.json` が正準 (v2.2.1 時点で
-  31 tools / 387 operations)。`scripts/check-doc-counts.ps1` がコード生成
+  31 tools / 388 operations)。`scripts/check-doc-counts.ps1` がコード生成
   マニフェストから導出し、全ドキュメントの表記を検証する。カウント変更時は
   README / FEATURES / docs / gh-pages / mcpb / vscode-extension / skills
   すべてを同期する。

@@ -223,7 +223,7 @@ behavior are not unnecessary complexity.
 ### カウントと監査
 
 - 公開サーフェスは upstream の `doc-counts.json` が正準 (v2.2.1 時点で
-  31 tools / 388 operations)。`scripts/check-doc-counts.ps1` がコード生成
+  31 tools / 408 operations)。`scripts/check-doc-counts.ps1` がコード生成
   マニフェストから導出し、全ドキュメントの表記を検証する。カウント変更時は
   README / FEATURES / docs / gh-pages / mcpb / vscode-extension / skills
   すべてを同期する。

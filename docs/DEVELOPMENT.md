@@ -88,7 +88,7 @@ git push origin --delete feature/your-feature-name
 
 1. **Ensure all changes are merged** to `main` via PRs
 
-2. Run **Release All Components** from GitHub Actions and select a semantic
+2. Run **[Release] All Components** from GitHub Actions and select a semantic
    version bump or custom version.
 3. The workflow compiles pending changesets, updates versions, builds and
    publishes all deliverables, creates the tag, and creates the GitHub release.
@@ -201,21 +201,21 @@ dotnet build -c Release
 ```
 
 Before the CLI project replaces its output, local builds call
-`scripts\Stop-ExcelMcpProcesses.ps1` once. The script delegates cleanup to
-`excelcli service stop`. Cleanup is scoped to `EXCELMCP_CLI_PIPE` and validates
-tracked PID start times. Excel identities remain recorded for their daemon
-generation through shutdown, so a failed final Excel exit cannot lose ownership
-metadata. Daemon, startup, and tracker mutexes use separate semantic namespaces
-over a case-insensitive SHA-256 pipe identity, so case variants, suffixes,
-separators, special characters, and long pipe names cannot collide across
-pipes or mutex roles. If the normal
-CLI binary predates ownership-lifecycle sources, the
-script first builds a current cleanup client in an isolated temporary output;
-this stops the tracked daemon before its loaded normal-output assemblies are
-replaced. A true first build with no CLI binary remains a safe no-op. Cleanup
-never sweeps all Excel processes. `Test-E2E.ps1` and
-`Test-CliWorkflow.ps1` allocate a private pipe for each invocation so parallel
-worktrees cannot stop each other's daemon or Excel instances.
+`scripts\Stop-ExcelCliService.ps1` once. It forcibly stops background CLI services
+whose executable is this worktree's Debug or Release output, after checking the
+`service run` command and PID/start-time identity. It retains a native process
+handle through verification and termination, so a reused PID cannot redirect
+termination to another process. **Builds do not save workbooks;
+unsaved work in those development sessions may be lost.** No temporary helper is
+built, and no Excel, MCP, foreground CLI, or other worktree's process is stopped.
+No matching service is a no-op; a real query or termination failure fails the
+build. Hosted CI skips the step; self-hosted desktops retain it.
+
+The optional `-PipeName` argument limits test-run cleanup to the selected pipe.
+Builds stop all eligible local CLI services, regardless of `EXCELMCP_CLI_PIPE`.
+`Test-E2E.ps1` and `Test-CliWorkflow.ps1` allocate a private pipe per invocation.
+Normal `excelcli service stop` and CLI/MCP workbook save/close safeguards remain
+unchanged; the direct force-stop policy applies only to development tooling.
 
 **For Complex Features:**
 - ✅ Add integration tests for all Excel operations
@@ -446,11 +446,25 @@ dotnet test tests\ExcelMcp.Service.Tests\ExcelMcp.Service.Tests.csproj -c Releas
 ExcelMcp uses Azure Application Insights for anonymous usage telemetry. The MCP
 Server uses WorkerService integration and also reports sanitized crashes; the CLI
 uses the base SDK for command telemetry. Telemetry is **opt-out** (enabled by
-default in release builds).
+default in release builds with an embedded connection string). Contributor builds
+default to off. Both entry points support the same `EXCELMCP_TELEMETRY_MODE`
+environment variable:
+
+| Value | Destination |
+|---|---|
+| Unset | Azure if the build contains a connection string; otherwise off |
+| `off` | No telemetry collection or delivery |
+| `local` | Approved operation events and request traces to a loopback OTLP receiver, never Azure |
+| `azure` | Existing Azure delivery; requires an embedded connection string |
+
+An explicit `off` or `local` overrides even a release package's embedded Azure
+configuration. Invalid settings are reported on stderr and return a nonzero exit
+code. `local` constructs no Application Insights client or automatic collectors.
 
 ### **How It Works**
 
-The Application Insights connection string is **embedded at build time** via MSBuild - there is no runtime environment variable lookup.
+The Azure connection string is **embedded at build time** via MSBuild. Runtime
+destination selection does not replace that string or require Azure credentials.
 
 **Build-time flow:**
 1. MSBuild reads `AppInsightsConnectionString` property (from `Directory.Build.props.user` or env var)
@@ -489,28 +503,73 @@ local diagnostic text and recognizes:
 
 ### **Local Development with Telemetry**
 
-To enable telemetry in local builds:
+No Azure resource or subscription access is needed. First build Release, then
+run the standalone Aspire dashboard in another terminal. You do not need an
+Aspire AppHost or containers for the application or ordinary tests.
 
 ```powershell
-# 1. Copy the template file
-Copy-Item "Directory.Build.props.user.template" "Directory.Build.props.user"
+dotnet build Sbroenne.ExcelMcp.sln -c Release
 
-# 2. Edit Directory.Build.props.user and add your connection string
-# <AppInsightsConnectionString>InstrumentationKey=xxx;IngestionEndpoint=...</AppInsightsConnectionString>
-
-# 3. Build - connection string is embedded into both entry points at compile time
-dotnet build Sbroenne.ExcelMcp.sln
-
-# 4. Run either entry point - telemetry is automatically sent to Azure
-dotnet run --project src/ExcelMcp.McpServer/ExcelMcp.McpServer.csproj
-dotnet run --project src/ExcelMcp.CLI/ExcelMcp.CLI.csproj -- session list --quiet
+# If the Aspire CLI is installed, start its standalone dashboard.
+aspire dashboard run
 ```
 
-**Note:** `Directory.Build.props.user` is gitignored - your connection string won't be committed.
+Follow the [official standalone dashboard setup](https://aspire.dev/dashboard/standalone/)
+to install the CLI or use the container alternative. Keep browser authentication
+enabled and bind the dashboard to loopback. Open the login URL printed by the
+dashboard; do not commit or share its token.
+
+In the terminal that launches ExcelMcp:
+
+```powershell
+$env:EXCELMCP_TELEMETRY_MODE = 'local'
+$env:OTEL_EXPORTER_OTLP_PROTOCOL = 'grpc'
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4317'
+.\src\ExcelMcp.CLI\bin\Release\net10.0-windows\excelcli.exe session list --quiet
+```
+
+For MCP, set these same variables on the process launched by your MCP client,
+using `src\ExcelMcp.McpServer\bin\Release\net10.0-windows\Sbroenne.ExcelMcp.McpServer.exe`
+as the server command. Call `file_read` with action `list` to exercise telemetry
+without opening a workbook. No console exporter is used: MCP standard output
+remains exclusively JSON-RPC.
+
+The supported protocols are `grpc` (default endpoint `http://localhost:4317`)
+and `http/protobuf` (default endpoint `http://localhost:4318`). The general
+`OTEL_EXPORTER_OTLP_ENDPOINT` is a base URL; HTTP export appends `/v1/logs`
+and `/v1/traces`. Only `localhost` or a loopback IP is accepted, without URL
+credentials, queries, or fragments. Per-signal endpoint overrides and OTLP
+headers are not used by this local pipeline.
+Local delivery also bypasses HTTP proxies and does not follow redirects.
+
+Events appear as structured logs and requests as traces. Only the already
+approved event properties and sanitized exception classifications are recorded;
+framework logs and automatic HTTP/runtime metrics are not enabled. This is not a
+replica of Azure's custom-event tables, Users/Sessions views, or ingestion rules.
+If the receiver is unavailable, delivery diagnostics go to stderr without
+changing the command result. Short-lived commands attempt a bounded flush.
+
+Automated tests capture telemetry in memory and test HTTP/protobuf delivery
+against an isolated loopback receiver. They require neither Aspire nor Azure:
+
+```powershell
+dotnet test tests\ExcelMcp.CLI.Tests\ExcelMcp.CLI.Tests.csproj -c Release --filter 'Feature=Telemetry'
+dotnet test tests\ExcelMcp.McpServer.Tests\ExcelMcp.McpServer.Tests.csproj -c Release --filter 'Feature=Telemetry'
+```
+
+These tests do not validate Azure table mapping, workspace transformations,
+cloud queries, or portal reports. No separate Azure test resource is required.
 
 ### **Local Development without Telemetry**
 
-If you don't create `Directory.Build.props.user`, builds will have an empty connection string and telemetry will be disabled. This is the default for local development.
+Ordinary contributor builds without an embedded connection string disable
+telemetry by default. To disable it explicitly, including in released packages:
+
+```powershell
+$env:EXCELMCP_TELEMETRY_MODE = 'off'
+```
+
+Remove the variable to restore the build's default behavior.
 
 ### **Azure Resources Setup (Maintainers Only)**
 
@@ -523,8 +582,8 @@ az login
 # 2. Deploy resources (creates RG, Log Analytics, App Insights)
 .\infrastructure\azure\deploy-appinsights.ps1 -SubscriptionId "<your-subscription-id>"
 
-# 3. Copy the connection string from output
-# Output: "Connection String: InstrumentationKey=xxx;IngestionEndpoint=..."
+# 3. Use the connection details saved in the ignored appinsights.secrets.local file.
+# Do not print, commit, or publish that file.
 ```
 
 ### **GitHub Secret Configuration (Maintainers Only)**
@@ -533,7 +592,7 @@ After deploying Azure resources:
 
 1. Go to GitHub repo → **Settings** → **Secrets and variables** → **Actions**
 2. Add new secret: `APPINSIGHTS_CONNECTION_STRING`
-3. Paste the connection string from deployment output
+3. Set the connection string from the ignored local deployment output file
 
 The release workflow sets this as an environment variable, and MSBuild embeds it at build time.
 
@@ -653,6 +712,8 @@ Runtime:
       │ (exception messages and stacks are omitted)
       ▼
   TelemetryClient → ingestion privacy transform → Application Insights
+  Or: explicit local mode → OTLP logs/traces → local dashboard
+  Or: off → no collection or delivery
 ```
 
 ### **Files Overview**
@@ -661,8 +722,14 @@ Runtime:
 |------|---------|
 | `Telemetry/ExcelMcpTelemetry.cs` | Static helper for tracking events |
 | `ExcelMcp.CLI/Telemetry/CliTelemetry.cs` | CLI command telemetry and lifecycle |
+| `ExcelMcp.CLI/Telemetry/DeferredTelemetrySink.cs` | Creates the CLI telemetry sink in the background and bounds its shutdown |
+| `ExcelMcp.CLI/Telemetry/ApplicationInsightsTelemetrySink.cs` | CLI sink that owns the Application Insights client |
+| `ExcelMcp.CLI/Telemetry/ICliTelemetrySink.cs` | Destination contract for CLI command telemetry |
+| `Shared/TelemetrySettings.cs` | Matching destination selection and local endpoint validation, compiled into both entry points |
+| `Shared/LocalTelemetry.cs` | Local-only export of approved events and request traces |
+| `ExcelMcp.CLI/Telemetry/LocalTelemetrySink.cs` | CLI adapter for local delivery |
 | `Telemetry/SensitiveDataRedactor.cs` | Redacts sensitive local diagnostic text |
-| Entry-point `Program.cs` files | Application Insights lifecycle configuration |
+| Entry-point `Program.cs` files | Telemetry destination and lifecycle configuration |
 | CLI and MCP Server project files | MSBuild targets that generate `TelemetryConfig.g.cs` |
 | `Directory.Build.props.user.template` | Template for local dev connection string |
 | `infrastructure/azure/appinsights-resources.bicep` | Azure resources and ingestion privacy transforms |

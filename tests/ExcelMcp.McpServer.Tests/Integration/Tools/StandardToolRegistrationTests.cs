@@ -94,10 +94,17 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
     [Theory]
     [InlineData("range_format", "validate-range", false)]
     [InlineData("connection", "test", true)]
+    [InlineData("connection", "get-account-settings", true)]
+    [InlineData("connection", "clear-account-hint", false)]
+    [InlineData("connection", "set-account-settings", false)]
     [InlineData("range", "trace-precedents", true)]
     [InlineData("range", "trace-dependents", true)]
     [InlineData("window", "get-view", false)]
     [InlineData("pythoninexcel", "get-result", false)]
+    [InlineData("vba", "search", true)]
+    [InlineData("vba", "references", true)]
+    [InlineData("vba", "status", true)]
+    [InlineData("vba", "replace-procedure", false)]
     public async Task Discovery_InspectionActionsUseAccurateEndpoints(string toolName, string action, bool readOnly)
     {
         var tools = await Client!.ListToolsAsync(cancellationToken: TestCancellationToken);
@@ -142,6 +149,11 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
     [InlineData("chart", "target_range")]
     [InlineData("screenshot", "range_address")]
     [InlineData("screenshot", "quality")]
+    [InlineData("vba_read", "search_text")]
+    [InlineData("vba_read", "module_name")]
+    [InlineData("vba_read", "whole_word")]
+    [InlineData("vba_read", "match_case")]
+    [InlineData("vba_read", "max_matches")]
     public async Task ParameterDescriptions_PreserveDeclaredMetadata(string toolName, string parameter)
     {
         var tools = await Client!.ListToolsAsync(cancellationToken: TestCancellationToken);
@@ -357,7 +369,7 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
         var sessions = schema.GetProperty("properties").GetProperty("sessions");
 
         var properties = sessions.GetProperty("items").GetProperty("properties");
-        foreach (var name in new[] { "workbook_session_id", "filePath", "isExcelVisible", "activeOperations", "canClose" })
+        foreach (var name in new[] { "workbook_session_id", "filePath", "isExcelVisible", "activeOperations", "canClose", "excelState", "blockingReason" })
         {
             Assert.True(properties.TryGetProperty(name, out _),
                 $"File session output schema does not describe {name}.");

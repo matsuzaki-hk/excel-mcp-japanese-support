@@ -6,11 +6,14 @@
 .DESCRIPTION
     Builds the Release solution unless -SkipBuild is supplied, then runs:
     1. Independent CLI workflow scenarios.
-    2. The stale-build graceful-save acceptance test.
-    3. Independent MCP workflow scenarios.
+    2. Independent MCP workflow scenarios.
+    3. External OLAP schema discovery and PivotTable tests through the Service boundary.
 
-    Defaults to all stages. A focused -Stages run is not complete acceptance.
-    The script fails if any gate fails or if a required filter matches no tests.
+    Defaults to all stages. The OLAP stage uses EXCELMCP_TEST_OLAP_* when set;
+    otherwise it starts the synthetic Atoti cube via Start-OlapTestCube.ps1
+    (requires Python) and stops it afterwards.
+    A focused -Stages run is not complete acceptance. The script fails if any
+    gate fails or if a required filter matches no tests.
 
 .EXAMPLE
     & .\scripts\Test-E2E.ps1
@@ -21,7 +24,7 @@ param(
     [switch]$SkipBuild,
     [string]$PipeName,
     [ValidateNotNullOrEmpty()]
-    [ValidateSet('Cli', 'Rebuild', 'Mcp')][string[]]$Stages = @('Cli', 'Rebuild', 'Mcp'),
+    [ValidateSet('Cli', 'Mcp', 'Olap')][string[]]$Stages = @('Cli', 'Mcp', 'Olap'),
     [string]$ResultsDirectory,
     [switch]$KeepCliFiles
 )
@@ -30,6 +33,7 @@ $ErrorActionPreference = 'Stop'
 $rootDir = Split-Path -Parent $PSScriptRoot
 $cliTestProject = Join-Path $rootDir 'tests\ExcelMcp.CLI.Tests\ExcelMcp.CLI.Tests.csproj'
 $mcpTestProject = Join-Path $rootDir 'tests\ExcelMcp.McpServer.Tests\ExcelMcp.McpServer.Tests.csproj'
+$serviceTestProject = Join-Path $rootDir 'tests\ExcelMcp.Service.Tests\ExcelMcp.Service.Tests.csproj'
 . (Join-Path $PSScriptRoot 'Invoke-TestStage.ps1')
 if (-not $ResultsDirectory) { $ResultsDirectory = Join-Path $rootDir "TestResults\e2e-$([Guid]::NewGuid().ToString('N'))" }
 $previousPipeName = $env:EXCELMCP_CLI_PIPE
@@ -41,6 +45,7 @@ else {
 }
 $env:EXCELMCP_CLI_PIPE = $selectedPipeName
 $failures = [Collections.Generic.List[Exception]]::new()
+$olapCube = $null
 
 Push-Location $rootDir
 try {
@@ -48,7 +53,7 @@ try {
 
     if (-not $SkipBuild) {
         Write-Host 'Building Release solution...' -ForegroundColor Cyan
-        dotnet build Sbroenne.ExcelMcp.sln --configuration Release --disable-build-servers -p:NuGetAudit=false --verbosity minimal
+        dotnet build Sbroenne.ExcelMcp.sln --configuration Release --disable-build-servers --verbosity minimal
         if ($LASTEXITCODE -ne 0) {
             throw "Release build failed with exit code $LASTEXITCODE."
         }
@@ -68,13 +73,7 @@ try {
                 $parameters.Project = $cliTestProject
                 $parameters.Filter = 'RequiresExcel=true&FullyQualifiedName~CliWorkflowAcceptanceTests'
                 $parameters.DeadlineSeconds = 600
-                $parameters.HangTimeout = '5m'
-            }
-            'Rebuild' {
-                $parameters.Project = $cliTestProject
-                $parameters.Filter = 'FullyQualifiedName~PreBuildGracefulSaveAcceptanceTests.StaleLockedBuildCleanup'
-                $parameters.DeadlineSeconds = 480
-                $parameters.HangTimeout = '6m'
+                $parameters.HangTimeout = '9m'
             }
             'Mcp' {
                 $parameters.Project = $mcpTestProject
@@ -82,8 +81,24 @@ try {
                 $parameters.DeadlineSeconds = 900
                 $parameters.HangTimeout = '15m'
             }
+            'Olap' {
+                $olapSettings = @($env:EXCELMCP_TEST_OLAP_CONNECTION_STRING, $env:EXCELMCP_TEST_OLAP_CUBE,
+                    $env:EXCELMCP_TEST_OLAP_HIERARCHY, $env:EXCELMCP_TEST_OLAP_LEVEL)
+                $missingSettings = @($olapSettings | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count
+                if ($missingSettings -gt 0 -and $missingSettings -lt $olapSettings.Count) {
+                    throw 'Configure all four EXCELMCP_TEST_OLAP_ settings, or clear all four to use the synthetic cube.'
+                }
+                if ($missingSettings -eq $olapSettings.Count) {
+                    $olapCube = & (Join-Path $PSScriptRoot 'Start-OlapTestCube.ps1')
+                    foreach ($key in $olapCube.Settings.Keys) { $parameters.Environment[$key] = $olapCube.Settings[$key] }
+                }
+                $parameters.Project = $serviceTestProject
+                $parameters.Filter = 'RequiresExcel=true&FullyQualifiedName~PersistentServiceConnectionTests.ExternalOlap'
+                $parameters.DeadlineSeconds = 600
+                $parameters.HangTimeout = '5m'
+            }
         }
-        & (Join-Path $PSScriptRoot 'Stop-ExcelMcpProcesses.ps1') -PipeName $selectedPipeName
+        & (Join-Path $PSScriptRoot 'Stop-ExcelCliService.ps1') -PipeName $selectedPipeName
         if ($LASTEXITCODE -ne 0) { throw "Owned CLI cleanup failed before $stage acceptance." }
         Invoke-TestStage @parameters -ReconcileCases
     }
@@ -94,11 +109,21 @@ catch {
 }
 finally {
     try {
-        & (Join-Path $PSScriptRoot 'Stop-ExcelMcpProcesses.ps1') -PipeName $selectedPipeName
+        & (Join-Path $PSScriptRoot 'Stop-ExcelCliService.ps1') -PipeName $selectedPipeName
         if ($LASTEXITCODE -ne 0) { throw 'Owned CLI cleanup failed after E2E validation.' }
     }
     catch { $failures.Add($_.Exception) }
     finally {
+        try {
+            if ($olapCube -and -not $olapCube.Process.HasExited) {
+                $olapCube.Process.Kill($true)
+                if (-not $olapCube.Process.WaitForExit(10000)) {
+                    throw "OLAP test cube cleanup timed out for PID $($olapCube.Process.Id)."
+                }
+            }
+        }
+        catch { $failures.Add($_.Exception) }
+        finally { if ($olapCube) { $olapCube.Process.Dispose() } }
         if ($null -eq $previousPipeName) {
             Remove-Item Env:EXCELMCP_CLI_PIPE -ErrorAction SilentlyContinue
         }

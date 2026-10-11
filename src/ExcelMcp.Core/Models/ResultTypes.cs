@@ -919,6 +919,77 @@ public class VbaListResult : ResultBase
     public List<ScriptInfo> Scripts { get; set; } = [];
 }
 
+/// <summary>VBA project access and execution status.</summary>
+public class VbaProjectStatusResult : ResultBase
+{
+    /// <summary>Whether Excel allows access to the VBA project object.</summary>
+    public bool ProjectAccess { get; set; }
+    /// <summary>Explanation when project access is blocked; this does not change Excel settings.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AccessMessage { get; set; }
+    /// <summary>Project name, when accessible.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectName { get; set; }
+    /// <summary>None or Locked, when project access allows inspection.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Protection { get; set; }
+    /// <summary>Design, Run, or Break, when project access allows inspection.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Mode { get; set; }
+}
+
+/// <summary>VBA library references inspected without modification.</summary>
+public class VbaReferencesResult : ResultBase
+{
+    /// <summary>References in their native project order.</summary>
+    public List<VbaReferenceInfo> References { get; set; } = [];
+    /// <summary>Whether any library reference is broken.</summary>
+    public bool HasBrokenReferences { get; set; }
+}
+
+/// <summary>One VBA library reference.</summary>
+public class VbaReferenceInfo
+{
+    /// <summary>One-based reference index, including broken references whose metadata cannot be read.</summary>
+    public int Index { get; set; }
+    /// <summary>Whether Excel reports the reference as broken.</summary>
+    public bool IsBroken { get; set; }
+    /// <summary>Library name; unavailable for broken references.</summary>
+    public string? Name { get; set; }
+    /// <summary>Library description; unavailable for broken references.</summary>
+    public string? Description { get; set; }
+    /// <summary>Library identifier; unavailable for broken references.</summary>
+    public string? LibraryId { get; set; }
+    /// <summary>Major version; unavailable for broken references.</summary>
+    public int? Major { get; set; }
+    /// <summary>Minor version; unavailable for broken references.</summary>
+    public int? Minor { get; set; }
+    /// <summary>Whether this is a built-in reference; unavailable for broken references.</summary>
+    public bool? BuiltIn { get; set; }
+}
+
+/// <summary>Limited VBA source search results.</summary>
+public class VbaSearchResult : ResultBase
+{
+    /// <summary>Located matches in module and source order.</summary>
+    public List<VbaSearchMatch> Matches { get; set; } = [];
+    /// <summary>Whether additional matches were omitted; narrow the search to inspect them.</summary>
+    public bool HasMore { get; set; }
+}
+
+/// <summary>One literal text match in VBA source.</summary>
+public class VbaSearchMatch
+{
+    /// <summary>Module containing the match.</summary>
+    public string ModuleName { get; set; } = string.Empty;
+    /// <summary>One-based source line.</summary>
+    public int Line { get; set; }
+    /// <summary>One-based source column.</summary>
+    public int Column { get; set; }
+    /// <summary>Source excerpt, at most 200 characters.</summary>
+    public string Excerpt { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// Result for viewing VBA module code
 /// </summary>
@@ -999,6 +1070,44 @@ public class ExportedModuleInfo
     /// <summary>
     /// Number of lines in the exported module
     /// </summary>
+/// Result for reading part of a VBA module.
+/// </summary>
+public class VbaReadResult : ResultBase
+{
+    /// <summary>Name of the VBA module.</summary>
+    public string ModuleName { get; set; } = string.Empty;
+    /// <summary>First line of the selected source in the module.</summary>
+    public int StartLine { get; set; }
+    /// <summary>Number of lines in the full selection.</summary>
+    public int TotalLineCount { get; set; }
+    /// <summary>Number of lines returned in Code.</summary>
+    public int ReturnedLineCount { get; set; }
+    /// <summary>Selected source text returned by this read.</summary>
+    public string Code { get; set; } = string.Empty;
+    /// <summary>Whether more lines remain in the selected procedure.</summary>
+    public bool HasMore { get; set; }
+    /// <summary>First line to request to continue, when more lines remain.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? NextStartLine { get; set; }
+    /// <summary>Fingerprint of the full procedure or selected line range.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceHash { get; set; }
+}
+
+/// <summary>
+/// Result for replacing one VBA procedure.
+/// </summary>
+public class VbaProcedureEditResult : OperationResult
+{
+    /// <summary>Name of the replaced procedure.</summary>
+    public string ProcedureName { get; set; } = string.Empty;
+    /// <summary>Kind of the replaced procedure.</summary>
+    public string ProcedureKind { get; set; } = string.Empty;
+    /// <summary>Fingerprint of the source read back after replacement.</summary>
+    public string SourceHash { get; set; } = string.Empty;
+    /// <summary>Line where the procedure now starts.</summary>
+    public int StartLine { get; set; }
+    /// <summary>Number of lines in the procedure now stored.</summary>
     public int LineCount { get; set; }
 }
 
@@ -1026,6 +1135,28 @@ public class ScriptInfo
     /// List of procedures in the module
     /// </summary>
     public List<string> Procedures { get; set; } = [];
+
+    /// <summary>
+    /// Procedure names, kinds, and source ranges.
+    /// </summary>
+    public List<VbaProcedureInfo> ProcedureDetails { get; set; } = [];
+}
+
+/// <summary>
+/// Name, kind, and source range for a VBA procedure.
+/// </summary>
+public class VbaProcedureInfo
+{
+    /// <summary>Procedure name.</summary>
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Procedure kind: Sub, Function, Property Get, Property Let, or Property Set.</summary>
+    public string Kind { get; set; } = string.Empty;
+    /// <summary>First line of the procedure in its module.</summary>
+    public int StartLine { get; set; }
+    /// <summary>Line containing the Sub, Function, or Property declaration, excluding introductory comments.</summary>
+    public int BodyStartLine { get; set; }
+    /// <summary>Number of lines in the procedure.</summary>
+    public int LineCount { get; set; }
 }
 
 /// <summary>
@@ -1951,6 +2082,45 @@ public class ConnectionPropertiesResult : ResultBase
     /// Refresh period in minutes (0 = no automatic refresh)
     /// </summary>
     public int RefreshPeriod { get; set; }
+}
+
+/// <summary>
+/// Safe account-setting inspection for an MSOLAP connection; never contains account or secret values.
+/// </summary>
+public class ConnectionAccountSettingsResult : ResultBase
+{
+    /// <summary>Exact workbook connection name.</summary>
+    public string ConnectionName { get; set; } = "";
+    /// <summary>Whether a User ID or UID setting exists, including an empty setting.</summary>
+    public bool AccountHintPresent { get; set; }
+    /// <summary>Whether a Password or PWD setting exists; not evidence of a valid saved password.</summary>
+    public bool PasswordPresent { get; set; }
+    /// <summary>Whether EffectiveUserName server impersonation is configured.</summary>
+    public bool ImpersonationPresent { get; set; }
+    /// <summary>Excel's password-saving setting, distinct from shared credential caches.</summary>
+    public bool SavePassword { get; set; }
+    /// <summary>Recognized Interactive Login value, null if absent, or Unrecognized.</summary>
+    public string? InteractiveLogin { get; set; }
+    /// <summary>Recognized Identity Mode value, null if absent, or Unrecognized.</summary>
+    public string? IdentityMode { get; set; }
+}
+
+/// <summary>Safe result of updating explicitly supplied workbook account-hint or sign-in settings.</summary>
+public class ConnectionAccountSettingsUpdateResult : ConnectionAccountSettingsResult
+{
+    /// <summary>Whether any explicitly requested account-hint or sign-in setting changed.</summary>
+    public bool Changed { get; set; }
+}
+
+/// <summary>Result of removing workbook-scoped account hints, not cached sign-in credentials.</summary>
+public class ConnectionAccountHintClearResult : ResultBase
+{
+    /// <summary>Exact workbook connection name.</summary>
+    public string ConnectionName { get; set; } = "";
+    /// <summary>Whether any User ID/UID setting was removed.</summary>
+    public bool Changed { get; set; }
+    /// <summary>Whether an account hint remains after successful readback.</summary>
+    public bool AccountHintPresent { get; set; }
 }
 
 #endregion

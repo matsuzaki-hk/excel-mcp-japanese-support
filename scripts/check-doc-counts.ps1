@@ -75,7 +75,7 @@ if ($Update -and $AllowStaleAdvertisedCounts) {
 
 if (-not $SkipBuild) {
     Write-Host "Refreshing generated Release count metadata..." -ForegroundColor Cyan
-    & dotnet build (Join-Path $rootDir "Sbroenne.ExcelMcp.sln") --configuration Release --no-restore -p:NuGetAudit=false --verbosity minimal
+    & dotnet build (Join-Path $rootDir "Sbroenne.ExcelMcp.sln") --configuration Release --no-restore --verbosity minimal
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Core Release build failed. Run dotnet restore, then retry this check." -ForegroundColor Red
         exit 1
@@ -159,7 +159,7 @@ if (-not (Test-Path -LiteralPath $contractsPath)) {
     Write-Host "ERROR: Generated MCP contracts are missing. Complete a Release build first." -ForegroundColor Red
     exit 1
 }
-foreach ($match in [regex]::Matches((Get-Content -LiteralPath $contractsPath -Raw), 'case\s+"([^"]+_read)"\s*:')) {
+foreach ($match in [regex]::Matches((Get-Content -LiteralPath $contractsPath -Raw), '\("([^"]+_read)",\s*"[^"]+"\)\s*=>')) {
     [void]$expectedReadToolNames.Add($match.Groups[1].Value)
 }
 $mcpSearchDirs = @(

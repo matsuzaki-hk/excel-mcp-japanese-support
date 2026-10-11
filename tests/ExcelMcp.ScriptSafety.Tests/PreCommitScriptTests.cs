@@ -75,7 +75,7 @@ public sealed class PreCommitScriptTests
             ("src/ExcelMcp.Core/Command.cs", true, true, false),
             ("src/ExcelMcp.CLI/Program.cs", true, true, false),
             ("src/ExcelMcp.McpServer/Program.cs", true, true, false),
-            ("src/ExcelMcp.Cleanup/Program.cs", true, true, false),
+            ("scripts/Stop-ExcelCliService.ps1", true, true, false),
             ("src/ExcelMcp.Generators.Cli/Generator.cs", true, true, false),
             ("docs/reference/report-formatting.md", true, false, true),
             ("Directory.Build.props", true, true, false),
@@ -157,7 +157,6 @@ public sealed class PreCommitScriptTests
     }
 
     [Theory]
-    [InlineData("check-npm-lockfiles")]
     [InlineData("check-com-leaks")]
     [InlineData("check-success-flag")]
     [InlineData("check-dynamic-casts")]
@@ -181,12 +180,11 @@ public sealed class PreCommitScriptTests
     }
 
     [Fact]
-    public async Task MergeCommit_UsesMergeParentAndStillGuardsLockfiles()
+    public async Task MergeCommit_UsesMergeParent()
     {
         var result = await RunHookAsync("README.md", merge: true);
         Assert.True(result.ExitCode == 0, result.Output);
         Assert.Contains("comparison-base=merge-parent", result.Output, StringComparison.Ordinal);
-        Assert.Contains("lockfile-ran -Staged", result.Output, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -214,19 +212,18 @@ public sealed class PreCommitScriptTests
             }
             foreach (var (name, message) in new[]
             {
-                ("check-npm-lockfiles", "lockfile-ran"),
                 ("check-com-leaks", "com-check-ran"),
                 ("check-success-flag", "success-check-ran"),
                 ("check-dynamic-casts", "casts-check-ran"),
                 ("check-workbook-package-access", "package-access-check-ran"),
-                ("Stop-ExcelMcpProcesses", "cleanup-ran"),
+                ("Stop-ExcelCliService", "cleanup-ran"),
                 ("Invoke-ExcelFreeTests", "excel-free-tests-ran"),
                 ("Invoke-ExcelTests", "excel-feature-tests-ran"),
                 ("Test-E2E", "e2e-ran"),
             })
             {
                 await File.WriteAllTextAsync(Path.Combine(scripts, $"{name}.ps1"),
-                    failure == "throw" && name == "check-npm-lockfiles"
+                    failure == "throw" && name == "check-com-leaks"
                         ? "throw 'check-root-cause'"
                         : name == failure
                         ? "Write-Host 'check-root-cause'; exit 19"

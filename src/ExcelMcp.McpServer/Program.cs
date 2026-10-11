@@ -64,7 +64,15 @@ public class Program
             .AddCommandLine(args);
 
         // Configure Application Insights
-        ConfigureTelemetry(builder);
+        try
+        {
+            ConfigureTelemetry(builder);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
 
         // Application Insights registers an ILogger provider that can forward framework
         // messages containing host paths or client names. Configure console logging last
@@ -97,6 +105,7 @@ public class Program
                     Do not set show:true just to leave a workbook open without a separate visibility request or known preference.
                     Use worksheet_read list to inspect sheets. Close only after active operations finish (canClose:true). Set save:true to keep changes;
                     close defaults to save:false and discards edits. Confirm before closing a visible window unless authorized.
+                    If file_read list reports excelState:dialogOpen, ask the user to check Excel for a prompt; the dialog type is not identified.
                     The server does not request confirmation through MCP elicitation; the client must obtain any needed consent.
                     Normal shutdown attempts to save remaining sessions. Crashes, timeouts, and forced cleanup may lose edits.
                     Cancellation is not undo: inspect file_read list before continuing, and do not blindly retry a change.
@@ -132,10 +141,11 @@ public class Program
             mcpBuilder.WithStdioServerTransport();
         }
 
-        var host = builder.Build();
+        using var host = builder.Build();
 
         // Initialize telemetry client for static access
         InitializeTelemetryClient(host.Services);
+        var localTelemetry = host.Services.GetService<LocalTelemetry>();
 
         // Note: Update checks are handled by ExcelMCP Service (shown via Windows notification)
         // to avoid duplicate notifications when running in unified package mode
@@ -146,7 +156,8 @@ public class Program
 
         try
         {
-            await host.RunAsync(runToken);
+            await host.StartAsync(runToken);
+            await host.WaitForShutdownAsync(runToken);
             return 0;
         }
         catch (OperationCanceledException)
@@ -170,6 +181,8 @@ public class Program
         finally
         {
             stdinMonitor?.Dispose();
+            localTelemetry?.Flush();
+            ExcelMcpTelemetry.SetLocalTelemetry(null);
         }
     }
 
@@ -193,6 +206,7 @@ public class Program
     /// </summary>
     private static void InitializeTelemetryClient(IServiceProvider services)
     {
+        ExcelMcpTelemetry.SetLocalTelemetry(services.GetService<LocalTelemetry>());
         // Resolve TelemetryClient from DI and store for static access
         // Worker Service SDK manages the TelemetryClient lifecycle including flush on shutdown
         var telemetryClient = services.GetService<TelemetryClient>();
@@ -207,12 +221,17 @@ public class Program
     /// Uses AddApplicationInsightsTelemetryWorkerService() for proper host integration.
     /// Enables Users/Sessions/Funnels/User Flows analytics in Azure Portal.
     /// </summary>
-    private static void ConfigureTelemetry(HostApplicationBuilder builder)
+    internal static void ConfigureTelemetry(HostApplicationBuilder builder, TelemetrySettings? settings = null)
     {
-        var connectionString = ExcelMcpTelemetry.GetConnectionString();
-        if (string.IsNullOrEmpty(connectionString))
+        settings ??= TelemetrySettings.Read(ExcelMcpTelemetry.GetConnectionString());
+        if (settings.Mode == TelemetryMode.Off)
         {
             return; // No connection string available (local dev build)
+        }
+        if (settings.Mode == TelemetryMode.Local)
+        {
+            builder.Services.AddSingleton(_ => new LocalTelemetry(settings, "ExcelMcp.McpServer"));
+            return;
         }
 
         // Configure Application Insights Worker Service SDK
@@ -225,7 +244,7 @@ public class Program
         var aiOptions = new ApplicationInsightsServiceOptions
         {
             // Set connection string if available
-            ConnectionString = connectionString,
+            ConnectionString = settings.ConnectionString,
 
             // Disable features not needed for MCP server (reduces overhead and AppMetrics ingestion)
             EnableQuickPulseMetricStream = false,  // Live Metrics not needed for CLI tool

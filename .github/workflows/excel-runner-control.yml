@@ -4,7 +4,10 @@ on:
   issues:
     types: [assigned]
   workflow_run:
-    workflows: [Copilot cloud agent, '[Excel Runner] Validation']
+    # Fork: upstream's 'Copilot cloud agent' workflow does not exist here;
+    # an unresolvable workflow name leaves phantom startup_failure runs on
+    # every workflow_run event.
+    workflows: ['[Excel Runner] Validation']
     types: [requested, completed]
   schedule:
     - cron: '*/5 * * * *'

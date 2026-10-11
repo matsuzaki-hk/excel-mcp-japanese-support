@@ -20,9 +20,9 @@ on:
         description: 'Custom version (e.g., 1.0.0-ja.1, overrides version_bump)'
         required: false
         type: string
-  workflow_run:
-    workflows: ["Sync with Upstream"]
-    types: [completed]
+  # NOTE: the workflow_run trigger on "Sync with Upstream" was removed: that
+  # workflow is disabled/renamed, and auto-sync-and-release.yml already
+  # dispatches this workflow directly via its trigger-release job.
 
 env:
   DOTNET_VERSION: '10.0.x'

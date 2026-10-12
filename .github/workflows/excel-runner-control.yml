@@ -9,8 +9,11 @@ on:
     # every workflow_run event.
     workflows: ['[Excel Runner] Validation']
     types: [requested, completed]
-  schedule:
-    - cron: '*/5 * * * *'
+  # Fork: schedule disabled. These jobs manage upstream's self-hosted Excel
+  # runner (vars.EXCEL_RUNNER_ENABLED) which the fork does not run; the
+  # 5-minute schedule only generated workflow_run noise on every event.
+  # schedule:
+  #   - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:

@@ -1,8 +1,9 @@
 name: '[Excel Runner] Maintenance'
 
 on:
-  schedule:
-    - cron: '17 1 * * 0'
+  # Fork: schedule disabled (upstream self-hosted runner infra, unused here).
+  # schedule:
+  #   - cron: '17 1 * * 0'
   workflow_dispatch:
 
 permissions:

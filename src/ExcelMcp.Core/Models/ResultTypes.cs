@@ -1070,6 +1070,10 @@ public class ExportedModuleInfo
     /// <summary>
     /// Number of lines in the exported module
     /// </summary>
+    public int LineCount { get; set; }
+}
+
+/// <summary>
 /// Result for reading part of a VBA module.
 /// </summary>
 public class VbaReadResult : ResultBase

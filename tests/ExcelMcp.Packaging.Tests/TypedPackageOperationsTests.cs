@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.IO.Compression;
-using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.Build;
 using Xunit;
 
@@ -13,16 +12,14 @@ namespace Sbroenne.ExcelMcp.Packaging.Tests;
 public sealed class TypedPackageOperationsTests
 {
     [Theory]
-    [InlineData(false, true, null, false)]
-    [InlineData(true, true, null, false)]
-    [InlineData(false, false, null, false)]
-    [InlineData(true, false, null, false)]
-    [InlineData(false, true, "AGENTS.md", false)]
-    [InlineData(false, true, "CLAUDE.md", false)]
-    [InlineData(false, true, null, true)]
-    [InlineData(true, true, null, true)]
+    [InlineData(false, null, false)]
+    [InlineData(true, null, false)]
+    [InlineData(false, "AGENTS.md", false)]
+    [InlineData(false, "CLAUDE.md", false)]
+    [InlineData(false, null, true)]
+    [InlineData(true, null, true)]
     public async Task AggregatePackaging_VsixTargetsRequireMatchingBundledRuntime(
-        bool corruptArm64Payload, bool reuseArm64Runtime, string? developerFile, bool skipExtensionTests)
+        bool corruptX64Payload, string? developerFile, bool skipExtensionTests)
     {
         var sandbox = NewSandbox();
         try
@@ -40,57 +37,40 @@ public sealed class TypedPackageOperationsTests
             var skill = Directory.CreateDirectory(Path.Combine(skills, "excel-mcp-report-formatting")).FullName;
             File.WriteAllText(Path.Combine(skill, "VERSION"), version);
             File.WriteAllText(Path.Combine(skill, "SKILL.md"), "Fixture skill");
-            var prepared = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var (architecture, machine) in new[] { ("x64", (ushort)0x8664), ("arm64", (ushort)0xaa64) })
-            {
-                var directory = Directory.CreateDirectory(Path.Combine(sandbox, "runtimes", architecture)).FullName;
-                BitConverter.GetBytes(machine).CopyTo(payload, offset + 4);
-                File.WriteAllBytes(Path.Combine(directory, "Sbroenne.ExcelMcp.McpServer.exe"), payload);
-            }
-            prepared["Mcp"] = Path.Combine(sandbox, "runtimes", "x64", "Sbroenne.ExcelMcp.McpServer.exe");
-            if (reuseArm64Runtime) { prepared["Mcp-arm64"] = Path.Combine(sandbox, "runtimes", "arm64", "Sbroenne.ExcelMcp.McpServer.exe"); }
+            // Fork: the VSIX also bundles the source-managed Japanese skill.
+            var jaSkill = Directory.CreateDirectory(Path.Combine(sandbox, "skills", "excel-mcp-ja")).FullName;
+            File.WriteAllText(Path.Combine(jaSkill, "SKILL.md"), "Fixture skill");
+            // Fork: only the x64 runtime is bundled; a corrupted payload must be rejected.
+            var machine = corruptX64Payload ? (ushort)0xaa64 : (ushort)0x8664;
+            var runtimeDir = Directory.CreateDirectory(Path.Combine(sandbox, "runtimes", "x64")).FullName;
+            BitConverter.GetBytes(machine).CopyTo(payload, offset + 4);
+            var runtime = Path.Combine(runtimeDir, "Sbroenne.ExcelMcp.McpServer.exe");
+            File.WriteAllBytes(runtime, payload);
+            var prepared = new Dictionary<string, string>(StringComparer.Ordinal) { ["Mcp"] = runtime };
             var output = Directory.CreateDirectory(Path.Combine(sandbox, "artifacts", "packages")).FullName;
             var calls = new List<PackageCommand>();
-            var publications = 0;
             var commands = new PackageCommands(call =>
             {
                 calls.Add(call);
-                if (call.Executable == "dotnet")
+                Assert.Equal("npm", call.Executable);
+                if (call.Arguments is ["run", "compile"])
                 {
-                    Assert.False(reuseArm64Runtime, "The prepared ARM64 runtime must be reused.");
-                    publications++;
-                    Assert.Equal(sandbox, call.WorkingDirectory);
-                    Assert.Contains(Path.Combine(sandbox, "src", "ExcelMcp.McpServer", "ExcelMcp.McpServer.csproj"), call.Arguments);
-                    Assert.Contains("win-arm64", call.Arguments);
-                    Assert.Contains($"-p:Version={version}", call.Arguments);
-                    var destination = call.Arguments[Array.IndexOf(call.Arguments, "-o") + 1];
-                    Assert.Equal(Path.Combine(output, "runtimes", "Mcp-arm64"), destination);
-                    Directory.CreateDirectory(destination);
-                    File.Copy(Path.Combine(sandbox, "runtimes", "arm64", "Sbroenne.ExcelMcp.McpServer.exe"), Path.Combine(destination, "Sbroenne.ExcelMcp.McpServer.exe"));
+                    var compiled = Directory.CreateDirectory(Path.Combine(call.WorkingDirectory, "out")).FullName;
+                    File.WriteAllText(Path.Combine(compiled, "extension.js"), "fixture");
+                    File.WriteAllText(Path.Combine(compiled, "prerequisites.js"), "fixture");
                 }
-                else
+                if (call.Arguments[0] == "exec")
                 {
-                    Assert.Equal("npm", call.Executable);
-                    if (call.Arguments is ["run", "compile"])
+                    var target = call.Arguments[Array.IndexOf(call.Arguments, "--target") + 1];
+                    var destination = call.Arguments[Array.IndexOf(call.Arguments, "--out") + 1];
+                    using var archive = ZipFile.Open(destination, ZipArchiveMode.Create);
+                    foreach (var file in Directory.EnumerateFiles(call.WorkingDirectory, "*", SearchOption.AllDirectories))
                     {
-                        var compiled = Directory.CreateDirectory(Path.Combine(call.WorkingDirectory, "out")).FullName;
-                        File.WriteAllText(Path.Combine(compiled, "extension.js"), "fixture");
-                        File.WriteAllText(Path.Combine(compiled, "prerequisites.js"), "fixture");
+                        var relative = Path.GetRelativePath(call.WorkingDirectory, file).Replace('\\', '/');
+                        archive.CreateEntryFromFile(file, $"extension/{relative}");
                     }
-                    if (call.Arguments[0] == "exec")
-                    {
-                        var target = call.Arguments[Array.IndexOf(call.Arguments, "--target") + 1];
-                        var destination = call.Arguments[Array.IndexOf(call.Arguments, "--out") + 1];
-                        using var archive = ZipFile.Open(destination, ZipArchiveMode.Create);
-                        foreach (var file in Directory.EnumerateFiles(call.WorkingDirectory, "*", SearchOption.AllDirectories))
-                        {
-                            var relative = Path.GetRelativePath(call.WorkingDirectory, file).Replace('\\', '/');
-                            var source = corruptArm64Payload && target == "win32-arm64" && relative == "bin/Sbroenne.ExcelMcp.McpServer.exe" ? prepared["Mcp"] : file;
-                            archive.CreateEntryFromFile(source, $"extension/{relative}");
-                        }
-                        using var writer = new StreamWriter(archive.CreateEntry("extension.vsixmanifest").Open());
-                        writer.Write($"<PackageManifest><Metadata><Identity TargetPlatform='{target}'/></Metadata></PackageManifest>");
-                    }
+                    using var writer = new StreamWriter(archive.CreateEntry("extension.vsixmanifest").Open());
+                    writer.Write($"<PackageManifest><Metadata><Identity TargetPlatform='{target}'/></Metadata></PackageManifest>");
                 }
                 return Task.FromResult(new ProcessResult(0, "", ""));
             });
@@ -105,35 +85,30 @@ public sealed class TypedPackageOperationsTests
                 Assert.NotNull(failure);
                 Assert.Contains($"VSIX contains development files or the CLI: extension/{developerFile}", failure.Message, StringComparison.Ordinal);
             }
-            else if (corruptArm64Payload)
+            else if (corruptX64Payload)
             {
                 Assert.NotNull(failure);
-                Assert.Contains("Runtime machine type 0x8664 does not match arm64", failure.Message, StringComparison.Ordinal);
+                Assert.Contains("does not match x64", failure.Message, StringComparison.Ordinal);
             }
             else
             {
                 Assert.Null(failure);
-                foreach (var (architecture, filename, machine) in new[] {
-                    ("x64", $"excel-mcp-{version}.vsix", (ushort)0x8664),
-                    ("arm64", $"excel-mcp-{version}-win32-arm64.vsix", (ushort)0xaa64)
-                })
+                // Fork contract: a single x64 VSIX under the excelmcp-ja name.
+                using var archive = ZipFile.OpenRead(Path.Combine(output, $"excelmcp-ja-{version}.vsix"));
+                var entry = archive.GetEntry("extension/bin/Sbroenne.ExcelMcp.McpServer.exe");
+                Assert.NotNull(entry);
+                using var reader = new BinaryReader(entry.Open());
+                var expected = File.ReadAllBytes(runtime);
+                var actual = reader.ReadBytes(expected.Length);
+                Assert.Equal((ushort)0x8664, BitConverter.ToUInt16(actual, offset + 4));
+                Assert.Equal(expected, actual);
+                foreach (var skillName in new[] { "excel-mcp-ja", "excel-mcp-report-formatting" })
                 {
-                    using var archive = ZipFile.OpenRead(Path.Combine(output, filename));
-                    var entry = archive.GetEntry("extension/bin/Sbroenne.ExcelMcp.McpServer.exe");
-                    Assert.NotNull(entry);
-                    using var reader = new BinaryReader(entry.Open());
-                    var expected = File.ReadAllBytes(Path.Combine(sandbox, "runtimes", architecture, "Sbroenne.ExcelMcp.McpServer.exe"));
-                    var actual = reader.ReadBytes(expected.Length);
-                    Assert.Equal(machine, BitConverter.ToUInt16(actual, offset + 4));
-                    Assert.Equal(expected, actual);
+                    Assert.NotNull(archive.GetEntry($"extension/skills/{skillName}/SKILL.md"));
+                    Assert.NotNull(archive.GetEntry($"extension/skills/{skillName}/VERSION"));
                 }
                 var debug = File.ReadAllBytes(Path.Combine(output, "extension", "bin", "Sbroenne.ExcelMcp.McpServer.exe"));
-                Assert.Equal(RuntimeInformation.OSArchitecture == Architecture.Arm64 ? (ushort)0xaa64 : (ushort)0x8664, BitConverter.ToUInt16(debug, offset + 4));
-            }
-            Assert.Equal(reuseArm64Runtime ? 0 : 1, publications);
-            if (!reuseArm64Runtime)
-            {
-                Assert.Equal(payload, File.ReadAllBytes(Path.Combine(output, "runtimes", "Mcp-arm64", "Sbroenne.ExcelMcp.McpServer.exe")));
+                Assert.Equal((ushort)0x8664, BitConverter.ToUInt16(debug, offset + 4));
             }
             Assert.Empty(Directory.GetFiles(output, "*-server-inspection.exe"));
         }

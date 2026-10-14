@@ -41,7 +41,7 @@ public sealed class McpbPackagingScriptTests
             StageMcpbInputs(sandbox);
             var output = Path.Combine(sandbox, "artifacts", "packages");
             var runtime = StageVersionedX64Runtime(sandbox, out var version);
-            var commands = new PackageCommands(_ => Task.FromResult(new ProcessResult(0, "", "")));
+            var commands = new PackageCommands(_ => Task.FromResult(new Sbroenne.ExcelMcp.Build.ProcessResult(0, "", "")));
             await new PackageExecution(sandbox, commands).ReleaseAsync(new PackageOptions
             {
                 Components = ["Mcpb"],
@@ -62,7 +62,7 @@ public sealed class McpbPackagingScriptTests
     [InlineData("CLAUDE.md")]
     public async Task AggregatePackaging_VsixTargetsRequireMatchingBundledRuntime(string? developerFile)
     {
-        var sandbox = CreateSandbox();
+        var sandbox = CreateSandbox("vsix-runtime");
         try
         {
             // Use a versioned PE fixture so the extension package exercises the real version check.
@@ -72,8 +72,8 @@ public sealed class McpbPackagingScriptTests
             {
                 File.WriteAllText(Path.Combine(extension, developerFile), "Developer-only instructions");
             }
-            File.WriteAllText(Path.Combine(extension, "package.json"), $$"""
-                {"version":"{{version}}","extensionKind":["ui"],"os":["win32"],"scripts":{"vscode:prepublish":"npm run compile"}}
+            File.WriteAllText(Path.Combine(extension, "package.json"), $$$"""
+                {"version":"{{{version}}}","extensionKind":["ui"],"os":["win32"],"scripts":{"vscode:prepublish":"npm run compile"}}
                 """);
             File.WriteAllText(Path.Combine(sandbox, "CHANGELOG.md"), "Fixture changelog");
             var skills = Directory.CreateDirectory(Path.Combine(sandbox, "prepared", "excel-mcp-report-formatting")).FullName;
@@ -269,8 +269,7 @@ public sealed class McpbPackagingScriptTests
         return bundle;
     }
 
-    private static string CurrentProcessExe() =>
-        Process.GetCurrentProcess().MainModule!.FileName!;
+    private static string CurrentProcessExe() => Environment.ProcessPath!;
 
     // Copies the test assembly as a self-contained x64 runtime fixture whose
     // ProductVersion matches, so the package version check exercises real data.
@@ -293,7 +292,7 @@ public sealed class McpbPackagingScriptTests
     // Simulates the npm/vsce steps inside the staged extension directory:
     // 'npm run compile' emits the out/ payload and 'vsce package' archives the
     // whole stage under extension/ plus the target's extension.vsixmanifest.
-    private static ProcessResult FakeExtensionCommand(PackageCommand command)
+    private static Sbroenne.ExcelMcp.Build.ProcessResult FakeExtensionCommand(PackageCommand command)
     {
         var arguments = command.Arguments;
         if (command.Executable == "npm" && arguments is ["run", "compile"])
@@ -301,7 +300,7 @@ public sealed class McpbPackagingScriptTests
             var outDirectory = Directory.CreateDirectory(Path.Combine(command.WorkingDirectory, "out")).FullName;
             File.WriteAllText(Path.Combine(outDirectory, "extension.js"), "fixture");
             File.WriteAllText(Path.Combine(outDirectory, "prerequisites.js"), "fixture");
-            return new ProcessResult(0, "", "");
+            return new Sbroenne.ExcelMcp.Build.ProcessResult(0, "", "");
         }
         if (command.Executable == "npm" && arguments.Length > 2 && arguments[0] == "exec" && arguments.Contains("vsce"))
         {
@@ -319,9 +318,9 @@ public sealed class McpbPackagingScriptTests
             {
                 writer.Write($"<PackageManifest><Metadata><Identity TargetPlatform='{target}'/></Metadata></PackageManifest>");
             }
-            return new ProcessResult(0, "", "");
+            return new Sbroenne.ExcelMcp.Build.ProcessResult(0, "", "");
         }
-        return new ProcessResult(0, "", "");
+        return new Sbroenne.ExcelMcp.Build.ProcessResult(0, "", "");
     }
 
     private static byte[] ReadAll(ZipArchiveEntry entry)

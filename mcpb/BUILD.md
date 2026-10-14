@@ -32,7 +32,7 @@ Run the script from the `mcpb` directory:
 .\Build-McpBundle.ps1
 ```
 
-The default output is `artifacts\excel-mcp-{version}.mcpb`. The version comes
+The default output is `artifacts\excel-mcp-ja-{version}.mcpb`. The version comes
 from `Directory.Build.props` unless you pass it explicitly.
 
 ```powershell
@@ -48,7 +48,7 @@ from `Directory.Build.props` unless you pass it explicitly.
 An `.mcpb` file is a ZIP-compatible archive with this layout:
 
 ```text
-excel-mcp-{version}.mcpb
+excel-mcp-ja-{version}.mcpb
 |-- manifest.json
 |-- icon-512.png
 |-- README.md
@@ -109,7 +109,7 @@ PowerShell's `Expand-Archive` expects a `.zip` extension. Copy the generated
 bundle before inspecting it:
 
 ```powershell
-$bundle = Get-ChildItem .\artifacts\excel-mcp-*.mcpb |
+$bundle = Get-ChildItem .\artifacts\excel-mcp-ja-*.mcpb |
   Sort-Object LastWriteTime -Descending |
   Select-Object -First 1
 $zip = [IO.Path]::ChangeExtension($bundle.FullName, ".zip")

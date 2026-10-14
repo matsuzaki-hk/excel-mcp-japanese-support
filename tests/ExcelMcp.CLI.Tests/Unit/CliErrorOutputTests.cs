@@ -13,6 +13,45 @@ namespace Sbroenne.ExcelMcp.CLI.Tests.Unit;
 [Trait("RequiresExcel", "false")]
 public sealed class CliErrorOutputTests
 {
+    [Fact]
+    public void WriteServiceError_PreservesPartialStateAsObject()
+    {
+        using var stdout = new StringWriter();
+        var originalOut = Console.Out;
+        var partialState = JsonSerializer.SerializeToElement(new
+        {
+            queryName = "Query",
+            mCodeUpdated = true,
+            queryExists = true,
+            loadMode = "load-to-table",
+            targetSheet = "Actual",
+            isLoadedToDataModel = false
+        });
+        try
+        {
+            Console.SetOut(stdout);
+            Assert.Equal(1, CliErrorOutput.WriteServiceError(new ServiceResponse
+            {
+                Success = false,
+                ErrorMessage = "Original privacy failure",
+                ErrorCategory = "Privacy",
+                Command = "powerquery.update",
+                PartialState = partialState.GetRawText()
+            }));
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        using var json = JsonDocument.Parse(stdout.ToString());
+        var root = json.RootElement;
+        Assert.False(root.GetProperty("success").GetBoolean());
+        Assert.True(root.GetProperty("isError").GetBoolean());
+        Assert.Equal("Privacy", root.GetProperty("errorCategory").GetString());
+        Assert.Equal(partialState.GetRawText(), root.GetProperty("partialState").GetRawText());
+    }
+
     [Theory]
     [InlineData(null, "Cancelled")]
     [InlineData("InvalidInput", "InvalidInput")]
@@ -72,10 +111,12 @@ public sealed class CliErrorOutputTests
         Assert.False(root.GetProperty("success").GetBoolean());
         Assert.Equal(category, root.GetProperty("errorCategory").GetString());
         Assert.Equal("Original operation context", root.GetProperty("errorMessage").GetString());
+        Assert.False(root.TryGetProperty("error", out _));
         Assert.Equal("Original cause", root.GetProperty("innerError").GetString());
         Assert.Equal("datamodel.evaluate", root.GetProperty("command").GetString());
         Assert.Equal("test-session", root.GetProperty("sessionId").GetString());
         Assert.Equal("0x800A03EC", root.GetProperty("hresult").GetString());
+        Assert.False(root.TryGetProperty("partialState", out _));
     }
 
     [Fact]

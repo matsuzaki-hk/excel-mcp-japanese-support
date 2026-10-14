@@ -5,13 +5,15 @@ instructions; review tasks use the root [Code Review Rules](../AGENTS.md#code-re
 
 ## Commands
 
-During development, use `dotnet test` with a filter for the affected project,
-class, or feature. Retain TRX results and use `--blame-hang-timeout` for Excel
-tests. Run each Excel-dependent command sequentially. Use
-`scripts\Invoke-ExcelTests.ps1` only for explicit group or complete-suite runs;
-its shared runner sets hard execution deadlines. Returning control while a
-test keeps running is not a timeout. Final runtime acceptance uses
-`scripts\Test-E2E.ps1` as required by the root rules.
+Use `build.ps1 plan` and `build.ps1 validate --plan <path>` for affected
+behavior and dependencies, and retain the selected results. Use
+`scripts\Invoke-ExcelTests.ps1` for explicit Excel group runs after a Release
+build; `scripts\Test-E2E.ps1` runs complete CLI/MCP acceptance. These runners
+set hard execution deadlines; returning control while a test keeps running
+is not a timeout.
+PR and commit checks share the typed changed-area policy. A test-only change
+selects its class and actual helper consumers; shared changes include affected
+dependencies. Empty or unknown selections must not be presented as passed tests.
 Session/batch infrastructure changes also require relevant ComInterop OnDemand
 tests. Core OnDemand tests are optional diagnostics, not mandatory CI gates.
 VBA needs Trust Center access; run screenshots separately because they use
@@ -38,8 +40,13 @@ Commands and prerequisites: [tests/README.md](README.md#quick-start).
   collection; separate Excel testhosts must not overlap. `RequiresExcel=false`
   alone does not establish parallel safety or low cost.
 - Positive tests assert successful prerequisites and verification responses,
-  then concrete workbook state and returned fields. Setup failure or an
-  expected error is not a successful positive test.
+  then exact values for every result field or workbook state the change adds
+  or advertises. Tests must fail if those fields are unexpectedly empty,
+  default, or stuck at one value. Cover each value of status flags (for example,
+  complete and incomplete) and promised data shapes (for example, multi-level
+  hierarchies, captions differing from names, and collections larger than a
+  requested bound). Setup failure or an expected error is not a successful
+  positive test.
 - Verify inside the test after the operation and before cleanup. No exception,
   success alone, object existence, or a loose count is not an outcome check.
   Replacements prove old/new state; refresh changes the source first;

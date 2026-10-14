@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Sbroenne.ExcelMcp.Core.Commands;
+using Sbroenne.ExcelMcp.Core.Commands.PivotTable;
+using Sbroenne.ExcelMcp.Core.Commands.Workbook;
 using Sbroenne.ExcelMcp.Core.Models;
 using Xunit;
 
@@ -20,6 +22,14 @@ public sealed partial class PersistentServicePowerQueryRefreshTests(
 
     private readonly IPowerQueryCommands _queries =
         ServiceCommandProxy.Create<IPowerQueryCommands>(fixture);
+    private readonly IPivotTableCommands _pivotTables =
+        ServiceCommandProxy.Create<IPivotTableCommands>(fixture);
+    private readonly IPivotTableFieldCommands _pivotFields =
+        ServiceCommandProxy.Create<IPivotTableFieldCommands>(fixture);
+    private readonly ISheetCommands _sheets =
+        ServiceCommandProxy.Create<ISheetCommands>(fixture);
+    private readonly IWorkbookCommands _workbooks =
+        ServiceCommandProxy.Create<IWorkbookCommands>(fixture);
     private readonly Dictionary<string, string> _storedSources = new(StringComparer.Ordinal);
 
     [Fact]
@@ -176,7 +186,7 @@ public sealed partial class PersistentServicePowerQueryRefreshTests(
 
         var response = await _fixture.SendForFailureAsync(
             "powerquery.refresh",
-            new { queryName, timeout = 60 });
+            new { queryName, timeoutSeconds = 60 });
 
         Assert.Equal("OperationFailureException", response.ExceptionType);
         Assert.Equal("Prerequisite", response.ErrorCategory);

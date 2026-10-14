@@ -177,8 +177,15 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
                 Command = cmd.Command,
                 Success = itemSucceeded,
                 Result = response.Success ? TryParseJsonElement(response.Result) : null,
-                Error = response.ErrorMessage ?? resultErrorMessage ??
-                    (negativeResult ? "Command reported success: false; see result for details." : null)
+                ErrorMessage = response.ErrorMessage ?? resultErrorMessage ??
+                    (negativeResult ? "Command reported success: false; see result for details." : null),
+                ErrorCategory = response.ErrorCategory,
+                ExceptionType = response.ExceptionType,
+                HResult = response.HResult,
+                InnerError = response.InnerError,
+                PartialState = response.PartialState is null
+                    ? null
+                    : JsonSerializer.Deserialize<JsonElement>(response.PartialState)
             };
 
             CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(output, BatchJsonOptions));
@@ -200,7 +207,7 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
             Index = index,
             Command = command,
             Success = false,
-            Error = error
+            ErrorMessage = error
         }, BatchJsonOptions));
     }
 
@@ -304,7 +311,7 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
     private static void WriteError(string message)
     {
         CliCommandRuntime.Current.Error.WriteLine(
-            JsonSerializer.Serialize(new { success = false, error = message }, ServiceProtocol.JsonOptions));
+            JsonSerializer.Serialize(new { success = false, errorMessage = message }, ServiceProtocol.JsonOptions));
     }
 
     // JSON options for batch I/O — camelCase, skip nulls for clean output
@@ -344,7 +351,22 @@ internal sealed class BatchCommand : AsyncCommand<BatchCommand.Settings>
         [JsonPropertyName("result")]
         public JsonElement? Result { get; init; }
 
-        [JsonPropertyName("error")]
-        public string? Error { get; init; }
+        [JsonPropertyName("errorMessage")]
+        public string? ErrorMessage { get; init; }
+
+        [JsonPropertyName("errorCategory")]
+        public string? ErrorCategory { get; init; }
+
+        [JsonPropertyName("exceptionType")]
+        public string? ExceptionType { get; init; }
+
+        [JsonPropertyName("hresult")]
+        public string? HResult { get; init; }
+
+        [JsonPropertyName("innerError")]
+        public string? InnerError { get; init; }
+
+        [JsonPropertyName("partialState")]
+        public JsonElement? PartialState { get; init; }
     }
 }

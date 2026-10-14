@@ -10,15 +10,6 @@ hide:
   - toc
 ---
 
-## Get started with Excel MCP Server or CLI
-
-ExcelMcp requires Windows and installed desktop Microsoft Excel. Choose the
-setup instructions for your assistant or command-line workflow:
-
-- [Set up Excel in GitHub Copilot for VS Code](installation-mcp-server.md#vs-code-extension-easiest-one-click-setup)
-- [Connect Claude Desktop to Excel](guides/claude-desktop.md)
-- [Install excelcli for coding agents and scripts](installation-cli.md)
-
 !!! success "Powered by the real Excel engine"
     Excel MCP Server automates the **actual Excel application** through its
     official COM API — the same engine Excel itself uses. That unlocks what
@@ -181,7 +172,7 @@ it and download the files the agent made.
 
 </div>
 
-[Explore capabilities across 60 MCP tools and 408 operations :material-arrow-right:](features.md){ .md-button .md-button--primary }
+[Explore capabilities across 60 MCP tools and 412 operations :material-arrow-right:](features.md){ .md-button .md-button--primary }
 
 ## Popular guides
 
@@ -240,8 +231,10 @@ features like **Python in Excel** work too — your AI assistant can write
 !!! info "Local Excel and your data"
     Excel runs on your Windows desktop. Requested workbook results are returned
     to your AI assistant, whose privacy policy applies. Release builds can send
-    anonymous usage statistics, but those statistics exclude workbook contents,
-    file names, and paths. Optional remote M/DAX formatting and Python in Excel
+    pseudonymous usage statistics using a stored random ID shared by the CLI and
+    MCP Server. A one-time migration event can link it to the previous name-derived
+    hash. Those statistics exclude workbook contents, file names, and paths.
+    Optional remote M/DAX formatting and Python in Excel
     use external services only when you request those features.
     [Read the privacy policy](privacy.md).
 
@@ -253,10 +246,12 @@ workflow:
 
 | Interface | Best for | Why |
 |-----------|----------|-----|
-| **CLI** (`excelcli`) | Coding agents (Copilot, Cursor, Windsurf) | **64% fewer tokens** — single tool, no large schemas. Better for cost-sensitive, high-throughput automation. |
-| **MCP Server** | Conversational AI (Claude Desktop, VS Code Chat) | Rich tool discovery and a persistent connection. Better for interactive, exploratory workflows. |
+| **CLI** (`excelcli`) | Agents that can run terminal commands | Built-in help without loading MCP tool definitions, usually with fewer AI tokens. |
+| **MCP Server** | Any MCP-compatible client | Tool discovery and a persistent connection. |
 
 [MCP Server docs](mcp-server.md){ .md-button } [CLI docs](cli.md){ .md-button }
+
+Coding agents can use either one; the choice is technical.
 
 ## GitHub star history
 

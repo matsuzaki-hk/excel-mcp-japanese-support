@@ -436,7 +436,7 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         string indent,
         string? argsPrefix = null)
     {
-        var minimumSeconds = info.Category == "powerquery" ? 0 : 1;
+        var minimumSeconds = info.Category is "powerquery" or "workbook" ? 0 : 1;
         foreach (var parameter in method.Parameters.Where(parameter => IsTimeSpanType(parameter.TypeName)))
         {
             var propertyName = parameter.ExposedName ?? parameter.Name;
@@ -873,7 +873,7 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
                 escapedDescription += " (JSON format)";
             if (isTimeoutSeconds && escapedDescription.IndexOf("seconds", StringComparison.OrdinalIgnoreCase) < 0)
             {
-                var minimumSeconds = info.Category == "powerquery" ? 0 : 1;
+                var minimumSeconds = info.Category is "powerquery" or "workbook" ? 0 : 1;
                 escapedDescription += $" Whole seconds only; range {minimumSeconds}-2147483.";
             }
 
@@ -1409,13 +1409,14 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
     }
 
     // Save As/copy/export defer output permissions to Excel; application and
-    // window controls do not require editing the workbook.
+    // window controls do not require editing the workbook. Native inspection can
+    // change the saved flag, but does not require workbook edit access.
     private static bool RequiresWritableWorkbook(ServiceInfo info, MethodInfo method) =>
         !info.NoSession && method.HasBatchParameter && !method.McpToolReadOnly &&
         info.Category is not ("window" or "screenshot") &&
         (info.Category != "calculationmode" || method.ActionName == "set-precision") &&
         (info.Category != "chart" || method.ActionName != "export-image") &&
-        (info.Category != "workbook" || method.ActionName is not ("save-as" or "save-copy-as" or "export-fixed-format"));
+        (info.Category != "workbook" || method.ActionName is not ("save-as" or "save-copy-as" or "export-fixed-format" or "inspect-document"));
 
     private static string GenerateCliManifest(List<ServiceInfo> categories)
     {
@@ -1865,7 +1866,7 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         {
             var propName = p.ExposedName ?? p.Name;
             var pascalProp = StringHelper.ToPascalCase(propName);
-            var minimumSeconds = info.Category == "powerquery" ? 0 : 1;
+            var minimumSeconds = info.Category is "powerquery" or "workbook" ? 0 : 1;
             sb.AppendLine(
                 $"                    var {p.Name} = Sbroenne.ExcelMcp.Core.Utilities.ParameterTransforms.ParseTimeoutSeconds(args.{pascalProp}, \"{propName}\", minimumSeconds: {minimumSeconds});");
         }

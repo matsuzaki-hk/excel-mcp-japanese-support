@@ -9,6 +9,7 @@ using Sbroenne.ExcelMcp.Core.Commands.Analysis;
 using Sbroenne.ExcelMcp.Core.Commands.Calculation;
 using Sbroenne.ExcelMcp.Core.Commands.Chart;
 using Sbroenne.ExcelMcp.Core.Commands.PivotTable;
+using Sbroenne.ExcelMcp.Core.Commands.Workbook;
 using Sbroenne.ExcelMcp.Core.Commands.XmlMap;
 using Sbroenne.ExcelMcp.Core.Models;
 using Sbroenne.ExcelMcp.Core.Utilities;
@@ -24,6 +25,30 @@ namespace Sbroenne.ExcelMcp.Core.Tests.Unit;
 [Trait("RequiresExcel", "false")]
 public sealed class GeneratedActionContractTests
 {
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"inspectorIndex":3}""")]
+    [InlineData("""{"inspectorName":"Hidden &Worksheets"}""")]
+    [InlineData("""{"inspectorIndex":3,"inspectorName":" "}""")]
+    public void DocumentInspectorDispatch_RequiresExactSelectionBeforeCore(string argsJson)
+    {
+        var (commands, proxy) = CreateProxy<IWorkbookCommands>();
+        Assert.Throws<ArgumentException>(() =>
+            ServiceRegistry.Workbook.DispatchToCore(commands, WorkbookAction.FixDocumentInspector, null!, argsJson));
+        Assert.Equal(0, proxy.CallCount);
+    }
+
+    [Fact]
+    public void DocumentInspectorDispatch_PreservesBatchJsonSelection()
+    {
+        var (commands, proxy) = CreateProxy<IWorkbookCommands>();
+        ServiceRegistry.Workbook.DispatchToCore(commands, WorkbookAction.FixDocumentInspector, null!,
+            """{"inspectorIndex":3,"inspectorName":"Hidden &Worksheets"}""");
+        Assert.Equal(1, proxy.CallCount);
+        Assert.Equal(3, Assert.IsType<int>(proxy.LastArguments![1]));
+        Assert.Equal("Hidden &Worksheets", Assert.IsType<string>(proxy.LastArguments[2]));
+    }
+
     [Theory]
     [InlineData("""{"precisionAsDisplayed":false}""", false)]
     [InlineData("""{"precisionAsDisplayed":false,"allowPrecisionLoss":null}""", false)]
@@ -162,6 +187,9 @@ public sealed class GeneratedActionContractTests
     [InlineData("worksheetstyle.get-tab-color", """{"sheetName":"Sheet1"}""")]
     [InlineData("powerquery.refresh", """{"queryName":"Probe","timeoutSeconds":60}""")]
     [InlineData("powerquery.refresh-all", """{"timeoutSeconds":60}""")]
+    [InlineData("powerquery.refresh-all", """{"refreshPivotTables":false,"timeoutSeconds":60}""")]
+    [InlineData("workbook.refresh-all", """{"timeoutSeconds":60}""")]
+    [InlineData("workbook.refresh-all", """{"timeoutSeconds":0}""")]
     [InlineData("vba.run", """{"procedureName":"Main","timeoutSeconds":60}""")]
     [InlineData("connection.refresh", """{"connectionName":"Probe","timeoutSeconds":60}""")]
     [InlineData("datamodel.refresh", """{"timeoutSeconds":60}""")]
@@ -325,6 +353,30 @@ public sealed class GeneratedActionContractTests
                 """{"pivotTableName":"PivotTable1","missingItemsLimit":"not-a-limit"}"""));
 
         Assert.Equal(0, proxy.CallCount);
+    }
+
+    [Fact]
+    public void PivotTableReadDispatch_UsesOptionalWorksheetAndMemberLimit()
+    {
+        var (commands, proxy) = CreateProxy<IPivotTableCommands>();
+
+        ServiceRegistry.PivotTable.DispatchToCore(
+            commands,
+            PivotTableAction.Read,
+            null!,
+            """{"pivotTableName":"Probe","sheetName":"Summary","maxSelectedMembers":25}""");
+
+        Assert.Equal("Summary", proxy.LastArguments![2]);
+        Assert.Equal(25, proxy.LastArguments[3]);
+
+        ServiceRegistry.PivotTable.DispatchToCore(
+            commands,
+            PivotTableAction.Read,
+            null!,
+            """{"pivotTableName":"Probe"}""");
+
+        Assert.Null(proxy.LastArguments![2]);
+        Assert.Equal(PivotTableSnapshotHelpers.DefaultMaxSelectedMembers, proxy.LastArguments[3]);
     }
 
     [Theory]
@@ -756,6 +808,20 @@ public sealed class GeneratedActionContractTests
     }
 
     [Fact]
+    public void RawDispatch_AllowsZeroForWorkbookRefreshAllTimeout()
+    {
+        var (commands, proxy) = CreateProxy<IWorkbookCommands>();
+
+        ServiceRegistry.Workbook.DispatchToCore(
+            commands,
+            WorkbookAction.RefreshAll,
+            null!,
+            """{"timeoutSeconds":0}""");
+
+        Assert.Equal(TimeSpan.Zero, Assert.IsType<TimeSpan>(proxy.LastArguments![1]));
+    }
+
+    [Fact]
     public void GeneratedRoutes_RejectOutOfRangeTimeoutsBeforeForwarding()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -817,6 +883,8 @@ public sealed class GeneratedActionContractTests
     [InlineData("workbook.save-as", false)]
     [InlineData("workbook.save-copy-as", false)]
     [InlineData("workbook.export-fixed-format", false)]
+    [InlineData("workbook.inspect-document", false)]
+    [InlineData("workbook.fix-document-inspector", true)]
     [InlineData("window.show", false)]
     [InlineData("chart.export-image", false)]
     [InlineData("xmlmap.export-xml", false)]

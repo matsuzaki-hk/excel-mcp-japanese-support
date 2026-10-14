@@ -3,8 +3,8 @@
 [AGENTS.md](../../AGENTS.md) owns the common repository rules and links the
 task-specific guides. [CONTEXT.md](../../CONTEXT.md) provides the system map;
 the [decision index](../DECISIONS.md) links architectural reasons and tradeoffs.
-Read only the decisions relevant to the work. ADRs are ordinary documentation,
-not a special instruction format that agents are guaranteed to load.
+ADRs are ordinary documentation, not a special instruction format that agents
+are guaranteed to load.
 
 ## Instruction discovery
 
@@ -74,8 +74,9 @@ Use the smallest applicable checks in [AGENTS.md](../../AGENTS.md#build-and-vali
 Builds and Excel-free checks do not prove Excel COM behavior.
 Desktop Excel is required for the local tests described in
 [tests/README.md](../../tests/README.md). Run Excel-dependent test commands
-sequentially. Runtime changes require local Excel E2E; report unavailable
-validation rather than claiming the hosted runner covered it.
+sequentially. Run the changed-area plan's selected Excel cases locally,
+including acceptance and infrastructure diagnostics when selected; report
+unavailable validation rather than claiming the hosted runner covered it.
 LLM evaluations also require external model access and may incur costs.
 Do not run them as an incidental setup check.
 

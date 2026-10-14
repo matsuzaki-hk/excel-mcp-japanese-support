@@ -12,6 +12,102 @@ Current commands and inputs come from CLI help or MCP tool descriptions.
 | Data Model | DAX measures and model relationships |
 | External OLAP cube | Existing server measures and cube hierarchies; supported client calculated members use MDX |
 
+## Create another report sharing a worksheet cache
+
+`create-from-table` and `create-from-range` create independent caches by default,
+even when their source is identical. To create a **new** report using an existing
+report's native cache, supply both sharing inputs:
+
+| Entry point | Existing PivotTable | Its exact worksheet |
+|---|---|---|
+| CLI | `--share-cache-with` | `--share-cache-with-sheet` |
+| MCP | `share_cache_with` | `share_cache_with_sheet` |
+| Service / CLI batch JSON | `shareCacheWith` | `shareCacheWithSheet` |
+
+Both must be nonblank or both omitted. The existing report must be a regular
+worksheet-backed PivotTable with the exact same source identity. Another
+worksheet or Table, or a different fixed range, is not a match even if the
+headers and data are identical. A Table and a fixed range covering its cells
+are distinct sources: sharing must not discard the Table's expanding source
+definition. When sharing through `create-from-range`, supply an explicit A1
+range address, not a named or structured Table reference; use `create-from-table`
+for a Table source. Excel's equivalent A1/R1C1 addresses and quoted worksheet references
+are resolved without rewriting the existing source. External/OLAP/Data Model
+caches and unresolvable source definitions are rejected before a report or
+cache is created.
+
+For an existing `SalesTable` and `ByRegion` on `Summary`:
+
+```cli
+excelcli -q pivottable create-from-table --session $sessionId --table-name SalesTable --destination-sheet Summary --destination-cell H3 --pivot-table-name ByProduct --share-cache-with ByRegion --share-cache-with-sheet Summary
+```
+
+```mcp
+pivottable(action: 'create-from-table', workbook_session_id: sessionId, table_name: 'SalesTable', destination_sheet: 'Summary', destination_cell: 'H3', pivot_table_name: 'ByProduct', share_cache_with: 'ByRegion', share_cache_with_sheet: 'Summary')
+```
+
+For `ByRegion` created from the fixed range `Data!A1:C100` instead:
+
+```cli
+excelcli -q pivottable create-from-range --session $sessionId --source-sheet Data --source-range A1:C100 --destination-sheet Summary --destination-cell H3 --pivot-table-name ByProduct --share-cache-with ByRegion --share-cache-with-sheet Summary
+```
+
+```mcp
+pivottable(action: 'create-from-range', workbook_session_id: sessionId, source_sheet: 'Data', source_range: 'A1:C100', destination_sheet: 'Summary', destination_cell: 'H3', pivot_table_name: 'ByProduct', share_cache_with: 'ByRegion', share_cache_with_sheet: 'Summary')
+```
+
+Sharing does not copy field layout or automatically connect slicers. Configure
+the new report's fields separately. `slicer` action `connect-pivottable` can then
+connect it to an existing slicer using that cache; selection filters every
+connected report, not independently cached reports. See the
+[complete CLI walkthrough](../guides/AUTOMATE-PIVOTTABLES.md).
+
+`read` returns `pivotTable.cacheIndex`, and each `list` entry returns `cacheIndex`.
+These are actual native indexes, local to this workbook, and can change when
+Excel reorganizes caches; they are not permanent IDs. Sharing creates no
+additional cache and does not move existing reports or consolidate caches.
+Once report creation starts, a later Excel failure does not promise rollback;
+inspect the named partial report before deciding what to do.
+
+## Read a bounded configuration snapshot
+
+`pivottable` action `read` returns the PivotTable layout together with exact
+selected members, native label/value filters, and Values-field settings. It
+does not return report cell values,
+refresh the PivotTable, or save the workbook.
+
+Use MCP `sheet_name` (CLI `--sheet`) to choose the exact worksheet when
+PivotTable names may repeat. MCP `max_selected_members` (CLI
+`--max-selected-members`) sets the maximum number of selected member names
+returned across all fields; it defaults to 100 and accepts 1 through 1000.
+Names are sorted for stable comparisons. `selectedMemberCount` reports the
+full count when known, while `membersTruncated` and `snapshotComplete` make an
+incomplete result explicit.
+
+For each placed row, column, or filter field, `fieldSelections` identifies the semantic field name and
+area, reports whether its exact selection and native filters were available,
+and lists selected members when `showAll` is false. Excel's automatic Values
+field, which appears when a PivotTable has two or more value fields, is not
+listed; value fields are reported in `valueFields`. An All selection has
+`showAll: true` and no selected member list. For OLAP and Data Model
+hierarchies, `fieldName` is the hierarchy unique name, `caption` is the
+displayed caption, and `selectedMemberUniqueNames` combines the selections from
+every level of the hierarchy; each unique name includes its level path. Native
+filters on OLAP levels include `levelUniqueName`. `fieldSelectionsAvailable`,
+`valueFieldsAvailable`, and `isOlapAvailable` distinguish unavailable
+configuration getters from empty results; inspect their matching error fields
+instead of assuming an empty list means no fields or selections.
+`snapshotComplete` is false when required state could not be read or the member
+bound truncated the result.
+
+```mcp
+pivottable_read(action: 'read', workbook_session_id: sessionId, pivot_table_name: 'SalesPivot', sheet_name: 'Summary', max_selected_members: 50)
+```
+
+```cli
+excelcli -q pivottable read --session $sessionId --pivot-table-name SalesPivot --sheet Summary --max-selected-members 50
+```
+
 For an existing cube measure, `add-value-field` accepts its exact qualified
 name (`[Measures].[Amount.SUM]`) or bare name (`Amount.SUM`). Dots in a
 measure name are not hierarchy separators. The requested aggregation is ignored
@@ -27,6 +123,11 @@ Use `datamodel update-measure` for an intentional compound DAX formula change.
 External measures must be changed on the cube server.
 
 ## Calculated fields are calculations on aggregates
+
+Regular calculated-field definitions belong to the PivotCache, not only the
+report used to create them. Creation, formula changes and deletion can affect
+other reports sharing that cache. Place a field in each report's Values area
+separately.
 
 For a regular PivotTable with a numeric `Sales` field, doubling Sales is safe.
 This example shows the distinction between defining a calculation, placing it
@@ -88,6 +189,15 @@ inspect them with `list-calculated-members` instead.
 
 ## Refresh, layout, and grouping
 
+Adding a value field can make a PivotTable overlap another PivotTable. Excel may
+accept the field but collapse the displayed summary to one `#SPILL!` cell.
+`pivottablefield add-value-field` (MCP `pivottable_field` action `add-value-field`)
+reports this as a failure. The field change remains; nothing is rolled back.
+Use `pivottable read` or `pivottable list` (MCP `pivottable` actions `read`/`list`)
+to inspect `layoutError`, the range, and field counts. These inspection operations
+can succeed while reporting a layout failure. Inspect nearby PivotTables and cells
+before deciding how to recover.
+
 Hierarchy subtotal changes apply one level at a time. A provider failure reports
 the completed levels and the attempted level, whose state may also have changed.
 Nothing is rolled back; inspect the hierarchy before retrying.
@@ -95,6 +205,10 @@ Nothing is rolled back; inspect the hierarchy before retrying.
 Refresh sources before their summaries. Worksheet-source edits may need a model
 refresh, followed by PivotTable refresh; Power Query refresh updates its model
 load but does not replace the dependent PivotTable refresh.
+Refreshing a shared cache updates its source records for all users; refresh
+dependent PivotTables explicitly and inspect their displayed results.
+Native grouping and ungrouping can also change fields available to reports
+sharing that cache. Choose independent caches when those effects are unwanted.
 
 - `sort-field` orders the selected field's labels in ascending or descending
   order, including Data Model fields identified by their exact CubeField name.
@@ -183,24 +297,44 @@ For an OLAP/Data Model report filter, use `set-report-filter` rather than
 OLAP member unique names (for example,
 `[RegionTable].[Region].&[North]`). An empty `selected_items` list shows all
 members; one or several names select those members only. This changes only the
-chosen PivotTable's report filter, not the Data Model or other reports.
-Nonempty selections enable Excel's multiple-selection mode, even for one member.
-After reopening a workbook with an external OLAP source, refresh the PivotTable
-to reconnect before changing its report filter.
+chosen PivotTable's report filter, not the Data Model or other reports. Use the
+exact hierarchy unique name returned by `list-fields` for `field_name`, not a
+level-qualified name. A one-member selection preserves the field's existing
+single- or multiple-selection mode; selecting several members enables Excel's
+multiple-selection mode when needed.
+After reopening a workbook with an external OLAP source, Excel may require an
+explicit PivotTable refresh to reconnect before the filter can be changed;
+refreshing can update source data, so it is not done automatically.
 For All, pass `selected_items: '[]'` in MCP or `--selected-items '[]'` in the CLI.
+
+Use `get-report-filter` with the same worksheet, PivotTable, and hierarchy to
+read one report filter without returning every PivotTable field or Values
+instance. It returns the exact selected member unique names, All state,
+selection mode, and field placement. `selectionStateAvailable: false` means
+Excel could not read the state; do not interpret empty `selectedItems` as All
+unless `showAll` is true and the state is available.
+Single-selection All state is identified using the hierarchy metadata exposed
+by Excel's OLAP connection, not a particular member name or caption. This also
+applies to `pivottable read`, including servers that name the All member
+`[AllMember]`. If Excel cannot expose the required metadata, the operation
+reports unavailable selection state rather than guessing.
 
 ```mcp
 pivottable_field(action: 'set-report-filter', workbook_session_id: sessionId, sheet_name: 'Summary', pivot_table_name: 'SalesPivot', field_name: '[RegionTable].[Region]', selected_items: '["[RegionTable].[Region].&[North]","[RegionTable].[Region].&[West]"]')
+pivottable_field(action: 'get-report-filter', workbook_session_id: sessionId, sheet_name: 'Summary', pivot_table_name: 'SalesPivot', field_name: '[RegionTable].[Region]')
 ```
 
 ```cli
 excelcli -q pivottablefield set-report-filter --session $sessionId --sheet Summary --pivot-table-name SalesPivot --field-name '[RegionTable].[Region]' --selected-items '["[RegionTable].[Region].&[North]","[RegionTable].[Region].&[West]"]'
+excelcli -q pivottablefield get-report-filter --session $sessionId --sheet Summary --pivot-table-name SalesPivot --field-name '[RegionTable].[Region]'
 ```
 
-The result reports the actual selected member names. If
-`mayHavePartiallyChanged` is true after a failure, inspect the PivotTable
-before retrying. The result also reports `rollbackAttempted`; this operation
-does not automatically undo a failed filter change.
+The write result separates `requestedItems` from `selectedItems`, which reports
+the actual state when Excel allowed readback. `failurePhase` identifies the
+failing operation phase. If `mayHavePartiallyChanged` is true after a failure,
+inspect the filter with `get-report-filter` before retrying. The result also
+reports `rollbackAttempted`; this operation does not automatically undo a
+failed filter change.
 The operation defers updates on the selected PivotTable where supported, but
 does not guarantee a particular number of provider queries.
 

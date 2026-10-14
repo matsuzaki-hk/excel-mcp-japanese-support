@@ -18,14 +18,17 @@ presence does not make them automatically loaded instructions.
 | [ADR-007](ADR-007-LOCAL-ACCESS-AND-TELEMETRY.md) | Local access and privacy boundaries | Current |
 | [ADR-008](ADR-008-GUIDANCE-SOURCE-OWNERSHIP.md) | Product and contributor guidance sources | Current |
 | [ADR-009](ADR-009-COORDINATED-RELEASE-OUTPUTS.md) | Release and publication ownership | Current |
+| [ADR-010](ADR-010-CHANGED-AREA-VALIDATION.md) | Shared changed-area validation and internal build tooling | Current |
 
 ## Maintaining decisions
 
 Create a record for a lasting architectural choice with meaningful alternatives,
 not each operation, implementation detail, or coding rule. Explain the current
-decision, reasons, tradeoffs, and consequences, then link its implementation
-and authoritative guidance. Do not copy mutable defaults, checklists, or
-procedures into the record.
+decision, then its reasons, tradeoffs, and consequences under "Reasons and
+tradeoffs", then link its implementation and authoritative guidance. Do not
+copy mutable defaults, counts, component inventories, checklists, or
+procedures into the record. When the code has not yet reached a decision,
+say so and link the tracking issue rather than describing the intent as done.
 
 Update a record when an approved decision changes. Keep this index aligned
 with current records; Git retains older versions, so there is no ADR archive

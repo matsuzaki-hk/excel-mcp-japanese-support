@@ -41,7 +41,6 @@ public static class ExcelToolsBase
         return JsonSerializer.Serialize(new
         {
             success = false,
-            error = errorMessage,
             errorMessage,
             errorCategory = response.ErrorCategory,
             command = response.Command,
@@ -49,6 +48,9 @@ public static class ExcelToolsBase
             exceptionType = response.ExceptionType,
             hresult = response.HResult,
             innerError = response.InnerError,
+            partialState = response.PartialState is null
+                ? (JsonElement?)null
+                : JsonSerializer.Deserialize<JsonElement>(response.PartialState),
             filePath,
             isError = true
         }, JsonOptions);
@@ -185,7 +187,6 @@ public static class ExcelToolsBase
         return JsonSerializer.Serialize(new
         {
             success = false,
-            error = errorMessage,
             errorMessage,
             errorCategory = "InvalidInput",
             filePath = path,
@@ -203,7 +204,6 @@ public static class ExcelToolsBase
         return JsonSerializer.Serialize(new
         {
             success = false,
-            error = errorMessage,
             errorMessage,
             errorCategory = OperationFailureClassifier.Classify(ex),
             isError = true,

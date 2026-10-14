@@ -1,5 +1,6 @@
 using System.Globalization;
 using Sbroenne.ExcelMcp.ComInterop;
+using Sbroenne.ExcelMcp.Core.Models;
 using Xunit;
 using Excel = Microsoft.Office.Interop.Excel;
 
@@ -7,6 +8,180 @@ namespace Sbroenne.ExcelMcp.Service.Tests;
 
 public sealed partial class PersistentServiceConnectionTests
 {
+    [ConfiguredExternalOlapFact]
+    [Trait("RunType", "OnDemand")]
+    public async Task ExternalOlapPivotTable_ReportFilter_NonstandardAllPreservesSingleSelection()
+    {
+        var (sheet, pivot, _) = CreateConfiguredExternalPivot("ExternalNonstandardAll");
+        var batch = _fixture.BatchToken;
+        var pivots = _fixture.CreateCommands<IPersistentPivotTableCommands>();
+        RequireSuccess(pivots.AddRowField(batch, pivot, ExternalRelativePeriod));
+        RequireSuccess(pivots.AddValueField(batch, pivot, ExternalAmountMeasure));
+        const string selectedMember = "[Sales].[RelativePeriod].[ALL].[AllMember].[Current Month]";
+        const string allMember = "[Sales].[RelativePeriod].[ALL].[AllMember]";
+        AssertExternalGrandTotal(pivot, 300);
+        var members = ReadExternalReportFilterMembers(sheet, pivot);
+        Assert.Equal(selectedMember, members["Current Month"]);
+        RequireSuccess(pivots.RemoveField(batch, pivot, ExternalRelativePeriod));
+        RequireSuccess(pivots.AddFilterField(batch, pivot, ExternalRelativePeriod));
+
+        SetExternalReportFilterSingleSelection(sheet, pivot, selectedMember);
+        AssertNativeSelection(false, selectedMember);
+        AssertSelection(false, selectedMember, 23);
+
+        SetExternalReportFilterSingleSelection(sheet, pivot, allMember);
+        AssertNativeSelection(true, allMember);
+        AssertSelection(true, null, 300);
+
+        var selected = RequireSuccess(pivots.SetReportFilter(
+            batch, sheet, pivot, ExternalRelativePeriod, [selectedMember]));
+        Assert.False(selected.ShowAll);
+        Assert.False(selected.MultipleSelectionEnabled);
+        Assert.Equal([selectedMember], selected.SelectedItems);
+        AssertNativeSelection(false, selectedMember);
+        AssertSelection(false, selectedMember, 23);
+
+        var assignedAll = RequireSuccess(pivots.SetReportFilter(
+            batch, sheet, pivot, ExternalRelativePeriod, [allMember]));
+        Assert.Equal([allMember], assignedAll.RequestedItems);
+        Assert.True(assignedAll.SelectionStateAvailable);
+        Assert.True(assignedAll.ShowAll);
+        Assert.False(assignedAll.MultipleSelectionEnabled);
+        Assert.Empty(assignedAll.SelectedItems);
+        AssertSelection(true, null, 300);
+
+        var rejected = pivots.SetReportFilter(batch, sheet, pivot, ExternalRelativePeriod,
+            ["[Sales].[RelativePeriod].[ALL].[AllMember].[MissingPeriod]"]);
+        Assert.False(rejected.Success);
+        Assert.Equal("set-single-selection", rejected.FailurePhase);
+        Assert.True(rejected.MayHavePartiallyChanged);
+        Assert.False(rejected.RollbackAttempted);
+        Assert.False(string.IsNullOrWhiteSpace(rejected.ErrorMessage));
+        Assert.True(rejected.SelectionStateAvailable);
+        Assert.True(rejected.ShowAll);
+        Assert.Empty(rejected.SelectedItems);
+        AssertSelection(true, null, 300);
+
+        RequireSuccess(pivots.SetReportFilter(
+            batch, sheet, pivot, ExternalRelativePeriod, [selectedMember]));
+        var cleared = RequireSuccess(pivots.SetReportFilter(
+            batch, sheet, pivot, ExternalRelativePeriod, []));
+        Assert.True(cleared.SelectionStateAvailable);
+        Assert.True(cleared.ShowAll);
+        Assert.False(cleared.MultipleSelectionEnabled);
+        Assert.Empty(cleared.SelectedItems);
+        AssertNativeSelection(true, allMember);
+        AssertSelection(true, null, 300);
+
+        await _fixture.SaveAndReopenAsync();
+        var disconnected = pivots.GetReportFilter(batch, sheet, pivot, ExternalRelativePeriod);
+        Assert.False(disconnected.Success);
+        Assert.False(disconnected.SelectionStateAvailable);
+        Assert.Equal("read-filter-state", disconnected.FailurePhase);
+        Assert.Contains("ADO session", disconnected.ErrorMessage, StringComparison.Ordinal);
+        Assert.False(disconnected.MayHavePartiallyChanged);
+        var disconnectedSnapshot = RequireSuccess(pivots.Read(batch, pivot, sheet));
+        Assert.False(disconnectedSnapshot.SnapshotComplete);
+        var unavailable = Assert.Single(disconnectedSnapshot.FieldSelections);
+        Assert.False(unavailable.SelectionStateAvailable);
+        Assert.Null(unavailable.ShowAll);
+        Assert.Null(unavailable.SelectedMemberCount);
+        Assert.Empty(unavailable.SelectedMemberUniqueNames);
+        Assert.Contains("ADO session", unavailable.SelectionError, StringComparison.Ordinal);
+        RequireSuccess(pivots.Refresh(batch, pivot));
+        AssertNativeSelection(true, allMember);
+        AssertSelection(true, null, 300);
+
+        void AssertSelection(bool showAll, string? member, double total)
+        {
+            var snapshot = RequireSuccess(pivots.Read(batch, pivot, sheet));
+            Assert.True(snapshot.SnapshotComplete);
+            var field = Assert.Single(snapshot.FieldSelections);
+            Assert.Equal(ExternalRelativePeriod, field.FieldName);
+            Assert.Equal(PivotFieldArea.Filter, field.Area);
+            Assert.True(field.SelectionStateAvailable);
+            Assert.Equal(showAll, field.ShowAll);
+            Assert.False(field.MultipleSelectionEnabled);
+            Assert.Equal(showAll ? null : (int?)1, field.SelectedMemberCount);
+            Assert.Equal(member is null ? [] : new[] { member }, field.SelectedMemberUniqueNames);
+            Assert.False(field.MembersTruncated);
+
+            var filter = RequireSuccess(pivots.GetReportFilter(batch, sheet, pivot, ExternalRelativePeriod));
+            Assert.True(filter.SelectionStateAvailable);
+            Assert.Equal(showAll, filter.ShowAll);
+            Assert.False(filter.MultipleSelectionEnabled);
+            Assert.Equal(member is null ? [] : new[] { member }, filter.SelectedItems);
+            var data = RequireSuccess(pivots.GetData(batch, pivot));
+            Assert.Equal(total, Convert.ToDouble(
+                Assert.Single(data.Values.SelectMany(row => row), value => value is double or int),
+                CultureInfo.InvariantCulture));
+        }
+
+        void AssertNativeSelection(bool showAll, string currentPage) =>
+            _fixture.ExecuteRawVerification((context, _) =>
+            {
+                Excel.Worksheet? worksheet = null;
+                Excel.PivotTables? tables = null;
+                Excel.PivotTable? table = null;
+                Excel.CubeFields? cubes = null;
+                Excel.CubeField? cube = null;
+                Excel.PivotFields? fields = null;
+                Excel.PivotField? field = null;
+                Excel.PivotCache? cache = null;
+                dynamic? ado = null;
+                dynamic? rows = null;
+                dynamic? columns = null;
+                dynamic? all = null;
+                try
+                {
+                    worksheet = ComUtilities.FindSheet(context.Book, sheet);
+                    tables = worksheet.PivotTables();
+                    table = tables.Item(pivot);
+                    cubes = table.CubeFields;
+                    cube = cubes[ExternalRelativePeriod];
+                    fields = cube.PivotFields;
+                    field = fields.Item(1);
+                    Assert.False(cube.EnableMultiplePageItems);
+                    Assert.Equal(currentPage, field.CurrentPageName);
+                    cache = table.PivotCache();
+                    // ADO schema rowsets have no referenced PIA.
+                    ado = cache.ADOConnection;
+                    rows = ado.OpenSchema(34, new object?[]
+                        { null, null, "SalesCube", null, null, ExternalRelativePeriod });
+                    Assert.False(Convert.ToBoolean(rows.EOF, CultureInfo.InvariantCulture));
+                    columns = rows.Fields;
+                    all = columns.Item("ALL_MEMBER");
+                    Assert.Equal(allMember, Convert.ToString(all.Value, CultureInfo.InvariantCulture));
+                    Assert.Equal(showAll, string.Equals(currentPage,
+                        Convert.ToString(all.Value, CultureInfo.InvariantCulture), StringComparison.Ordinal));
+                    return true;
+                }
+                finally
+                {
+                    ComUtilities.Release(ref all);
+                    ComUtilities.Release(ref columns);
+                    try
+                    {
+                        if (rows is not null)
+                            rows.Close();
+                    }
+                    finally
+                    {
+                        ComUtilities.Release(ref rows);
+                        ComUtilities.Release(ref ado);
+                        ComUtilities.Release(ref cache);
+                        ComUtilities.Release(ref field);
+                        ComUtilities.Release(ref fields);
+                        ComUtilities.Release(ref cube);
+                        ComUtilities.Release(ref cubes);
+                        ComUtilities.Release(ref table);
+                        ComUtilities.Release(ref tables);
+                        ComUtilities.Release(ref worksheet);
+                    }
+                }
+            });
+    }
+
     [ConfiguredExternalOlapFact]
     [Trait("RunType", "OnDemand")]
     public async Task ExternalOlapPivotTable_ReportFilter_SelectsOneMultipleAndAllWithoutChangingOtherReport()
@@ -32,6 +207,21 @@ public sealed partial class PersistentServiceConnectionTests
         RequireSuccess(pivots.RemoveField(batch, pivot, ExternalRelativePeriod));
         RequireSuccess(pivots.AddFilterField(batch, pivot, ExternalRelativePeriod));
 
+        var wrongIdentifier = pivots.SetReportFilter(
+            batch, sheet, pivot, $"{ExternalRelativePeriod}.[RelativePeriod]", []);
+        Assert.False(wrongIdentifier.Success);
+        Assert.Contains("list-fields", wrongIdentifier.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(wrongIdentifier.MayHavePartiallyChanged);
+
+        SetExternalReportFilterSingleSelection(sheet, pivot, members["Current Month"]);
+        var singleModeBefore = RequireSuccess(pivots.GetReportFilter(
+            batch, sheet, pivot, ExternalRelativePeriod));
+        Assert.False(singleModeBefore.MultipleSelectionEnabled);
+        Select([members["Prior Month"]], 22);
+        var singleModeAfter = RequireSuccess(pivots.GetReportFilter(
+            batch, sheet, pivot, ExternalRelativePeriod));
+        Assert.False(singleModeAfter.MultipleSelectionEnabled);
+
         Select([members["Current Month"]], 23);
         Select([members["Current Month"], members["Prior Month"]], 45);
         Select([members["Next Month"]], 24);
@@ -43,10 +233,19 @@ public sealed partial class PersistentServiceConnectionTests
             ["[Sales].[RelativePeriod].[RelativePeriod].&[MissingPeriod]"]);
         Assert.False(rejected.Success);
         Assert.False(string.IsNullOrWhiteSpace(rejected.ErrorMessage));
+        Assert.Equal(["[Sales].[RelativePeriod].[RelativePeriod].&[MissingPeriod]"],
+            rejected.RequestedItems);
+        Assert.True(rejected.SelectionStateAvailable);
+        Assert.Equal("assign-selected-items", rejected.FailurePhase);
         Assert.True(rejected.MayHavePartiallyChanged);
         Assert.False(rejected.RollbackAttempted);
         Assert.True(rejected.ShowAll);
         Assert.Empty(rejected.SelectedItems);
+        var afterFailure = RequireSuccess(pivots.GetReportFilter(
+            batch, sheet, pivot, ExternalRelativePeriod));
+        Assert.True(afterFailure.ShowAll);
+        Assert.True(afterFailure.SelectionStateAvailable);
+        Assert.Empty(afterFailure.SelectedItems);
         AssertTotal(300);
         Assert.Equal(otherBefore, ReadExternalPivotState(otherSheet, otherPivot));
 
@@ -61,16 +260,42 @@ public sealed partial class PersistentServiceConnectionTests
 
         void Select(List<string> selectedItems, double expected)
         {
+            var before = RequireSuccess(pivots.GetReportFilter(
+                batch, sheet, pivot, ExternalRelativePeriod));
             var result = RequireSuccess(pivots.SetReportFilter(
                 batch, sheet, pivot, ExternalRelativePeriod, selectedItems));
             Assert.Equal(sheet, result.SheetName);
             Assert.Equal(pivot, result.PivotTableName);
             Assert.Equal(ExternalRelativePeriod, result.FieldName);
+            Assert.NotNull(result.RequestedItems);
+            Assert.Equal(selectedItems.Order(StringComparer.Ordinal),
+                result.RequestedItems!.Order(StringComparer.Ordinal));
+            Assert.True(result.SelectionStateAvailable);
             Assert.Equal(selectedItems.Count == 0, result.ShowAll);
             Assert.Equal(selectedItems.Order(StringComparer.Ordinal),
                 result.SelectedItems.Order(StringComparer.Ordinal));
+            Assert.Equal(before.MultipleSelectionEnabled || selectedItems.Count > 1,
+                result.MultipleSelectionEnabled);
             Assert.False(result.MayHavePartiallyChanged);
             Assert.False(result.RollbackAttempted);
+
+            var inspected = RequireSuccess(pivots.GetReportFilter(
+                batch, sheet, pivot, ExternalRelativePeriod));
+            Assert.Equal(PivotFieldArea.Filter, inspected.FieldArea);
+            Assert.Equal(result.ShowAll, inspected.ShowAll);
+            Assert.Equal(result.MultipleSelectionEnabled, inspected.MultipleSelectionEnabled);
+            Assert.Equal(result.SelectedItems.Order(StringComparer.Ordinal),
+                inspected.SelectedItems.Order(StringComparer.Ordinal));
+            var snapshot = RequireSuccess(pivots.Read(batch, pivot, sheet));
+            Assert.True(snapshot.SnapshotComplete);
+            var selection = Assert.Single(snapshot.FieldSelections);
+            Assert.True(selection.SelectionStateAvailable);
+            Assert.Equal(result.ShowAll, selection.ShowAll);
+            Assert.Equal(result.MultipleSelectionEnabled, selection.MultipleSelectionEnabled);
+            Assert.Equal(selectedItems.Count == 0 ? null : (int?)selectedItems.Count,
+                selection.SelectedMemberCount);
+            Assert.Equal(selectedItems.Order(StringComparer.Ordinal),
+                selection.SelectedMemberUniqueNames.Order(StringComparer.Ordinal));
             AssertTotal(expected);
             Assert.Equal(otherBefore, ReadExternalPivotState(otherSheet, otherPivot));
         }
@@ -82,6 +307,44 @@ public sealed partial class PersistentServiceConnectionTests
                 Assert.Single(data.Values.SelectMany(row => row), value => value is double or int),
                 CultureInfo.InvariantCulture));
         }
+    }
+
+    private void SetExternalReportFilterSingleSelection(
+        string sheetName, string pivotName, string selectedMember)
+    {
+        _fixture.ExecuteRawVerification((context, _) =>
+        {
+            Excel.Worksheet? sheet = null;
+            Excel.PivotTables? pivots = null;
+            Excel.PivotTable? pivot = null;
+            Excel.CubeFields? cubes = null;
+            Excel.CubeField? cube = null;
+            Excel.PivotFields? fields = null;
+            Excel.PivotField? field = null;
+            try
+            {
+                sheet = ComUtilities.FindSheet(context.Book, sheetName);
+                pivots = sheet.PivotTables();
+                pivot = pivots.Item(pivotName);
+                cubes = pivot.CubeFields;
+                cube = cubes[ExternalRelativePeriod];
+                fields = cube.PivotFields;
+                field = fields.Item(1);
+                cube.EnableMultiplePageItems = false;
+                field.CurrentPageName = selectedMember;
+                return true;
+            }
+            finally
+            {
+                ComUtilities.Release(ref field);
+                ComUtilities.Release(ref fields);
+                ComUtilities.Release(ref cube);
+                ComUtilities.Release(ref cubes);
+                ComUtilities.Release(ref pivot);
+                ComUtilities.Release(ref pivots);
+                ComUtilities.Release(ref sheet);
+            }
+        });
     }
 
     private Dictionary<string, string> ReadExternalReportFilterMembers(string sheetName, string pivotName) =>

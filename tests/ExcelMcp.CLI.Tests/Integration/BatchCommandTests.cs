@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Sbroenne.ExcelMcp.CLI.Tests.Helpers;
+using Sbroenne.ExcelMcp.Service;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -32,6 +33,50 @@ public sealed class BatchCommandTests : IDisposable
     {
         try { Directory.Delete(_tempDir, recursive: true); }
         catch { /* best effort */ }
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("update")]
+    public async Task Batch_PowerQueryFailure_PreservesDiagnosticsAndPartialState(string action)
+    {
+        var partialState = JsonSerializer.SerializeToElement(new
+        {
+            queryName = "Query",
+            queryExists = true,
+            loadMode = "load-to-table",
+            targetSheet = "Actual",
+            isLoadedToDataModel = false
+        });
+        var result = await InProcessCliHelper.RunAsync(["batch", "--session", "session"],
+            request =>
+            {
+                Assert.Equal($"powerquery.{action}", request.Command);
+                Assert.Equal("session", request.SessionId);
+                return new ServiceResponse
+                {
+                    Success = false,
+                    ErrorMessage = "Query remains after privacy failure",
+                    ErrorCategory = "Privacy",
+                    ExceptionType = "PowerQueryCommandException",
+                    HResult = "0x800A03EC",
+                    InnerError = "Original privacy error",
+                    PartialState = partialState.GetRawText()
+                };
+            },
+            $$$"""{"command":"powerquery.{{{action}}}","args":{"queryName":"Query","mCode":"error \"Formula.Firewall\""}}""");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(result.Stderr);
+        using var json = JsonDocument.Parse(result.Stdout);
+        var root = json.RootElement;
+        Assert.False(root.GetProperty("success").GetBoolean());
+        Assert.Equal(partialState.GetRawText(), root.GetProperty("partialState").GetRawText());
+        Assert.Equal("Privacy", root.GetProperty("errorCategory").GetString());
+        Assert.Equal("PowerQueryCommandException", root.GetProperty("exceptionType").GetString());
+        Assert.Equal("0x800A03EC", root.GetProperty("hresult").GetString());
+        Assert.Equal("Original privacy error", root.GetProperty("innerError").GetString());
+        Assert.Equal("Query remains after privacy failure", root.GetProperty("errorMessage").GetString());
     }
 
     // ============================================
@@ -206,7 +251,7 @@ public sealed class BatchCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Batch_SuccessResult_HasNoErrorField()
+    public async Task Batch_SuccessResult_HasNoErrorMessageField()
     {
         var inputFile = WriteBatchFile("""
             [
@@ -218,13 +263,15 @@ public sealed class BatchCommandTests : IDisposable
 
         Assert.Single(results);
         Assert.True(results[0].GetProperty("success").GetBoolean());
-        // error field should be absent (JsonIgnoreCondition.WhenWritingNull)
-        Assert.False(results[0].TryGetProperty("error", out _),
-            "Success result should not contain 'error' field");
+        // Error message should be absent (JsonIgnoreCondition.WhenWritingNull).
+        Assert.False(results[0].TryGetProperty("errorMessage", out _),
+            "Success result should not contain 'errorMessage' field");
+        Assert.False(results[0].TryGetProperty("partialState", out _));
+        Assert.False(results[0].TryGetProperty("errorCategory", out _));
     }
 
     [Fact]
-    public async Task Batch_ErrorResult_HasErrorField()
+    public async Task Batch_ErrorResult_HasOnlyErrorMessageField()
     {
         var inputFile = WriteBatchFile("""
             [
@@ -236,8 +283,10 @@ public sealed class BatchCommandTests : IDisposable
 
         Assert.Single(results);
         Assert.False(results[0].GetProperty("success").GetBoolean());
-        Assert.True(results[0].TryGetProperty("error", out var error));
-        Assert.False(string.IsNullOrWhiteSpace(error.GetString()));
+        Assert.True(results[0].TryGetProperty("errorMessage", out var errorMessage));
+        Assert.False(string.IsNullOrWhiteSpace(errorMessage.GetString()));
+        Assert.False(results[0].TryGetProperty("error", out _));
+        Assert.False(results[0].TryGetProperty("partialState", out _));
     }
 
     // ============================================

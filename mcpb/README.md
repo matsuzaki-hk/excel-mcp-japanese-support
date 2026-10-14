@@ -15,7 +15,7 @@ Excel MCP Server lets you automate Excel through conversation with Claude:
 - **Automate** - VBA macros, batch operations, data refresh
 - **Agent Mode** - Say "show me Excel" and watch AI work in real-time, side-by-side with Claude
 
-**60 MCP tools across 31 feature areas, with 408 operations** for comprehensive Excel automation.
+**60 MCP tools across 31 feature areas, with 412 operations** for comprehensive Excel automation.
 
 ## Requirements
 
@@ -112,11 +112,15 @@ Claude through the MCP client.
 code and requires explicit consent. Python in Excel runs Python code and
 referenced worksheet data in Microsoft's cloud.
 
-**Anonymous telemetry:** The MCP Server collects tool usage, performance, and
-error-rate metrics. Telemetry excludes file contents, file names, paths, and
-personal data.
+**Pseudonymous telemetry:** The MCP Server collects tool usage, performance,
+and error-rate metrics using a random ID stored for the current Windows user.
+When Azure telemetry is active as the ID is first created, one migration event
+also sends the previous name-derived hash so older usage can be counted under
+the new ID. Local telemetry does not send this link to Azure. Raw names,
+workbook contents, file names, and paths are not sent.
 
-See our complete [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/ja-localization/PRIVACY.md).
+See our complete [Privacy Policy](https://github.com/matsuzaki-hk/excel-mcp-japanese-support/blob/ja-localization/PRIVACY.md) for
+details and the accepted telemetry-off limitation.
 
 ## Troubleshooting
 

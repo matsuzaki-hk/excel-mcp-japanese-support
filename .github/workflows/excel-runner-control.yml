@@ -3,12 +3,12 @@ name: '[Excel Runner] Control'
 on:
   issues:
     types: [assigned]
-  workflow_run:
-    # Fork: upstream's 'Copilot cloud agent' workflow does not exist here;
-    # an unresolvable workflow name leaves phantom startup_failure runs on
-    # every workflow_run event.
-    workflows: ['[Excel Runner] Validation']
-    types: [requested, completed]
+  # Fork: workflow_run trigger removed entirely. The listeners referenced
+  # upstream-only workflows ('Copilot cloud agent' / '[Excel Runner]
+  # Validation') which never run on this fork, and every workflow_run event
+  # additionally spawned phantom startup_failure runs against a deleted
+  # 'BuildFailed' workflow registration. With no workflow_run listeners
+  # left in the repo, GitHub stops emitting the event at all.
   # Fork: schedule disabled. These jobs manage upstream's self-hosted Excel
   # runner (vars.EXCEL_RUNNER_ENABLED) which the fork does not run; the
   # 5-minute schedule only generated workflow_run noise on every event.

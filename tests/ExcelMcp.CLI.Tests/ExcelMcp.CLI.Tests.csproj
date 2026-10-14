@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <NoWarn>$(NoWarn);CS1591;CA1707</NoWarn>
     <LangVersion>latest</LangVersion>
@@ -17,17 +16,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="xunit" />
-    <PackageReference Include="xunit.runner.visualstudio">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
-    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
@@ -45,6 +34,7 @@
     <Compile Include="..\Shared\SavedWorkbookTemplate.cs" Link="Helpers\SavedWorkbookTemplate.cs" />
     <Compile Include="..\Shared\TestClassificationArchitectureTests.cs" Link="Helpers\TestClassificationArchitectureTests.cs" />
     <Compile Include="..\Shared\LocalTelemetryTests.cs" Link="Unit\LocalTelemetryTests.cs" />
+    <Compile Include="..\Shared\TelemetryUserIdentityTests.cs" Link="Unit\TelemetryUserIdentityTests.cs" />
     <Compile Include="..\Shared\LocalOtlpReceiver.cs" Link="Helpers\LocalOtlpReceiver.cs" />
     <Compile Include="..\Shared\LocalGrpcOtlpReceiver.cs" Link="Helpers\LocalGrpcOtlpReceiver.cs" />
   </ItemGroup>

@@ -1,6 +1,7 @@
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Models;
+using Excel = Microsoft.Office.Interop.Excel;
 
 namespace Sbroenne.ExcelMcp.Core.Commands.Range;
 
@@ -36,16 +37,14 @@ public partial class RangeCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? sheet = null;
-            dynamic? range = null;
-            dynamic? validation = null;
+            Excel.Worksheet? sheet = null;
+            Excel.Range? range = null;
+            Excel.Validation? validation = null;
 
             try
             {
                 // Get sheet
-                sheet = string.IsNullOrEmpty(sheetName)
-                    ? ctx.Book.ActiveSheet
-                    : ctx.Book.Worksheets[sheetName];
+                sheet = Utilities.WorksheetLookup.Get(ctx.Book, sheetName);
 
                 // Get range
                 range = sheet.Range[rangeAddress];
@@ -58,7 +57,7 @@ public partial class RangeCommands
 
                 // Add validation
                 validation.Add(
-                    Type: xlType,
+                    Type: (Excel.XlDVType)xlType,
                     AlertStyle: xlAlertStyle,
                     Operator: xlOperator,
                     Formula1: formula1 ?? "",
@@ -150,16 +149,14 @@ public partial class RangeCommands
     {
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? sheet = null;
-            dynamic? range = null;
-            dynamic? validation = null;
+            Excel.Worksheet? sheet = null;
+            Excel.Range? range = null;
+            Excel.Validation? validation = null;
 
             try
             {
                 // Get sheet
-                sheet = string.IsNullOrEmpty(sheetName)
-                    ? ctx.Book.ActiveSheet
-                    : ctx.Book.Worksheets[sheetName];
+                sheet = Utilities.WorksheetLookup.Get(ctx.Book, sheetName);
 
                 // Get range
                 range = sheet.Range[rangeAddress];
@@ -167,18 +164,9 @@ public partial class RangeCommands
                 // Try to get validation
                 validation = range.Validation;
 
-                // Check if validation exists
-                var hasValidation = true;
-                try
-                {
-                    var testType = validation.Type;
-                }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    hasValidation = false;
-                }
-
-                if (!hasValidation)
+                int? nativeType = ReadValidationType(() => validation.Type,
+                    () => HasValidationInScope(ctx.App, range));
+                if (!nativeType.HasValue)
                 {
                     return new RangeValidationResult
                     {
@@ -192,15 +180,15 @@ public partial class RangeCommands
 
                 // Read all validation properties into local variables first
                 // This ensures we're not affected by any COM state changes during object initialization
-                var validationType = GetValidationTypeName(validation.Type);
+                var validationType = GetValidationTypeName(nativeType.Value);
                 var validationOperator = GetValidationOperatorName(validation.Operator);
                 var formula1 = validation.Formula1?.ToString() ?? string.Empty;
                 var formula2 = validation.Formula2?.ToString() ?? string.Empty;
-                var ignoreBlank = validation.IgnoreBlank ?? true;
-                var showInputMessage = validation.ShowInput ?? false;
+                var ignoreBlank = validation.IgnoreBlank;
+                var showInputMessage = validation.ShowInput;
                 var inputTitle = validation.InputTitle?.ToString() ?? string.Empty;
                 var inputMessage = validation.InputMessage?.ToString() ?? string.Empty;
-                var showErrorAlert = validation.ShowError ?? true;
+                var showErrorAlert = validation.ShowError;
                 var errorStyle = GetErrorStyleName(validation.AlertStyle);
                 var errorTitle = validation.ErrorTitle?.ToString() ?? string.Empty;
                 var validationErrorMessage = validation.ErrorMessage?.ToString() ?? string.Empty;
@@ -235,6 +223,49 @@ public partial class RangeCommands
         });
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Accepts Validation.Type's ambiguous no-rule sentinel only when an independent scope-bound validation-cell query corroborates absence; if a rule is found, the original native failure is rethrown.")]
+    private static int? ReadValidationType(Func<int> readType, Func<bool> containsValidation)
+    {
+        try
+        {
+            return readType();
+        }
+        catch (System.Runtime.InteropServices.COMException ex) when (ex.HResult == unchecked((int)0x800A03EC))
+        {
+            if (containsValidation())
+                throw;
+            return null;
+        }
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Corroborates a prior Validation.Type no-rule sentinel using only SpecialCells(AllValidation)'s documented no-match result; any found cells are intersected with the exact requested scope, and other native failures propagate.")]
+    private static bool HasValidationInScope(Excel.Application app, Excel.Range scope)
+    {
+        Excel.Range? validatedCells = null;
+        Excel.Range? intersection = null;
+        try
+        {
+            try
+            {
+                validatedCells = scope.SpecialCells(Excel.XlCellType.xlCellTypeAllValidation);
+            }
+            catch (System.Runtime.InteropServices.COMException ex) when (ex.HResult == unchecked((int)0x800A03EC))
+            {
+                return false;
+            }
+            // Single-cell SpecialCells can search the whole used range instead of the requested cell.
+            intersection = app.Intersect(scope, validatedCells);
+            return intersection is not null;
+        }
+        finally
+        {
+            ComUtilities.Release(ref intersection);
+            ComUtilities.Release(ref validatedCells);
+        }
+    }
+
     /// <inheritdoc />
     public OperationResult RemoveValidation(
         IExcelBatch batch,
@@ -243,16 +274,14 @@ public partial class RangeCommands
     {
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? sheet = null;
-            dynamic? range = null;
-            dynamic? validation = null;
+            Excel.Worksheet? sheet = null;
+            Excel.Range? range = null;
+            Excel.Validation? validation = null;
 
             try
             {
                 // Get sheet
-                sheet = string.IsNullOrEmpty(sheetName)
-                    ? ctx.Book.ActiveSheet
-                    : ctx.Book.Worksheets[sheetName];
+                sheet = Utilities.WorksheetLookup.Get(ctx.Book, sheetName);
 
                 // Get range
                 range = sheet.Range[rangeAddress];

@@ -13,7 +13,7 @@ the same features as the MCP Server and usually uses fewer AI tokens.
 > **Primary distribution: npm or standalone executable** — Run `npx -y @sbroenne/excelcli@latest --help` or download `excelcli.exe` from the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest). No .NET runtime required.
 > **Secondary distribution: NuGet .NET tool** — `dotnet tool install --global Sbroenne.ExcelMcp.CLI` (requires .NET 10 runtime).
 
-The CLI provides 31 feature command categories with 412 operations matching the MCP Server, plus `session`, `service`, and `batch` commands — the same capabilities without loading 31 tool schemas into context.
+The CLI provides 33 feature command categories with 429 operations matching the MCP Server, plus `session`, `service`, and `batch` commands — the same capabilities without loading 33 tool schemas into context.
 
 | Interface | Best For | Why |
 |-----------|----------|-----|
@@ -50,7 +50,7 @@ service for an update.
 
 ### Primary Installation: Standalone Executable
 
-1. Download **`ExcelMcp-CLI-{version}-windows.zip`** from the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
+1. Download **`ExcelMcp-CLI-{version}-windows.zip`** for x64 Windows or **`ExcelMcp-CLI-{version}-windows-arm64.zip`** for ARM64 Windows from the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
 2. Extract `excelcli.exe` to a permanent location (e.g., `C:\Tools\ExcelMcp\`) and add the directory to your PATH
 3. Verify: `excelcli --version` and `excelcli --help`
 
@@ -71,11 +71,11 @@ dotnet tool install --global Sbroenne.ExcelMcp.CLI
 
 ## 📋 What You Can Do
 
-ExcelMcp.CLI provides **412 operations** across 31 feature command categories including Power Query, Python in Excel, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, and Window Management.
+ExcelMcp.CLI provides **429 operations** across 31 feature command categories including Power Query, Python in Excel, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, and Window Management.
 
 Drives the **actual Excel application** via COM — not a file-format parser — so live operations (Power Query refresh, recalculation, DAX evaluation, VBA execution) run for real and existing workbooks stay intact.
 
-📚 **[Feature Overview →](https://github.com/sbroenne/mcp-server-excel/blob/main/FEATURES.md)** - Capabilities grouped by goal. Use `excelcli --help` and `excelcli <command> --help` for current actions and inputs.
+📚 **[Feature Overview →](https://github.com/sbroenne/mcp-server-excel/blob/main/FEATURES.md)** - Capabilities grouped by goal. Use `excelcli --help` for commands, `excelcli <command> --help` for actions, and `excelcli <command> <action> --help` for only that action's inputs.
 
 ---
 
@@ -172,6 +172,27 @@ Transport failures exit nonzero without a `sessions` property. Status and list
 allow up to 10 seconds for daemon transport readiness, while daemon startup
 allows up to 30 seconds.
 
+When neither a running daemon nor startup is observed, status and list use a
+brief connection check instead of waiting two seconds. They still discover a
+responsive service without a daemon mutex and recheck startup after a failed
+connection. A service that connects retains the normal response deadline.
+
+An expired command or shutdown wait does not authorize terminating the service
+or Excel. The affected workbook remains open and may still change. If the service
+exits for another reason while its Excel instances remain alive, automatic startup
+keeps their process identities separately and starts a new service without closing
+or attaching to them. `service status` and `service stop` include
+`retainedExcelProcessCount` and `retainedExcelProcesses`, with each copy's
+`processId`, UTC `startTime`, and `workbookState: "unknown"`. Stopping an
+already-stopped service leaves these Excel copies open.
+`service stop` always stops the service. If a workbook was busy, waiting for a
+prompt, or its state could not be confirmed, that Excel copy is left exactly as
+it is, made visible, and reported in `shutdownWarning`; nothing is saved,
+discarded, or terminated.
+Use `session discover`, check `complete` and `errors`, then explicitly attach
+with `session attach --workbook-id <ID>` to inspect the intended workbook.
+Do not infer that an unknown workbook is empty or safe to terminate.
+
 ---
 
 ## 🛠️ Advanced Usage
@@ -195,6 +216,22 @@ example, a `powerquery refresh-all` where one query failed), so scripts can
 check `$LASTEXITCODE`. In `batch` output, such a line has `success: false`, and
 `--stop-on-error` stops there.
 
+Each per-command batch result also includes `commandSummary`, a single-line
+description of at most 160 characters. It identifies selected worksheet/range,
+table, query, PivotTable, or chart targets and includes inline range-write
+dimensions when available. For example:
+`range.set-values: Sales!A2:D21 (20 rows x 4 columns)`.
+Summaries appear on failed entries too; they describe the request, not proof
+that it completed. Existing `index`, `command`, results, errors, and exit codes
+are unchanged. Both JSON-array and one-command-per-line input produce one JSON
+result per output line.
+
+Summaries do not copy cell contents, formulas, code, credentials, connection
+strings, or file paths from input arguments. Target names are returned to the
+requesting user, not added to usage reporting; they are not redacted for public
+sharing. See [CLI batch jobs](../../docs/reference/workflows.md#cli-batch-jobs)
+for the supported details, shortening rules, and examples.
+
 ### CI/CD Integration
 
 Excel COM requires a self-hosted Windows runner with desktop Excel installed; GitHub-hosted runners do not include Excel.
@@ -209,7 +246,9 @@ jobs:
         shell: pwsh
         run: |
           $version = (Invoke-RestMethod "https://api.github.com/repos/sbroenne/mcp-server-excel/releases/latest").tag_name.TrimStart('v')
-          Invoke-WebRequest "https://github.com/sbroenne/mcp-server-excel/releases/download/v$version/ExcelMcp-CLI-$version-windows.zip" -OutFile cli.zip
+          $architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+          $suffix = if ($architecture -eq 'Arm64') { 'windows-arm64' } else { 'windows' }
+          Invoke-WebRequest "https://github.com/sbroenne/mcp-server-excel/releases/download/v$version/ExcelMcp-CLI-$version-$suffix.zip" -OutFile cli.zip
           Expand-Archive cli.zip -DestinationPath C:\Tools\ExcelMcp
           "C:\Tools\ExcelMcp" >> $env:GITHUB_PATH
 

@@ -1,3 +1,4 @@
+#Requires -Version 7.4
 <#
 .SYNOPSIS
     Tests analytics aggregation, privacy boundaries, and Copilot output validation.
@@ -49,18 +50,24 @@ function Normalize-SyntheticUsageRows {
     $legacyByNewId = @{}
     foreach ($migration in $MigrationEvents) {
         $legacyUserId = $migration.Properties.LegacyUserId
-        if ($migration.UserId -and $legacyUserId) {
-            $legacyByNewId[$migration.UserId] = $legacyUserId
+        $userId = if ($migration.Properties.UserId) { $migration.Properties.UserId } else { $migration.UserId }
+        if ($userId -and $legacyUserId) {
+            $legacyByNewId[$userId] = $legacyUserId
         }
     }
 
     foreach ($row in $Rows) {
-        if ($ExcludeMigrationEvents -and $row.Name -eq "UserIdMigration") {
+        if ($ExcludeMigrationEvents -and $row.Name -in @("UserIdMigration", "SessionStart", "UnhandledException")) {
             continue
         }
         $copy = $row.Clone()
-        if ($legacyByNewId.ContainsKey($row.UserId)) {
-            $copy.UserId = $legacyByNewId[$row.UserId]
+        foreach ($field in @("UserId", "SessionId", "AppVersion")) {
+            if ($row.Properties -and $row.Properties[$field]) {
+                $copy[$field] = $row.Properties[$field]
+            }
+        }
+        if ($legacyByNewId.ContainsKey($copy.UserId)) {
+            $copy.UserId = $legacyByNewId[$copy.UserId]
         }
         [pscustomobject]$copy
     }
@@ -454,18 +461,25 @@ try {
         "The query lookup does not split CLI sheet actions."
     Assert-True ($prelude.Contains("coalesce(tostring(Properties['EntryPoint']), 'mcp-server')")) `
         "Rows recorded before the entry point label are not counted as MCP Server."
-    Assert-True ($prelude -match "let userIdMigrations = AppEvents\s*\r?\n\| where Name == 'UserIdMigration'") `
+    Assert-True ($prelude -match "let userIdMigrations = AppEvents\s*\r?\n\| extend UserId=coalesce\(tostring\(Properties\['UserId'\]\), UserId\)\s*\r?\n\| where Name == 'UserIdMigration'") `
         "User ID migration mappings are not read from all retained events."
     Assert-True (($prelude -split "UserId=coalesce\(LegacyUserId, UserId\)").Count -eq 3) `
         "New IDs are not normalized to their legacy ID."
     Assert-True ($prelude -match "summarize arg_max\(TimeGenerated, LegacyUserId\) by UserId") `
         "The latest migration mapping is not selected for each new ID."
-    Assert-True ($prelude.Contains("where Name !in ('SessionStart', 'UserIdMigration')")) `
+    Assert-True ($prelude.Contains("where Name !in ('SessionStart', 'UserIdMigration', 'UnhandledException')")) `
         "Migration link events are not excluded from action metrics."
     Assert-True ($prelude -notmatch "let userIdMigrations = AppEvents[\s\S]*?ago\(") `
         "User ID migration mappings must use the full retention period."
     Assert-True ($prelude -match "let excludedNames = dynamic\(\['file/open', 'file/close'\]\)") `
         "Excluded actions are not removed after names are combined."
+
+    Assert-True (($prelude -split "UserId=coalesce\(tostring\(Properties\['UserId'\]\), UserId\)").Count -eq 4) `
+        "Native OpenTelemetry identity attributes are not normalized alongside historical columns."
+    Assert-True (($prelude -split "SessionId=coalesce\(tostring\(Properties\['SessionId'\]\), SessionId\)").Count -eq 3) `
+        "Native process sessions are not available to session analytics."
+    Assert-True (($prelude -split "AppVersion=coalesce\(tostring\(Properties\['AppVersion'\]\), AppVersion\)").Count -eq 3) `
+        "Native versions are not available to adoption analytics."
 
     $legacyId = "legacy-user"
     $randomId = "random-user"
@@ -474,8 +488,8 @@ try {
     $legacyTime = $currentWeekStart.AddDays(-6).AddHours(12)
     $randomTime = $currentWeekStart.AddDays(-1).AddHours(12)
     $migrationRows = @(@{
-        Name = "UserIdMigration"; UserId = $randomId
-        Properties = @{ LegacyUserId = $legacyId }
+        Name = "UserIdMigration"; UserId = ""
+        Properties = @{ UserId = $randomId; LegacyUserId = $legacyId }
         TimeGenerated = $now
     })
     $syntheticRequests = @(
@@ -485,14 +499,16 @@ try {
             SessionId = "session-one"; Name = "range/get-values"
         },
         @{
-            UserId = $randomId; TimeGenerated = $randomTime
-            AppVersion = "2.0.1"; EntryPoint = "cli"; Feature = "power-query"
-            SessionId = "session-two"; Name = "powerquery/refresh"
+            UserId = ""; TimeGenerated = $randomTime
+            AppVersion = ""; EntryPoint = "cli"; Feature = "power-query"
+            SessionId = ""; Name = "powerquery/refresh"
+            Properties = @{ UserId = $randomId; SessionId = "session-two"; AppVersion = "2.0.1" }
         }
     )
     $syntheticEvents = @(
         @{ UserId = $legacyId; TimeGenerated = $legacyTime; Name = "range/get-values" },
-        @{ UserId = $randomId; TimeGenerated = $randomTime; Name = "powerquery/refresh" }
+        @{ UserId = ""; Properties = @{ UserId = $randomId }; TimeGenerated = $randomTime; Name = "powerquery/refresh" },
+        @{ UserId = ""; Properties = @{ UserId = $randomId }; TimeGenerated = $randomTime; Name = "UnhandledException" }
     ) + $migrationRows
     $normalizedSyntheticRequests = @(
         Normalize-SyntheticUsageRows $syntheticRequests $migrationRows
@@ -788,6 +804,33 @@ Review the 200 heavy data actions before changing behavior.
         "Persist script did not create the dedicated data branch."
     $testsRun++
 
+    $storedReportText = [IO.File]::ReadAllText($reportPath)
+    $storedReportContent = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($storedReportText))
+    $updatedPayloads = [Collections.Generic.List[object]]::new()
+    $existingReportInvoker = {
+        param([string[]]$Arguments)
+        $request = $Arguments -join ' '
+        if ($request -like 'api */git/ref/heads/*') { return [pscustomobject]@{ ExitCode = 0; Output = @('{}') } }
+        if ($Arguments[1] -like 'repos/*/contents/*') {
+            return [pscustomobject]@{ ExitCode = 0; Output = @((@{ content = $storedReportContent; sha = 'report-sha' } | ConvertTo-Json -Compress)) }
+        }
+        if ($request -like 'api --silent --method PUT *') {
+            $updatedPayloads.Add((Get-Content -Raw -LiteralPath $Arguments[[Array]::IndexOf($Arguments, '--input') + 1] | ConvertFrom-Json))
+            return [pscustomobject]@{ ExitCode = 0; Output = @() }
+        }
+        throw "Unexpected request: $request"
+    }
+    & $persistScript -Repository 'owner/repository' -Branch 'analytics-data' -ReportPath $reportPath `
+        -RemotePath '.github/usage-analytics.json' -CommitSha '0123456789abcdef' -TempPath $testRoot -ApiInvoker $existingReportInvoker
+    Assert-True ($updatedPayloads.Count -eq 0) 'Unchanged analytics wrote a new snapshot.'
+    $storedReportContent = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"schemaVersion":3,"interpretation":"previous"}'))
+    & $persistScript -Repository 'owner/repository' -Branch 'analytics-data' -ReportPath $reportPath `
+        -RemotePath '.github/usage-analytics.json' -CommitSha '0123456789abcdef' -TempPath $testRoot -ApiInvoker $existingReportInvoker
+    Assert-True ($updatedPayloads.Count -eq 1 -and $updatedPayloads[0].sha -eq 'report-sha') "Analytics update did not use the current file SHA: $($updatedPayloads | ConvertTo-Json -Compress)."
+    Assert-True ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($updatedPayloads[0].content)) -ceq $storedReportText) 'Analytics update changed the content.'
+    Assert-True (@(Get-ChildItem $testRoot -Filter 'usage-analytics-*.json').Count -eq 0) 'Analytics persistence left a temporary payload.'
+    $testsRun++
+
     $bootstrapPath = Write-TestFile "bootstrap.json" ($report | ConvertTo-Json -Depth 10)
     $restoredText = [IO.File]::ReadAllText($reportPath)
     $restoredContent = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($restoredText))
@@ -826,6 +869,42 @@ Review the 200 heavy data actions before changing behavior.
     Assert-True ([IO.File]::ReadAllText($bootstrapPath) -eq $schemaTwoText) `
         "Restore script rejected a report from before work weighting."
     $testsRun++
+
+    foreach ($responseCase in 'missing', 'forbidden', 'invalid-payload', 'invalid-report', 'invalid-invoker') {
+        $before = [IO.File]::ReadAllText($bootstrapPath)
+        $badRestoreInvoker = {
+            param([string[]]$Arguments)
+            switch ($responseCase) {
+                'missing' { return [pscustomobject]@{ ExitCode = 1; Output = @('HTTP 404') } }
+                'forbidden' { return [pscustomobject]@{ ExitCode = 1; Output = @('HTTP 403') } }
+                'invalid-payload' { return [pscustomobject]@{ ExitCode = 0; Output = @('{}') } }
+                'invalid-report' {
+                    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"schemaVersion":999}'))
+                    return [pscustomobject]@{ ExitCode = 0; Output = @((@{ content = $encoded } | ConvertTo-Json -Compress)) }
+                }
+                'invalid-invoker' { return $null }
+            }
+        }
+        $restoreAction = {
+            & $restoreScript -Repository 'owner/repository' -Branch 'analytics-data' -ReportPath $bootstrapPath `
+                -RemotePath '.github/usage-analytics.json' -ApiInvoker $badRestoreInvoker
+        }
+        if ($responseCase -eq 'missing') {
+            $global:LASTEXITCODE = 1
+            & $restoreAction
+            Assert-True ($global:LASTEXITCODE -eq 0) 'Expected absence left a failing native exit code.'
+        } else {
+            $expected = switch ($responseCase) {
+                'forbidden' { 'Unable to restore usage analytics' }
+                'invalid-payload' { 'did not return analytics report content' }
+                'invalid-report' { 'unsupported schema' }
+                'invalid-invoker' { 'invalid result' }
+            }
+            Assert-Throws -ExpectedMessage $expected -Action $restoreAction
+        }
+        Assert-True ([IO.File]::ReadAllText($bootstrapPath) -ceq $before) 'Missing or invalid restore changed the bootstrap.'
+        $testsRun++
+    }
 
     $unsupported = $interpretation.Replace("84 downloads", "999 downloads")
     $unsupportedPath = Write-TestFile "unsupported.md" $unsupported

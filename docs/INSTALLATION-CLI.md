@@ -19,8 +19,9 @@ The npm option also requires **Node.js 18 or later**. Install the current LTS
 with `winget install OpenJS.NodeJS.LTS`. Windows x64 and ARM64 are supported;
 ARM64 Node.js uses a native ARM64 executable.
 
-The standalone ZIP currently contains the x64 CLI. For a native ARM64 CLI,
-use the npm installation with ARM64 Node.js.
+The standalone release includes separate x64 and ARM64 ZIPs. Choose the
+download that matches your Windows architecture; the ARM64 archive contains a
+native ARM64 executable.
 
 ### Optional (for specific features)
 - **Microsoft Analysis Services OLE DB Provider (MSOLAP)** - Required for DAX query execution (`evaluate`, `execute-dmv` actions)
@@ -83,12 +84,15 @@ Avoid installing multiple distributions of `excelcli` on the same PATH. Use
 ### Standalone Executable (Also Primary)
 
 1. Go to the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
-2. Download **`ExcelMcp-CLI-{version}-windows.zip`**
+2. Download **`ExcelMcp-CLI-{version}-windows.zip`** for x64 Windows or
+   **`ExcelMcp-CLI-{version}-windows-arm64.zip`** for ARM64 Windows
 3. Extract to a permanent location (e.g., `C:\Tools\ExcelMcp\`)
 
 ```powershell
 Expand-Archive "ExcelMcp-CLI-1.x.x-windows.zip" -DestinationPath "C:\Tools\ExcelMcp"
 ```
+
+For ARM64 Windows, use `ExcelMcp-CLI-1.x.x-windows-arm64.zip` instead.
 
 #### Add the Standalone CLI to PATH
 
@@ -147,7 +151,8 @@ direct-marketplace installations do not need to move.
 
 **Current plugin launch:** Use `npx -y @sbroenne/excelcli@latest`. The plugin also
 provides `bin\start-cli.ps1`, which launches the same npm package while preserving
-quoted JSON arguments in Windows PowerShell. npm resolves the `latest` tag and
+quoted JSON arguments in PowerShell 7.4 or later (`pwsh`); Windows PowerShell
+5.1 is not supported. npm resolves the `latest` tag and
 manages caching subject to its cache policy; the plugin has no GitHub-release
 downloader or separate update checker. No global installation helper, PATH
 change, or separate .NET runtime is required.
@@ -221,9 +226,10 @@ npx -y @sbroenne/excelcli@latest -q service stop
 ```
 
 For standalone or global installations, use `excelcli -q service stop`.
-Stopping the service may terminate its tracked Excel processes; do not use it
-as an update shortcut while workbooks have unsaved changes. The next workbook
-command starts the service using the selected CLI executable.
+Normal shutdown closes workbooks opened by ExcelMcp only when they have no
+unsaved changes. Unsaved or attached workbooks stay open. Excel copies left by
+an earlier service are reported, not closed. The next workbook command starts
+the service using the selected CLI executable.
 
 **npm:**
 
@@ -239,7 +245,8 @@ npm uninstall --global @sbroenne/excelcli
 **Standalone exe (primary):**
 
 1. Go to the [latest release](https://github.com/sbroenne/mcp-server-excel/releases/latest)
-2. Download the new ZIP: `ExcelMcp-CLI-{version}-windows.zip`
+2. Download the new ZIP matching your installation: `ExcelMcp-CLI-{version}-windows.zip`
+   for x64 Windows or `ExcelMcp-CLI-{version}-windows-arm64.zip` for ARM64 Windows
 3. Extract and overwrite the existing files in your installation directory
 
 ```powershell
@@ -365,7 +372,7 @@ After installation:
 
 1. **Learn the basics:** Try `npx -y @sbroenne/excelcli@latest --help`
    (or `excelcli --help` for global/standalone installs) and open a test workbook
-2. **Explore features:** See the [feature overview](../FEATURES.md) for capabilities. Use CLI help for current actions and inputs across all 31 feature command categories.
+2. **Explore features:** See the [feature overview](../FEATURES.md) for capabilities. Use CLI help for current actions and inputs across all 33 feature command categories.
 3. **Read the guides:**
    - [MCP Server Installation Guide](INSTALLATION-MCP-SERVER.md) - for AI assistants like Claude Desktop and Copilot Chat
    - [Agent Skills](https://github.com/sbroenne/mcp-server-excel-plugins/tree/main/plugins/excel-cli/skills/excel-cli-report-formatting) - token-efficient AI guidance for coding agents

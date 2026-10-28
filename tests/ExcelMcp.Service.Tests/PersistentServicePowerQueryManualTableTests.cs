@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Sbroenne.ExcelMcp.Core.Commands;
+using Sbroenne.ExcelMcp.Core.Commands.Range;
 using Sbroenne.ExcelMcp.Core.Models;
 using Xunit;
 
@@ -30,47 +31,85 @@ public sealed class PersistentServicePowerQueryManualTableTests(
     private readonly IPersistentTableCommands _tables =
         ServiceCommandProxy.Create<IPersistentTableCommands>(fixture);
 
-    [Fact]
-    public void List_WorkbookWithManualTable_ReturnsOnlyQueries()
+    [Theory]
+    [InlineData(PowerQueryLoadMode.LoadToTable)]
+    [InlineData(PowerQueryLoadMode.LoadToDataModel)]
+    [InlineData(PowerQueryLoadMode.ConnectionOnly)]
+    public void RefreshAll_OrdinaryTableBeforeQueryDestination_DoesNotBlockRefresh(PowerQueryLoadMode mode)
     {
-        var state = ArrangeManualTableAndQuery();
+        var batch = _fixture.BatchToken;
+        var sheet = _fixture.CreateTestSheet(batch);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var tableName = $"RefreshSource_{suffix}";
+        var queryName = $"RefreshTarget_{suffix}";
+        RequireSuccess(_commands.SetValues(batch, sheet, "A1:B3", [["Key", "Value"], [1, 10], [2, 20]]));
+        RequireSuccess(_tables.Create(batch, sheet, tableName, "A1:B3"));
+        var code = $"let Source = Excel.CurrentWorkbook(){{[Name=\"{tableName}\"]}}[Content], " +
+            "Typed = Table.TransformColumnTypes(Source, {{\"Key\", Int64.Type}, {\"Value\", Int64.Type}}) in Typed";
+        var worksheetLoad = mode == PowerQueryLoadMode.LoadToTable;
+        RequireSuccess(_queries.Create(batch, queryName, code, mode,
+            worksheetLoad ? sheet : null, worksheetLoad ? "D1" : null));
+        _fixture.RegisterPowerQueryForCleanup(queryName);
+        if (worksheetLoad)
+        {
+            PowerQueryStateAssertions.AssertRows([["Key", "Value"], [1, 10], [2, 20]],
+                RequireSuccess(_commands.GetValues(batch, sheet, "D1:E3")).Values);
+        }
 
-        var result = RequireSuccess(_queries.List(_fixture.BatchToken));
+        RequireSuccess(_commands.SetValues(batch, sheet, "A2:B3", [[7, 70], [9, 90]],
+            overwritePolicy: OverwritePolicy.Allow));
+        var result = RequireSuccess(_queries.RefreshAll(batch, refreshPivotTables: false));
 
-        Assert.True(result.Success, $"List failed: {result.ErrorMessage}");
-        Assert.NotNull(result.Queries);
-        var query = Assert.Single(result.Queries);
-        Assert.DoesNotContain(
-            result.Queries,
-            candidate => candidate.Name.StartsWith(
-                "Error Query",
-                StringComparison.Ordinal));
-        Assert.Equal(state.QueryName, query.Name);
-        Assert.NotEmpty(query.FormulaPreview);
-        Assert.DoesNotContain("Error:", query.FormulaPreview);
-        Assert.True(query.IsConnectionOnly);
-        AssertPreserved(state, OriginalMCode, ["Column1", "Column2"], [["A", "B"], ["C", "D"]]);
-    }
-
-    [Fact]
-    public void View_WorkbookWithManualTable_ReturnsQueryDetails()
-    {
-        var state = ArrangeManualTableAndQuery();
-
-        var result = RequireSuccess(_queries.View(_fixture.BatchToken, state.QueryName));
-
-        Assert.True(result.Success, $"View failed: {result.ErrorMessage}");
-        Assert.Equal(state.QueryName, result.QueryName);
-        Assert.NotEmpty(result.MCode);
-        Assert.Contains("Source = #table", result.MCode);
-        Assert.True(result.IsConnectionOnly);
-        AssertPreserved(state, OriginalMCode, ["Column1", "Column2"], [["A", "B"], ["C", "D"]]);
+        Assert.Empty(result.FailedQueries);
+        if (mode == PowerQueryLoadMode.ConnectionOnly)
+        {
+            Assert.Empty(result.RefreshedQueries);
+            Assert.Equal(queryName, Assert.Single(result.SkippedQueries).QueryName);
+        }
+        else
+        {
+            Assert.Equal(queryName, Assert.Single(result.RefreshedQueries));
+            Assert.Empty(result.SkippedQueries);
+        }
+        var view = RequireSuccess(_queries.View(batch, queryName));
+        Assert.Equal(mode, view.LoadMode);
+        Assert.Equal(code, view.MCode);
+        Assert.Equal(worksheetLoad ? sheet : null, view.TargetSheet);
+        if (worksheetLoad)
+        {
+            PowerQueryStateAssertions.AssertRows([["Key", "Value"], [7, 70], [9, 90]],
+                RequireSuccess(_commands.GetValues(batch, sheet, "D1:E3")).Values);
+        }
+        if (mode == PowerQueryLoadMode.LoadToDataModel)
+        {
+            var model = _fixture.CreateCommands<IDataModelCommands>();
+            var rows = RequireSuccess(model.Evaluate(batch, $"EVALUATE '{queryName}'"));
+            Assert.Equal([$"{queryName}[Key]", $"{queryName}[Value]"], rows.Columns);
+            Assert.Equal(2, rows.RowCount);
+            Assert.Equal(2, rows.ColumnCount);
+            PowerQueryStateAssertions.AssertRows([[7, 70], [9, 90]], rows.Rows);
+        }
+        PowerQueryStateAssertions.AssertRows([["Key", "Value"], [7, 70], [9, 90]],
+            RequireSuccess(_commands.GetValues(batch, sheet, "A1:B3")).Values);
+        var table = RequireSuccess(_tables.Read(batch, tableName)).Table;
+        Assert.NotNull(table);
+        Assert.Equal(tableName, table.Name);
+        Assert.Equal(sheet, table.SheetName);
+        Assert.Equal("$A$1:$B$3", table.Range);
     }
 
     [Fact]
     public void Update_WorkbookWithManualTable_UpdatesQuerySuccessfully()
     {
         var state = ArrangeManualTableAndQuery();
+        var listed = RequireSuccess(_queries.List(_fixture.BatchToken));
+        var query = Assert.Single(listed.Queries);
+        Assert.DoesNotContain(listed.Queries,
+            candidate => candidate.Name.StartsWith("Error Query", StringComparison.Ordinal));
+        Assert.Equal(state.QueryName, query.Name);
+        Assert.NotEmpty(query.FormulaPreview);
+        Assert.DoesNotContain("Error:", query.FormulaPreview);
+        Assert.True(query.IsConnectionOnly);
         const string updatedMCode = """
             let
                 Source = #table(

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics.CodeAnalysis;
 
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
@@ -35,9 +36,10 @@ public partial class DataModelCommands
             Excel.Model? model = null;
             Excel.WorkbookConnection? dataModelConn = null;
             Excel.ModelConnection? modelConn = null;
-            dynamic? adoConnection = null;
-            dynamic? recordset = null;
-            dynamic? fields = null;
+            ADODB._Connection? adoConnection = null;
+            ADODB._Recordset? recordset = null;
+            ADODB.Fields? fields = null;
+            Exception? operationFailure = null;
 
             try
             {
@@ -66,7 +68,7 @@ public partial class DataModelCommands
                 }
 
                 // Get the ADO connection - this is a live MSOLAP connection to the embedded AS engine
-                adoConnection = modelConn.ADOConnection;
+                adoConnection = ComUtilities.ReadAdoConnection(modelConn);
                 if (adoConnection == null)
                 {
                     throw new InvalidOperationException("No ADOConnection available - cannot execute DAX query");
@@ -78,7 +80,7 @@ public partial class DataModelCommands
                 // Wrap in try-catch to provide helpful error message when MSOLAP is missing
                 try
                 {
-                    recordset = adoConnection.Execute(daxQuery);
+                    recordset = adoConnection.Execute(daxQuery, out _, (int)ADODB.ExecuteOptionEnum.adOptionUnspecified);
                 }
                 catch (COMException ex) when (ex.HResult == unchecked((int)0x80040154))
                 {
@@ -90,8 +92,9 @@ public partial class DataModelCommands
                 }
                 catch (COMException ex)
                 {
+                    string failureMessage = GetDaxEvaluationFailureMessage(adoConnection, ex);
                     throw new InvalidOperationException(
-                        $"DAX evaluation failed: {ex.Message}", ex);
+                        failureMessage, ex);
                 }
 
                 ct.ThrowIfCancellationRequested();
@@ -105,10 +108,10 @@ public partial class DataModelCommands
                 for (int i = 0; i < fieldCount; i++)
                 {
                     ct.ThrowIfCancellationRequested();
-                    dynamic? field = null;
+                    ADODB.Field? field = null;
                     try
                     {
-                        field = fields.Item(i);
+                        field = fields[i];
                         string fieldName = field.Name?.ToString() ?? $"Column{i}";
                         result.Columns.Add(fieldName);
                     }
@@ -128,10 +131,10 @@ public partial class DataModelCommands
                     for (int i = 0; i < fieldCount; i++)
                     {
                         ct.ThrowIfCancellationRequested();
-                        dynamic? field = null;
+                        ADODB.Field? field = null;
                         try
                         {
-                            field = fields.Item(i);
+                            field = fields[i];
                             object? value = field.Value;
 
                             // Convert DBNull to null
@@ -158,35 +161,93 @@ public partial class DataModelCommands
                 result.RowCount = result.Rows.Count;
                 result.Success = true;
             }
+            catch (Exception exception)
+            {
+                operationFailure = exception;
+                throw;
+            }
             finally
             {
-                // Close recordset if open
-                if (recordset != null)
+                try
                 {
-                    try
-                    {
-                        // State 1 = adStateOpen
-                        if ((int)recordset.State == 1)
-                        {
-                            recordset.Close();
-                        }
-                    }
-                    catch (System.Runtime.InteropServices.COMException)
-                    {
-                        // Ignore errors closing recordset
-                    }
+                    CloseRecordset(recordset, operationFailure);
                 }
-
-                ComUtilities.Release(ref fields);
-                ComUtilities.Release(ref recordset);
-                ComUtilities.Release(ref adoConnection);
-                ComUtilities.Release(ref modelConn);
-                ComUtilities.Release(ref dataModelConn);
-                ComUtilities.Release(ref model);
+                finally
+                {
+                    ComUtilities.Release(ref fields);
+                    ComUtilities.Release(ref recordset);
+                    ComUtilities.Release(ref adoConnection);
+                    ComUtilities.Release(ref modelConn);
+                    ComUtilities.Release(ref dataModelConn);
+                    ComUtilities.Release(ref model);
+                }
             }
 
             return result;
         }, timeoutCts.Token);
+    }
+
+    [SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Provider diagnostics are secondary to the original DAX COM failure; any diagnostic-read exception is included in the returned message while the original COM exception remains the inner exception.")]
+    private static string GetDaxEvaluationFailureMessage(ADODB._Connection adoConnection, COMException failure)
+    {
+        ADODB.Errors? errors = null;
+        var details = new List<string>();
+        int? errorCount = null;
+        try
+        {
+            errors = adoConnection.Errors;
+            errorCount = errors.Count;
+            for (int index = 0; index < errorCount; index++)
+            {
+                ADODB.Error? error = null;
+                try
+                {
+                    error = errors[index];
+                    string description = error.Description?.ToString() ?? string.Empty;
+                    string source = error.Source?.ToString() ?? string.Empty;
+                    string number = error.Number.ToString("X8",
+                        System.Globalization.CultureInfo.InvariantCulture);
+                    if (!string.IsNullOrWhiteSpace(description) ||
+                        !string.IsNullOrWhiteSpace(source) ||
+                        number != "00000000")
+                    {
+                        var identity = string.IsNullOrWhiteSpace(source)
+                            ? $"0x{number}"
+                            : $"0x{number} from {source}";
+                        details.Add(string.IsNullOrWhiteSpace(description)
+                            ? identity
+                            : $"{identity}: {description}");
+                    }
+                }
+                finally
+                {
+                    ComUtilities.Release(ref error);
+                }
+            }
+        }
+        catch (Exception diagnosticsFailure)
+        {
+            details.Add(
+                $"The provider error collection could not be read " +
+                $"({diagnosticsFailure.GetType().Name}): {diagnosticsFailure.Message}");
+        }
+        finally
+        {
+            ComUtilities.Release(ref errors);
+        }
+
+        if (details.Count == 0)
+        {
+            details.Add(errorCount == 0
+                ? "The ADO provider returned no error records."
+                : $"The ADO provider returned {errorCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "an unreadable number of"} error records without details.");
+        }
+
+        string hresult = unchecked((uint)failure.HResult).ToString("X8",
+            System.Globalization.CultureInfo.InvariantCulture);
+        var message = $"DAX evaluation failed (HRESULT 0x{hresult}): {failure.Message}";
+        return $"{message} Engine details: {string.Join(" | ", details)}";
     }
 
     /// <summary>

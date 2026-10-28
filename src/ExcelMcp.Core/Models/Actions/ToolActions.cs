@@ -1,4 +1,4 @@
-#pragma warning disable CS1591
+#pragma warning disable CS1591 // Enum members are serialized action identifiers; operation descriptions live on the Core command contracts.
 namespace Sbroenne.ExcelMcp.Core.Models.Actions;
 
 /// <summary>
@@ -25,7 +25,28 @@ public enum FileAction
     Create,
 
     [System.Text.Json.Serialization.JsonStringEnumMemberName("test")]
-    Test
+    Test,
+
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("save")]
+    Save,
+
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("discover")]
+    Discover,
+
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("attach")]
+    Attach,
+
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("notices")]
+    Notices,
+
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("enable-editing")]
+    EnableEditing,
+
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("enable-connections")]
+    EnableConnections,
+
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("enable-macros")]
+    EnableMacros
 }
 
 // NOTE: PowerQueryAction is now generated from IPowerQueryCommands interface
@@ -78,4 +99,3 @@ public enum FileAction
 // CalculationModeAction is now generated from ICalculationModeCommands interface
 // See Sbroenne.ExcelMcp.Generated.CalculationModeAction in ServiceRegistry.CalculationMode.g.cs
 #pragma warning restore CS1591
-

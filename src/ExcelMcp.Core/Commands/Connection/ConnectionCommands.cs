@@ -29,47 +29,11 @@ public partial class ConnectionCommands : IConnectionCommands
         };
     }
 
-    private static dynamic? GetTypedSubConnection(dynamic conn)
-    {
-        int connType = conn.Type;
-
-        if (connType == 1)
-        {
-            return conn.OLEDBConnection;
-        }
-
-        if (connType == 2)
-        {
-            return conn.ODBCConnection;
-        }
-
-        if (connType is 3 or 4)
-        {
-            try
-            {
-                return conn.TextConnection;
-            }
-            catch (COMException)
-            {
-                try
-                {
-                    return conn.WebConnection;
-                }
-                catch (COMException)
-                {
-                    return null;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static bool GetBackgroundQuerySetting(dynamic conn)
+    private static bool GetBackgroundQuerySetting(Excel.WorkbookConnection conn)
     {
         try
         {
-            int connType = conn.Type;
+            int connType = (int)conn.Type;
             if (connType == 1)
             {
                 Excel.OLEDBConnection? oledbConnection = null;
@@ -98,33 +62,8 @@ public partial class ConnectionCommands : IConnectionCommands
                 }
             }
 
-            if (connType is 3 or 4)
-            {
-                dynamic? textConnection = null;
-                try
-                {
-                    textConnection = conn.TextConnection;
-                    return textConnection?.BackgroundQuery ?? false;
-                }
-                catch (COMException)
-                {
-                }
-                finally
-                {
-                    ComUtilities.Release(ref textConnection);
-                }
-
-                dynamic? webConnection = null;
-                try
-                {
-                    webConnection = conn.WebConnection;
-                    return webConnection?.BackgroundQuery ?? false;
-                }
-                finally
-                {
-                    ComUtilities.Release(ref webConnection);
-                }
-            }
+            if (connType is 4 or 5)
+                return ReadLegacyQueryTableValue(conn, query => query.BackgroundQuery);
         }
         catch (COMException ex) when (IsUnsupportedConnectionProperty(ex))
         {
@@ -133,11 +72,11 @@ public partial class ConnectionCommands : IConnectionCommands
         return false;
     }
 
-    private static bool GetRefreshOnFileOpenSetting(dynamic conn)
+    private static bool GetRefreshOnFileOpenSetting(Excel.WorkbookConnection conn)
     {
         try
         {
-            int connType = conn.Type;
+            int connType = (int)conn.Type;
             if (connType == 1)
             {
                 Excel.OLEDBConnection? oledbConnection = null;
@@ -166,33 +105,8 @@ public partial class ConnectionCommands : IConnectionCommands
                 }
             }
 
-            if (connType is 3 or 4)
-            {
-                dynamic? textConnection = null;
-                try
-                {
-                    textConnection = conn.TextConnection;
-                    return textConnection?.RefreshOnFileOpen ?? false;
-                }
-                catch (COMException)
-                {
-                }
-                finally
-                {
-                    ComUtilities.Release(ref textConnection);
-                }
-
-                dynamic? webConnection = null;
-                try
-                {
-                    webConnection = conn.WebConnection;
-                    return webConnection?.RefreshOnFileOpen ?? false;
-                }
-                finally
-                {
-                    ComUtilities.Release(ref webConnection);
-                }
-            }
+            if (connType is 4 or 5)
+                return ReadLegacyQueryTableValue(conn, query => query.RefreshOnFileOpen);
         }
         catch (COMException ex) when (IsUnsupportedConnectionProperty(ex))
         {
@@ -201,11 +115,11 @@ public partial class ConnectionCommands : IConnectionCommands
         return false;
     }
 
-    private static bool GetSavePasswordSetting(dynamic conn)
+    private static bool GetSavePasswordSetting(Excel.WorkbookConnection conn)
     {
         try
         {
-            int connType = conn.Type;
+            int connType = (int)conn.Type;
             if (connType == 1)
             {
                 Excel.OLEDBConnection? oledbConnection = null;
@@ -234,33 +148,8 @@ public partial class ConnectionCommands : IConnectionCommands
                 }
             }
 
-            if (connType is 3 or 4)
-            {
-                dynamic? textConnection = null;
-                try
-                {
-                    textConnection = conn.TextConnection;
-                    return textConnection?.SavePassword ?? false;
-                }
-                catch (COMException)
-                {
-                }
-                finally
-                {
-                    ComUtilities.Release(ref textConnection);
-                }
-
-                dynamic? webConnection = null;
-                try
-                {
-                    webConnection = conn.WebConnection;
-                    return webConnection?.SavePassword ?? false;
-                }
-                finally
-                {
-                    ComUtilities.Release(ref webConnection);
-                }
-            }
+            if (connType is 4 or 5)
+                return ReadLegacyQueryTableValue(conn, query => query.SavePassword);
         }
         catch (COMException ex) when (IsUnsupportedConnectionProperty(ex))
         {
@@ -269,11 +158,11 @@ public partial class ConnectionCommands : IConnectionCommands
         return false;
     }
 
-    private static int GetRefreshPeriod(dynamic conn)
+    private static int GetRefreshPeriod(Excel.WorkbookConnection conn)
     {
         try
         {
-            int connType = conn.Type;
+            int connType = (int)conn.Type;
             if (connType == 1)
             {
                 Excel.OLEDBConnection? oledbConnection = null;
@@ -302,33 +191,8 @@ public partial class ConnectionCommands : IConnectionCommands
                 }
             }
 
-            if (connType is 3 or 4)
-            {
-                dynamic? textConnection = null;
-                try
-                {
-                    textConnection = conn.TextConnection;
-                    return textConnection?.RefreshPeriod ?? 0;
-                }
-                catch (COMException)
-                {
-                }
-                finally
-                {
-                    ComUtilities.Release(ref textConnection);
-                }
-
-                dynamic? webConnection = null;
-                try
-                {
-                    webConnection = conn.WebConnection;
-                    return webConnection?.RefreshPeriod ?? 0;
-                }
-                finally
-                {
-                    ComUtilities.Release(ref webConnection);
-                }
-            }
+            if (connType is 4 or 5)
+                return ReadLegacyQueryTableValue(conn, query => query.RefreshPeriod);
         }
         catch (COMException ex) when (IsUnsupportedConnectionProperty(ex))
         {
@@ -337,19 +201,21 @@ public partial class ConnectionCommands : IConnectionCommands
         return 0;
     }
 
-    private static DateTime? GetLastRefreshDate(dynamic conn, ILogger logger)
+    private static DateTime? GetLastRefreshDate(Excel.WorkbookConnection conn, ILogger logger)
     {
         try
         {
-            int connType = conn.Type;
+            int connType = (int)conn.Type;
             if (connType == 1)
             {
                 Excel.OLEDBConnection? oledbConnection = null;
                 try
                 {
                     oledbConnection = conn.OLEDBConnection;
-                    // PIA gap: OLAP RefreshDate can be an empty VARIANT, not the PIA's non-nullable DateTime.
-                    return oledbConnection == null ? null : GetRefreshDateSafe(((dynamic)oledbConnection).RefreshDate);
+                    if (oledbConnection is null)
+                        return null;
+                    bool isConnected = oledbConnection.IsConnected;
+                    return ReadOleDbRefreshDate(() => oledbConnection.RefreshDate, isConnected);
                 }
                 finally
                 {
@@ -360,18 +226,23 @@ public partial class ConnectionCommands : IConnectionCommands
             if (connType == 2)
             {
                 Excel.ODBCConnection? odbcConnection = null;
+                Excel.Ranges? ranges = null;
                 try
                 {
+                    ranges = conn.Ranges;
+                    if (ranges.Count == 0)
+                        return null;
                     odbcConnection = conn.ODBCConnection;
                     return GetRefreshDateSafe(odbcConnection?.RefreshDate);
                 }
                 finally
                 {
                     ComUtilities.Release(ref odbcConnection);
+                    ComUtilities.Release(ref ranges);
                 }
             }
         }
-        catch (COMException ex)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             logger.LogWarning(ex, "Could not read the connection's last-refresh timestamp; reporting it as unknown");
         }
@@ -379,14 +250,29 @@ public partial class ConnectionCommands : IConnectionCommands
         return null;
     }
 
-    private static bool IsUnsupportedConnectionProperty(COMException exception) =>
-        exception.HResult is unchecked((int)0x80020003) or unchecked((int)0x80004001);
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Only RefreshDate's unset 1004 is tolerated when native IsConnected independently confirms no active OLE DB session. Successful dates are retained even when disconnected; other HRESULTs and connected-provider failures propagate.")]
+    private static DateTime? ReadOleDbRefreshDate(Func<object?> readRefreshDate, bool isConnected)
+    {
+        const int unsetRefreshDate = unchecked((int)0x800A03EC);
+        try
+        {
+            return GetRefreshDateSafe(readRefreshDate());
+        }
+        catch (COMException error) when (error.HResult == unsetRefreshDate && !isConnected)
+        {
+            return null;
+        }
+    }
 
-    private static string? GetConnectionString(dynamic conn)
+    private static bool IsUnsupportedConnectionProperty(COMException exception) =>
+        ComErrors.IsMemberUnavailable(exception);
+
+    private static string? GetConnectionString(Excel.WorkbookConnection conn)
     {
         try
         {
-            int connType = conn.Type;
+            int connType = (int)conn.Type;
             string? connectionString = null;
 
             if (connType == 1)
@@ -395,7 +281,7 @@ public partial class ConnectionCommands : IConnectionCommands
                 try
                 {
                     oledbConnection = conn.OLEDBConnection;
-                    connectionString = oledbConnection?.Connection?.ToString();
+                    connectionString = ((object?)oledbConnection?.Connection)?.ToString();
                 }
                 finally
                 {
@@ -408,63 +294,35 @@ public partial class ConnectionCommands : IConnectionCommands
                 try
                 {
                     odbcConnection = conn.ODBCConnection;
-                    connectionString = odbcConnection?.Connection?.ToString();
+                    connectionString = ((object?)odbcConnection?.Connection)?.ToString();
                 }
                 finally
                 {
                     ComUtilities.Release(ref odbcConnection);
                 }
             }
-            else if (connType is 3 or 4)
+            else if (connType == 4)
             {
-                dynamic? textConnection = null;
+                Excel.TextConnection? textConnection = null;
                 try
                 {
                     textConnection = conn.TextConnection;
-                    connectionString = textConnection?.Connection?.ToString();
-                }
-                catch (COMException)
-                {
+                    connectionString = ((object?)textConnection.Connection)?.ToString();
                 }
                 finally
                 {
                     ComUtilities.Release(ref textConnection);
                 }
 
-                if (string.IsNullOrWhiteSpace(connectionString))
-                {
-                    dynamic? webConnection = null;
-                    try
-                    {
-                        webConnection = conn.WebConnection;
-                        connectionString = webConnection?.Connection?.ToString();
-                    }
-                    catch (COMException)
-                    {
-                    }
-                    finally
-                    {
-                        ComUtilities.Release(ref webConnection);
-                    }
-                }
             }
-
-            // Fallback to root ConnectionString property
-            if (string.IsNullOrWhiteSpace(connectionString))
+            else if (connType == 5)
             {
-                try
-                {
-                    connectionString = conn.ConnectionString?.ToString();
-                }
-                catch (COMException)
-                {
-                    // Property not available
-                }
+                connectionString = ReadLegacyQueryTableValue(conn, query => ((object?)query.Connection)?.ToString());
             }
 
             return connectionString;
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // Property not available
         }
@@ -472,18 +330,18 @@ public partial class ConnectionCommands : IConnectionCommands
         return null;
     }
 
-    private static string? GetCommandText(dynamic conn)
+    private static string? GetCommandText(Excel.WorkbookConnection conn)
     {
         try
         {
-            int connType = conn.Type;
+            int connType = (int)conn.Type;
             if (connType == 1)
             {
                 Excel.OLEDBConnection? oledbConnection = null;
                 try
                 {
                     oledbConnection = conn.OLEDBConnection;
-                    return oledbConnection?.CommandText?.ToString();
+                    return ((object?)oledbConnection?.CommandText)?.ToString();
                 }
                 finally
                 {
@@ -497,7 +355,7 @@ public partial class ConnectionCommands : IConnectionCommands
                 try
                 {
                     odbcConnection = conn.ODBCConnection;
-                    return odbcConnection?.CommandText?.ToString();
+                    return ((object?)odbcConnection?.CommandText)?.ToString();
                 }
                 finally
                 {
@@ -505,47 +363,20 @@ public partial class ConnectionCommands : IConnectionCommands
                 }
             }
 
-            if (connType is 3 or 4)
-            {
-                dynamic? textConnection = null;
-                try
-                {
-                    textConnection = conn.TextConnection;
-                    return textConnection?.CommandText?.ToString();
-                }
-                catch (COMException)
-                {
-                }
-                finally
-                {
-                    ComUtilities.Release(ref textConnection);
-                }
-
-                dynamic? webConnection = null;
-                try
-                {
-                    webConnection = conn.WebConnection;
-                    return webConnection?.CommandText?.ToString();
-                }
-                finally
-                {
-                    ComUtilities.Release(ref webConnection);
-                }
-            }
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
         }
 
         return null;
     }
 
-    private static string? GetCommandType(dynamic conn)
+    private static string? GetCommandType(Excel.WorkbookConnection conn)
     {
         int commandType;
         try
         {
-            int connType = conn.Type;
+            int connType = (int)conn.Type;
             if (connType == 1)
             {
                 Excel.OLEDBConnection? oledbConnection = null;
@@ -587,7 +418,7 @@ public partial class ConnectionCommands : IConnectionCommands
                 return null;
             }
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             return null;
         }
@@ -603,7 +434,7 @@ public partial class ConnectionCommands : IConnectionCommands
         };
     }
 
-    private static object GetConnectionProperties(dynamic conn, ILogger logger)
+    private static object GetConnectionProperties(Excel.WorkbookConnection conn, ILogger logger)
     {
         return new
         {
@@ -615,7 +446,7 @@ public partial class ConnectionCommands : IConnectionCommands
         };
     }
 
-    private static void CreateConnection(dynamic workbook, string connectionName, ConnectionDefinition definition)
+    private static void CreateConnection(Excel.Workbook workbook, string connectionName, ConnectionDefinition definition)
     {
         // Validate required fields
         if (string.IsNullOrWhiteSpace(definition.ConnectionString))
@@ -633,8 +464,8 @@ public partial class ConnectionCommands : IConnectionCommands
                 "Use powerquery tool for file/web imports, or create an ODC file and use import-odc action.");
         }
 
-        dynamic? connections = null;
-        dynamic? newConnection = null;
+        Excel.Connections? connections = null;
+        Excel.WorkbookConnection? newConnection = null;
 
         try
         {
@@ -663,7 +494,7 @@ public partial class ConnectionCommands : IConnectionCommands
         }
     }
 
-    private static bool IsOlapConnection(dynamic connection)
+    private static bool IsOlapConnection(Excel.WorkbookConnection connection)
     {
         int connectionType = Convert.ToInt32(connection.Type, CultureInfo.InvariantCulture);
         if (connectionType != 1) return false;
@@ -680,7 +511,7 @@ public partial class ConnectionCommands : IConnectionCommands
         }
     }
 
-    private static void UpdateConnectionProperties(dynamic conn, ConnectionDefinition definition)
+    private static void UpdateConnectionProperties(Excel.WorkbookConnection conn, ConnectionDefinition definition)
     {
         int connType = Convert.ToInt32(conn.Type, CultureInfo.InvariantCulture);
         if (connType == 1 && definition.BackgroundQuery.HasValue &&
@@ -691,7 +522,7 @@ public partial class ConnectionCommands : IConnectionCommands
             try
             {
                 providerConnection = conn.OLEDBConnection;
-                current = Convert.ToString(providerConnection.Connection, CultureInfo.InvariantCulture)
+                current = Convert.ToString((object)providerConnection.Connection, CultureInfo.InvariantCulture)
                     ?? throw new InvalidOperationException("The OLEDB connection string could not be read.");
             }
             finally
@@ -724,6 +555,13 @@ public partial class ConnectionCommands : IConnectionCommands
         {
             throw new ArgumentException(
                 "OLAP connections refresh synchronously and do not support backgroundQuery=true.",
+                nameof(definition));
+        }
+        if (connType is 4 or 5 && !string.IsNullOrWhiteSpace(definition.CommandText))
+        {
+            throw new ArgumentException(
+                "SQL commandText applies to OLEDB/ODBC connections, not text/web imports. " +
+                "Use querytable to inspect the source and import settings. No connection properties have been changed.",
                 nameof(definition));
         }
 
@@ -814,98 +652,23 @@ public partial class ConnectionCommands : IConnectionCommands
                     ComUtilities.Release(ref odbcConnection);
                 }
             }
-            else if (connType is 3 or 4) // TEXT (type 3) or WEB (type 4) - Excel may report CSV files as either
+            else if (connType is 4 or 5)
             {
-                // Excel has type 3/4 confusion: CSV files created with "TEXT;filepath" may be reported as type 4 (WEB)
-                // Try TextConnection first (correct for type 3), fall back to WebConnection if that fails
-                dynamic? textConnection = null;
-                try
+                VisitLegacyQueryTables(conn, query =>
                 {
-                    textConnection = conn.TextConnection; // Try TEXT first
-                }
-                catch (COMException)
-                {
-                }
-
-                if (textConnection != null)
-                {
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(definition.ConnectionString))
-                        {
-                            textConnection.Connection = definition.ConnectionString;
-                        }
-                        if (!string.IsNullOrWhiteSpace(definition.CommandText))
-                        {
-                            textConnection.CommandText = definition.CommandText;
-                        }
-                        if (definition.BackgroundQuery.HasValue)
-                        {
-                            textConnection.BackgroundQuery = definition.BackgroundQuery.Value;
-                        }
-                        if (definition.RefreshOnFileOpen.HasValue)
-                        {
-                            textConnection.RefreshOnFileOpen = definition.RefreshOnFileOpen.Value;
-                        }
-                        if (definition.SavePassword.HasValue)
-                        {
-                            textConnection.SavePassword = definition.SavePassword.Value;
-                        }
-                        if (definition.RefreshPeriod.HasValue)
-                        {
-                            textConnection.RefreshPeriod = definition.RefreshPeriod.Value;
-                        }
-                    }
-                    finally
-                    {
-                        ComUtilities.Release(ref textConnection);
-                    }
-
-                    return;
-                }
-
-                dynamic? webConnection = null;
-                try
-                {
-                    webConnection = conn.WebConnection; // Fall back to WEB
-                    if (webConnection != null)
-                    {
-                        if (!string.IsNullOrWhiteSpace(definition.ConnectionString))
-                        {
-                            webConnection.Connection = definition.ConnectionString;
-                        }
-                        if (!string.IsNullOrWhiteSpace(definition.CommandText))
-                        {
-                            webConnection.CommandText = definition.CommandText;
-                        }
-                        if (definition.BackgroundQuery.HasValue)
-                        {
-                            webConnection.BackgroundQuery = definition.BackgroundQuery.Value;
-                        }
-                        if (definition.RefreshOnFileOpen.HasValue)
-                        {
-                            webConnection.RefreshOnFileOpen = definition.RefreshOnFileOpen.Value;
-                        }
-                        if (definition.SavePassword.HasValue)
-                        {
-                            webConnection.SavePassword = definition.SavePassword.Value;
-                        }
-                        if (definition.RefreshPeriod.HasValue)
-                        {
-                            webConnection.RefreshPeriod = definition.RefreshPeriod.Value;
-                        }
-                    }
-                }
-                catch (COMException)
-                {
-                    // Neither works - skip property updates
-                }
-                finally
-                {
-                    ComUtilities.Release(ref webConnection);
-                }
+                    if (!string.IsNullOrWhiteSpace(definition.ConnectionString))
+                        query.Connection = definition.ConnectionString;
+                    if (definition.BackgroundQuery.HasValue)
+                        query.BackgroundQuery = definition.BackgroundQuery.Value;
+                    if (definition.RefreshOnFileOpen.HasValue)
+                        query.RefreshOnFileOpen = definition.RefreshOnFileOpen.Value;
+                    if (definition.SavePassword.HasValue)
+                        query.SavePassword = definition.SavePassword.Value;
+                    if (definition.RefreshPeriod.HasValue)
+                        query.RefreshPeriod = definition.RefreshPeriod.Value;
+                });
             }
-            else if (connType == 5) // XMLMAP
+            else if (connType == 3) // XMLMAP
             {
                 // XMLMAP connection properties - future implementation
                 // For now, just update basic properties like description (already done above)
@@ -935,6 +698,84 @@ public partial class ConnectionCommands : IConnectionCommands
         catch (Exception ex)
         {
             throw new InvalidOperationException($"Failed to update connection properties: {ex.Message}", ex);
+        }
+    }
+
+    private static T ReadLegacyQueryTableValue<T>(
+        Excel.WorkbookConnection connection, Func<Excel.QueryTable, T> read)
+    {
+        T value = default!;
+        bool found = false;
+        VisitLegacyQueryTables(connection, query =>
+        {
+            T candidate = read(query);
+            if (found && !EqualityComparer<T>.Default.Equals(value, candidate))
+            {
+                throw new InvalidOperationException(
+                    $"Connection '{connection.Name}' has differing settings on its linked QueryTables. " +
+                    "Use querytable view to inspect each import separately.");
+            }
+            value = candidate;
+            found = true;
+        });
+        return value;
+    }
+
+    private static void VisitLegacyQueryTables(
+        Excel.WorkbookConnection connection, Action<Excel.QueryTable> visit)
+    {
+        Excel.Workbook? workbook = null;
+        Excel.Sheets? sheets = null;
+        bool found = false;
+        string name = connection.Name;
+        try
+        {
+            workbook = (Excel.Workbook)connection.Parent;
+            sheets = workbook.Worksheets;
+            for (int sheetIndex = 1; sheetIndex <= sheets.Count; sheetIndex++)
+            {
+                Excel.Worksheet? sheet = null;
+                Excel.QueryTables? queries = null;
+                try
+                {
+                    sheet = (Excel.Worksheet)sheets[sheetIndex];
+                    queries = sheet.QueryTables;
+                    for (int queryIndex = 1; queryIndex <= queries.Count; queryIndex++)
+                    {
+                        Excel.QueryTable? query = null;
+                        Excel.WorkbookConnection? owner = null;
+                        try
+                        {
+                            query = queries.Item(queryIndex);
+                            owner = query.WorkbookConnection;
+                            if (!string.Equals(name, owner.Name, StringComparison.Ordinal))
+                                continue;
+                            visit(query);
+                            found = true;
+                        }
+                        finally
+                        {
+                            ComUtilities.Release(ref owner);
+                            ComUtilities.Release(ref query);
+                        }
+                    }
+                }
+                finally
+                {
+                    ComUtilities.Release(ref queries);
+                    ComUtilities.Release(ref sheet);
+                }
+            }
+            if (!found)
+            {
+                throw new InvalidOperationException(
+                    $"Connection '{name}' has no linked worksheet QueryTable from which to read or change import settings.");
+            }
+        }
+        finally
+        {
+            ComUtilities.Release(ref sheets);
+            ComUtilities.Release(ref workbook);
         }
     }
 
@@ -968,50 +809,9 @@ public partial class ConnectionCommands : IConnectionCommands
         return Type.Missing;
     }
 
-    private static void SetConnectionProperty<T>(dynamic conn, string propertyName, T? value) where T : struct
-    {
-        if (!value.HasValue) return;
-
-        dynamic? subConn = null;
-        try
-        {
-            subConn = GetTypedSubConnection(conn);
-            if (subConn != null)
-            {
-                SetProperty(subConn, propertyName, value.Value);
-            }
-        }
-        catch (COMException)
-        {
-            // Property not available for this connection type
-        }
-        finally
-        {
-            ComUtilities.Release(ref subConn);
-        }
-    }
-
-    private static void SetProperty<T>(dynamic obj, string propertyName, T value)
-    {
-        try
-        {
-            // Use reflection to set property dynamically
-            var type = obj.GetType();
-            var property = type.GetProperty(propertyName);
-            if (property != null && property.CanWrite)
-            {
-                property.SetValue(obj, value);
-            }
-        }
-        catch (System.Runtime.InteropServices.COMException)
-        {
-            // Property doesn't exist or can't be set
-        }
-    }
-
     private static void CreateQueryTableForConnection(
-        dynamic targetSheet,
-        dynamic conn,
+        Excel.Worksheet targetSheet,
+        Excel.WorkbookConnection conn,
         PowerQueryHelpers.QueryTableOptions options,
         CancellationToken cancellationToken)
     {
@@ -1031,9 +831,9 @@ public partial class ConnectionCommands : IConnectionCommands
             commandText = "";
         }
 
-        dynamic? queryTables = null;
+        Excel.QueryTables? queryTables = null;
         Excel.QueryTable? queryTable = null;
-        dynamic? range = null;
+        Excel.Range? range = null;
 
         try
         {

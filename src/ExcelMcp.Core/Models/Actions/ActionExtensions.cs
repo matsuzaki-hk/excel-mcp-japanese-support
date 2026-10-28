@@ -1,4 +1,4 @@
-#pragma warning disable CS1591
+#pragma warning disable CS1591 // Action conversion members mirror the enums; operation descriptions live on the Core command contracts.
 namespace Sbroenne.ExcelMcp.Core.Models.Actions;
 
 /// <summary>
@@ -13,6 +13,13 @@ public static class ActionExtensions
         FileAction.Close => "close",
         FileAction.Create => "create",
         FileAction.Test => "test",
+        FileAction.Save => "save",
+        FileAction.Discover => "discover",
+        FileAction.Attach => "attach",
+        FileAction.Notices => "notices",
+        FileAction.EnableEditing => "enable-editing",
+        FileAction.EnableConnections => "enable-connections",
+        FileAction.EnableMacros => "enable-macros",
         _ => throw new ArgumentException($"Unknown FileAction: {action}")
     };
 
@@ -54,4 +61,3 @@ public static class ActionExtensions
     // CalculationModeAction.ToActionString() is now generated in ServiceRegistry.CalculationMode.ToActionString()
 }
 #pragma warning restore CS1591
-

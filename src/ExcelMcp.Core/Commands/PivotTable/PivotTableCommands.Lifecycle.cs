@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Models;
@@ -19,7 +18,7 @@ public partial class PivotTableCommands
         return batch.Execute((ctx, ct) =>
         {
             var pivotTables = new List<PivotTableInfo>();
-            dynamic? sheets = null;
+            Excel.Sheets? sheets = null;
 
             try
             {
@@ -27,19 +26,24 @@ public partial class PivotTableCommands
                 for (int i = 1; i <= sheets.Count; i++)
                 {
                     ct.ThrowIfCancellationRequested();
-                    dynamic? sheet = null;
-                    dynamic? pivotTablesCol = null;
+                    Excel.Worksheet? sheet = null;
+                    Excel.PivotTables? pivotTablesCol = null;
                     try
                     {
-                        sheet = sheets.Item(i);
+                        sheet = (Excel.Worksheet)sheets[i];
                         string sheetName = sheet.Name;
-                        pivotTablesCol = sheet.PivotTables;
+                        pivotTablesCol = (Excel.PivotTables)sheet.PivotTables();
 
                         for (int j = 1; j <= pivotTablesCol.Count; j++)
                         {
                             ct.ThrowIfCancellationRequested();
-                            dynamic? pivot = null;
-                            dynamic? pivotCache = null;
+                            Excel.PivotTable? pivot = null;
+                            Excel.PivotCache? pivotCache = null;
+                            Excel.Range? tableRange = null;
+                            Excel.PivotFields? rowFields = null;
+                            Excel.PivotFields? columnFields = null;
+                            Excel.PivotFields? dataFields = null;
+                            Excel.PivotFields? pageFields = null;
                             try
                             {
                                 pivot = pivotTablesCol.Item(j);
@@ -58,77 +62,23 @@ public partial class PivotTableCommands
                                 int filterFieldCount = 0;
                                 DateTime? lastRefresh = null;
 
-                                try
-                                {
-                                    range = pivot.TableRange2.Address;
-                                    layoutError = PivotTableHelpers.GetLayoutError((Microsoft.Office.Interop.Excel.PivotTable)pivot);
-                                }
-                                catch (System.Runtime.InteropServices.COMException)
-                                {
-                                    // TableRange2 might fail for disconnected PivotTables
-                                    range = "(unavailable)";
-                                }
-
-                                try
-                                {
-                                    pivotCache = pivot.PivotCache;
-                                    sourceData = pivotCache.SourceData?.ToString() ?? string.Empty;
-
-                                    // Handle RefreshDate which can be DateTime or double (OLE date)
-                                    if (pivotCache.RefreshDate != null)
-                                    {
-                                        var refreshDate = pivotCache.RefreshDate;
-                                        if (refreshDate is DateTime dt)
-                                        {
-                                            lastRefresh = dt;
-                                        }
-                                        else if (refreshDate is double dbl)
-                                        {
-                                            lastRefresh = DateTime.FromOADate(dbl);
-                                        }
-                                    }
-                                }
-                                catch (System.Runtime.InteropServices.COMException)
-                                {
-                                    // SourceData might fail for Data Model or external sources
+                                tableRange = pivot.TableRange2;
+                                range = tableRange.Address;
+                                layoutError = PivotTableHelpers.GetLayoutError((Microsoft.Office.Interop.Excel.PivotTable)pivot);
+                                pivotCache = pivot.PivotCache();
+                                if ((int)pivotCache.SourceType == (int)Excel.XlPivotTableSourceType.xlDatabase)
+                                    sourceData = ((object?)pivotCache.SourceData)?.ToString() ?? string.Empty;
+                                else
                                     sourceData = "(external or Data Model)";
-                                }
-
-                                try
-                                {
-                                    rowFieldCount = pivot.RowFields.Count;
-                                }
-                                catch (COMException)
-                                {
-                                    // RowFields.Count may fail for Data Model or OLAP PivotTables
-                                }
-
-                                try
-                                {
-                                    columnFieldCount = pivot.ColumnFields.Count;
-                                }
-                                catch (COMException)
-                                {
-                                    // ColumnFields.Count may fail for Data Model or OLAP PivotTables
-                                }
-
-                                try
-                                {
-                                    valueFieldCount = pivot.DataFields.Count;
-                                }
-                                catch (COMException)
-                                {
-                                    // DataFields.Count may fail for Data Model or OLAP PivotTables
-                                }
-
-                                try
-                                {
-                                    filterFieldCount = pivot.PageFields.Count;
-                                }
-                                catch (COMException)
-                                {
-                                    // PageFields.Count may fail for Data Model or OLAP PivotTables
-                                }
+                                lastRefresh = GetRefreshDateSafe(pivotCache.RefreshDate);
+                                rowFields = (Excel.PivotFields)pivot.RowFields;
+                                columnFields = (Excel.PivotFields)pivot.ColumnFields;
+                                dataFields = (Excel.PivotFields)pivot.DataFields;
+                                pageFields = (Excel.PivotFields)pivot.PageFields;
+                                rowFieldCount = Convert.ToInt32(rowFields.Count);
+                                columnFieldCount = Convert.ToInt32(columnFields.Count);
+                                valueFieldCount = Convert.ToInt32(dataFields.Count);
+                                filterFieldCount = Convert.ToInt32(pageFields.Count);
 
                                 var info = new PivotTableInfo
                                 {
@@ -147,14 +97,13 @@ public partial class PivotTableCommands
 
                                 pivotTables.Add(info);
                             }
-                            catch (Exception ex)
-                            {
-                                // Log but don't fail entire list operation for one bad PivotTable
-                                // Continue to next PivotTable
-                                System.Diagnostics.Debug.WriteLine($"Skipping PivotTable {j} on sheet {sheetName}: {ex.Message}");
-                            }
                             finally
                             {
+                                ComUtilities.Release(ref pageFields);
+                                ComUtilities.Release(ref dataFields);
+                                ComUtilities.Release(ref columnFields);
+                                ComUtilities.Release(ref rowFields);
+                                ComUtilities.Release(ref tableRange);
                                 ComUtilities.Release(ref pivotCache);
                                 ComUtilities.Release(ref pivot);
                             }
@@ -197,73 +146,53 @@ public partial class PivotTableCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? pivot = null;
-            dynamic? pivotCache = null;
-            dynamic? cubeFields = null;
-            dynamic? pivotFields = null;
+            Excel.PivotTable? pivot = null;
+            Excel.PivotCache? pivotCache = null;
+            Excel.CubeFields? cubeFields = null;
+            Excel.PivotFields? pivotFields = null;
+            Excel.Worksheet? parentSheet = null;
+            Excel.Range? tableRange = null;
+            Excel.PivotFields? rowFields = null;
+            Excel.PivotFields? columnFields = null;
+            Excel.PivotFields? dataFields = null;
+            Excel.PivotFields? pageFields = null;
 
             try
             {
                 pivot = sheetName is null
                     ? FindPivotTable(ctx.Book, pivotTableName)
                     : FindPivotTable(ctx.Book, sheetName, pivotTableName);
-                pivotCache = pivot.PivotCache;
+                pivotCache = pivot.PivotCache();
+                parentSheet = (Excel.Worksheet)pivot.Parent;
+                tableRange = pivot.TableRange2;
+                rowFields = (Excel.PivotFields)pivot.RowFields;
+                columnFields = (Excel.PivotFields)pivot.ColumnFields;
+                dataFields = (Excel.PivotFields)pivot.DataFields;
+                pageFields = (Excel.PivotFields)pivot.PageFields;
 
                 // Get basic info with defensive error handling (properties can throw on Data Model sources)
                 var info = new PivotTableInfo
                 {
                     Name = pivot.Name,
                     CacheIndex = Convert.ToInt32(pivot.CacheIndex),
-                    SheetName = pivot.Parent.Name
+                    SheetName = parentSheet.Name,
+                    Range = tableRange.Address,
+                    LayoutError = PivotTableHelpers.GetLayoutError((Excel.PivotTable)pivot),
+                    RowFieldCount = Convert.ToInt32(rowFields.Count),
+                    ColumnFieldCount = Convert.ToInt32(columnFields.Count),
+                    ValueFieldCount = Convert.ToInt32(dataFields.Count),
+                    FilterFieldCount = Convert.ToInt32(pageFields.Count),
+                    LastRefresh = GetRefreshDateSafe(pivotCache.RefreshDate)
                 };
 
-                // TableRange2 - can throw on Data Model sources
-                try
-                {
-                    info.Range = pivot.TableRange2.Address;
-                    info.LayoutError = PivotTableHelpers.GetLayoutError((Microsoft.Office.Interop.Excel.PivotTable)pivot);
-                }
-                catch (COMException ex) when (ex.HResult == unchecked((int)0x800A03EC))
-                {
-                    info.Range = "[Data Model - Range not available]";
-                }
-
-                // SourceData - can throw on Data Model sources
-                try
-                {
-                    info.SourceData = pivotCache.SourceData?.ToString() ?? string.Empty;
-                }
-                catch (COMException ex) when (ex.HResult == unchecked((int)0x800A03EC))
-                {
+                if ((int)pivotCache.SourceType == (int)Excel.XlPivotTableSourceType.xlDatabase)
+                    info.SourceData = ((object?)pivotCache.SourceData)?.ToString() ?? string.Empty;
+                else
                     info.SourceData = "[Data Model Source]";
-                }
-
-                // Field counts - usually safe but wrap defensively
-                try
-                {
-                    info.RowFieldCount = pivot.RowFields.Count;
-                    info.ColumnFieldCount = pivot.ColumnFields.Count;
-                    info.ValueFieldCount = pivot.DataFields.Count;
-                    info.FilterFieldCount = pivot.PageFields.Count;
-                }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    // Field counts default to 0 if unavailable
-                }
-
-                // RefreshDate
-                try
-                {
-                    info.LastRefresh = GetRefreshDateSafe(pivotCache.RefreshDate);
-                }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    info.LastRefresh = null;
-                }
 
                 var olapState = PivotTableSnapshotHelpers.TryReadSnapshotProperty(
                     () => Convert.ToBoolean(pivotCache.OLAP));
-                bool isOlap = olapState.Value ?? false;
+                bool isOlap = olapState.Available && olapState.Value;
 
                 var fieldSnapshot = olapState.Available
                     ? PivotTableSnapshotHelpers.TryReadSnapshotProperty(() =>
@@ -276,7 +205,7 @@ public partial class PivotTableCommands
                         }
                         else
                         {
-                            pivotFields = (Excel.PivotFields)pivot.PivotFields;
+                            pivotFields = (Excel.PivotFields)pivot.PivotFields();
                             fields = GetRegularFieldsInfo(pivotFields);
                         }
 
@@ -287,7 +216,8 @@ public partial class PivotTableCommands
                             pivotTableName,
                             batch.WorkbookPath,
                             maxSelectedMembers,
-                            ct);
+                            ct,
+                            batch as IExcelBatchWindowControl);
                         return (Fields: fields, Selections: selections);
                     })
                     : new PivotSnapshotProperty<(List<PivotFieldInfo> Fields, List<PivotFieldSelectionSnapshot> Selections)>(
@@ -327,6 +257,12 @@ public partial class PivotTableCommands
             }
             finally
             {
+                ComUtilities.Release(ref pageFields);
+                ComUtilities.Release(ref dataFields);
+                ComUtilities.Release(ref columnFields);
+                ComUtilities.Release(ref rowFields);
+                ComUtilities.Release(ref tableRange);
+                ComUtilities.Release(ref parentSheet);
                 ComUtilities.Release(ref cubeFields);
                 ComUtilities.Release(ref pivotFields);
                 ComUtilities.Release(ref pivotCache);
@@ -338,7 +274,7 @@ public partial class PivotTableCommands
     /// <summary>
     /// Gets field info from CubeFields (OLAP/Data Model PivotTables)
     /// </summary>
-    private static List<PivotFieldInfo> GetCubeFieldsInfo(dynamic cubeFields)
+    private static List<PivotFieldInfo> GetCubeFieldsInfo(Excel.CubeFields cubeFields)
     {
         var fields = new List<PivotFieldInfo>();
         int fieldCount = cubeFields.Count;
@@ -347,7 +283,7 @@ public partial class PivotTableCommands
             Microsoft.Office.Interop.Excel.CubeField? cubeField = null;
             try
             {
-                cubeField = cubeFields.Item(i);
+                cubeField = cubeFields[i];
                 var orientation = cubeField.Orientation;
                 fields.Add(new PivotFieldInfo
                 {
@@ -370,61 +306,52 @@ public partial class PivotTableCommands
     /// <summary>
     /// Gets field info from PivotFields (regular PivotTables)
     /// </summary>
-    private static List<PivotFieldInfo> GetRegularFieldsInfo(dynamic pivotFields)
+    private static List<PivotFieldInfo> GetRegularFieldsInfo(Excel.PivotFields pivotFields)
     {
         var fields = new List<PivotFieldInfo>();
 
-        try
-        {
-            int fieldCount = pivotFields.Count;
+        int fieldCount = pivotFields.Count;
 
-            for (int i = 1; i <= fieldCount; i++)
+        for (int i = 1; i <= fieldCount; i++)
+        {
+            Excel.PivotField? field = null;
+            try
             {
-                dynamic? field = null;
-                try
-                {
-                    field = pivotFields.Item(i);
-                    int orientation = Convert.ToInt32(field.Orientation);
+                field = pivotFields.Item(i);
+                object? sourceName = field.SourceName;
+                if (PivotTableHelpers.IsValuesPlaceholderField(field, sourceName))
+                    continue; // Excel's synthetic Values field is not a source column.
+                int orientation = (int)field.Orientation;
 
-                    var fieldInfo = new PivotFieldInfo
+                var fieldInfo = new PivotFieldInfo
+                {
+                    Name = sourceName?.ToString() ?? field.Name?.ToString() ?? $"Field{i}",
+                    CustomName = field.Caption?.ToString() ?? string.Empty,
+                    Area = orientation switch
                     {
-                        Name = field.SourceName?.ToString() ?? field.Name?.ToString() ?? $"Field{i}",
-                        CustomName = field.Caption?.ToString() ?? string.Empty,
-                        Area = orientation switch
-                        {
-                            XlPivotFieldOrientation.xlRowField => PivotFieldArea.Row,
-                            XlPivotFieldOrientation.xlColumnField => PivotFieldArea.Column,
-                            XlPivotFieldOrientation.xlPageField => PivotFieldArea.Filter,
-                            XlPivotFieldOrientation.xlDataField => PivotFieldArea.Value,
-                            _ => PivotFieldArea.Hidden
-                        },
-                        Position = orientation != XlPivotFieldOrientation.xlHidden ? Convert.ToInt32(field.Position) : 0,
-                        DataType = PivotTableHelpers.DetectFieldDataType(field)
-                    };
+                        XlPivotFieldOrientation.xlRowField => PivotFieldArea.Row,
+                        XlPivotFieldOrientation.xlColumnField => PivotFieldArea.Column,
+                        XlPivotFieldOrientation.xlPageField => PivotFieldArea.Filter,
+                        XlPivotFieldOrientation.xlDataField => PivotFieldArea.Value,
+                        _ => PivotFieldArea.Hidden
+                    },
+                    Position = orientation != XlPivotFieldOrientation.xlHidden ? Convert.ToInt32((object)field.Position, System.Globalization.CultureInfo.InvariantCulture) : 0,
+                    DataType = PivotTableHelpers.DetectFieldDataType(field)
+                };
 
-                    // Get function for value fields
-                    if (orientation == XlPivotFieldOrientation.xlDataField)
-                    {
-                        int comFunction = Convert.ToInt32(field.Function);
-                        fieldInfo.Function = PivotTableHelpers.GetAggregationFunctionFromCom(comFunction);
-                    }
+                // Get function for value fields
+                if (orientation == XlPivotFieldOrientation.xlDataField)
+                {
+                    int comFunction = (int)field.Function;
+                    fieldInfo.Function = PivotTableHelpers.GetAggregationFunctionFromCom(comFunction);
+                }
 
-                    fields.Add(fieldInfo);
-                }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    // Individual field access failed - skip this field and continue
-                    // This can happen with calculated fields or special field types
-                }
-                finally
-                {
-                    ComUtilities.Release(ref field);
-                }
+                fields.Add(fieldInfo);
             }
-        }
-        catch (System.Runtime.InteropServices.COMException)
-        {
-            // PivotFields collection access failed - return partial results
+            finally
+            {
+                ComUtilities.Release(ref field);
+            }
         }
 
         return fields;
@@ -437,8 +364,8 @@ public partial class PivotTableCommands
     {
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? pivot = null;
-            dynamic? tableRange = null;
+            Excel.PivotTable? pivot = null;
+            Excel.Range? tableRange = null;
 
             try
             {
@@ -470,13 +397,13 @@ public partial class PivotTableCommands
     {
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? pivot = null;
-            dynamic? pivotCache = null;
+            Excel.PivotTable? pivot = null;
+            Excel.PivotCache? pivotCache = null;
 
             try
             {
                 pivot = FindPivotTable(ctx.Book, pivotTableName);
-                pivotCache = pivot.PivotCache;
+                pivotCache = pivot.PivotCache();
 
                 int previousRecordCount = pivotCache.RecordCount;
 
@@ -507,7 +434,7 @@ public partial class PivotTableCommands
     /// <summary>
     /// Safely converts Excel RefreshDate (which can be DateTime or double OLE date) to DateTime?
     /// </summary>
-    private static DateTime? GetRefreshDateSafe(dynamic refreshDate)
+    private static DateTime? GetRefreshDateSafe(object? refreshDate)
     {
         if (refreshDate == null)
             return null;

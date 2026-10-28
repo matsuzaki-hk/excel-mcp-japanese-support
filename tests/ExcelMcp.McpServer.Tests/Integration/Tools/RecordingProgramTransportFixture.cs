@@ -75,14 +75,18 @@ public sealed class RecordingProgramTransportFixture :
                 .FirstOrDefault()?.Text
                 ?? throw new InvalidOperationException(
                     $"Unexpected response from MCP tool '{toolName}'.");
-            AssertSerializedResult(text, response);
+            var jsonResult = result.Content.Any(content => content is ImageContentBlock)
+                ? result.StructuredContent?.GetRawText()
+                    ?? throw new InvalidOperationException("Image result has no structured metadata.")
+                : text;
+            AssertSerializedResult(jsonResult, response);
             var request = _backend.TakeRequest();
             RecordingToolTest.AssertRequest(
                 request,
                 expectedCommand,
                 expectedSessionId,
                 expectedArgsJson);
-            return new CapturedToolCall(text, request, result);
+            return new CapturedToolCall(jsonResult, request, result);
         }
         finally
         {
@@ -269,7 +273,8 @@ public sealed class RecordingProgramTransportFixture :
                     "No recording response was configured."));
         }
 
-        public bool ForceCloseSession(string sessionId) => false;
+        public void RevealSession(string sessionId) =>
+            throw new InvalidOperationException("Unexpected reveal in a recording-only fixture.");
 
         public void Dispose()
         {

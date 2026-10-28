@@ -17,6 +17,119 @@ namespace Sbroenne.ExcelMcp.Service.Tests;
 public sealed partial class ServiceWorkbookLifecycleTests
 {
     private static readonly bool[] CloseSaveModes = [true, false];
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PersistentFixture_TemplateFailure_ReportsRunningProcessWithoutStoppingIt(bool creationThrows)
+    {
+        // A short-lived stand-in for Excel: it outlives the fixture's 15-second exit wait, then ends by itself.
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("pwsh")
+        {
+            ArgumentList = { "-NoProfile", "-Command", "Start-Sleep -Seconds 25" },
+            UseShellExecute = false,
+            CreateNoWindow = true
+        })!;
+        var original = new InvalidOperationException("Template creation failed.");
+        ExcelProcessIdentity? identity = null;
+        var fixture = new FailingTemplateFixture(_ =>
+        {
+            identity = SessionManager.TrackExcelProcessIdentity(process.Id);
+            Assert.NotNull(identity);
+            if (creationThrows)
+                throw original;
+        });
+        try
+        {
+            var failure = await Assert.ThrowsAnyAsync<Exception>(fixture.InitializeAsync);
+            Assert.Equal(0, fixture.ExcelLaunchCount);
+            var ownedIdentity = Assert.IsType<ExcelProcessIdentity>(identity);
+            Assert.True(OwnedProcessGuard.MatchesLiveProcess(ownedIdentity));
+            if (creationThrows)
+                Assert.Contains(original, Assert.IsType<AggregateException>(failure).Flatten().InnerExceptions);
+            Assert.Contains("Excel is still running after shutdown", failure.ToString());
+        }
+        finally
+        {
+            if (identity is { } owned)
+                SessionManager.UntrackExcelProcess(owned);
+            await fixture.DisposeAsync();
+        }
+    }
+
+    private sealed class FailingTemplateFixture(Action<string> createWorkbook) :
+        PersistentServiceWorkbookFixture(createWorkbook);
+
+    [Fact]
+    public async Task PersistentFixture_TracksProcessWhileReopenBlocked()
+    {
+        var fixture = new PersistentServiceWorkbookFixture();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        Task? reopening = null;
+        Exception? failure = null;
+        try
+        {
+            await fixture.InitializeAsync();
+            Assert.Equal(1, fixture.ExcelLaunchCount);
+            ExcelBatch.BeforeWorkbookOpenHook = (path, _) =>
+            {
+                if (!string.Equals(path, fixture.WorkbookPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                entered.Set();
+                if (!release.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    throw new TimeoutException("Test did not release the blocked reopen.");
+                }
+            };
+
+            reopening = Task.Run(fixture.SaveAndReopenAsync);
+            var reopenTimeout = ComInteropConstants.DefaultOperationTimeout
+                + ProcessTerminationPolicy.NormalShutdownBudget
+                + ComInteropConstants.DefaultOperationTimeout
+                + TimeSpan.FromSeconds(15);
+            Assert.True(entered.Wait(reopenTimeout),
+                $"Reopen did not reach Excel within {reopenTimeout}.");
+            Assert.Equal(2, fixture.ExcelLaunchCount);
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+        finally
+        {
+            release.Set();
+            ExcelBatch.BeforeWorkbookOpenHook = null;
+            try
+            {
+                if (reopening is not null)
+                {
+                    await reopening;
+                }
+            }
+            catch (Exception ex)
+            {
+                failure = PersistentServiceCleanupFailures.Combine(failure, ex);
+            }
+            finally
+            {
+                var cleanup = await Record.ExceptionAsync(fixture.DisposeAsync);
+                if (cleanup is not null)
+                {
+                    failure = PersistentServiceCleanupFailures.Combine(failure, cleanup);
+                }
+            }
+        }
+
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
     [Theory]
     [InlineData("connection.list")]
     [InlineData("connection.get-properties")]
@@ -143,7 +256,6 @@ public sealed partial class ServiceWorkbookLifecycleTests
             var path = Path.Join(directory, "background-refresh.xlsx");
             var session = await CreateSessionAsync(service, path);
             sessions[session] = 0;
-            await WriteMarkerAsync(service, session, "Unsaved edit");
             var created = await service.ProcessAsync(new ServiceRequest
             {
                 Command = "powerquery.create",
@@ -158,7 +270,9 @@ public sealed partial class ServiceWorkbookLifecycleTests
                 Args = """{"queryName":"DelayedLoad","mCode":"Function.InvokeAfter(() => #table({\"Marker\"}, {{\"After\"}}), #duration(0,0,0,12))","refresh":false}"""
             });
             RequireSuccess(updated);
+            await WriteMarkerAsync(service, session, "Unsaved edit");
             var batch = Assert.IsAssignableFrom<IExcelBatch>(service.SessionManager.GetSession(session));
+            Assert.False(batch.Execute((context, _) => context.Book.Saved));
             using var refreshEntered = new ManualResetEventSlim();
             string? refreshConnectionName = null;
             var refreshTask = Task.Run(() => batch.Execute((context, _) =>
@@ -228,7 +342,8 @@ public sealed partial class ServiceWorkbookLifecycleTests
                     Assert.Same(batch, service.SessionManager.GetSession(session));
                 }
                 var saveFailure = Assert.Throws<ExcelBusyException>(() => batch.Save());
-                Assert.Contains("refresh", saveFailure.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains(backgroundQuery ? "refresh" : "pending", saveFailure.Message,
+                    StringComparison.OrdinalIgnoreCase);
                 Assert.False(batch.HasTimedOutOperation);
                 Assert.True(guardTimer.Elapsed < TimeSpan.FromSeconds(5),
                     "Status, rejected close, and rejected save must not wait behind the long refresh.");
@@ -440,17 +555,21 @@ public sealed partial class ServiceWorkbookLifecycleTests
                 ? await CreateSessionAsync(service, workbookPath, show)
                 : await OpenSessionAsync(service, workbookPath, show);
             sessions[sessionId] = 0;
-
-            var list = await service.ProcessAsync(new ServiceRequest
+            var batch = Assert.IsType<ExcelBatch>(service.SessionManager.GetSession(sessionId));
+            var firstInspection = 1;
+            batch.BeforeRefreshStateReadHookForTests = () =>
             {
-                Command = "session.list"
-            });
+                if (Interlocked.Exchange(ref firstInspection, 0) == 1)
+                    Thread.Sleep(TimeSpan.FromSeconds(1));
+            };
 
-            RequireSuccess(list);
-            using var result = JsonDocument.Parse(list.Result!);
+            var list = await WaitForSettledSessionListAsync(service, sessionId);
+            using var result = JsonDocument.Parse(list);
             var session = Assert.Single(
                 result.RootElement.GetProperty("sessions").EnumerateArray(),
                 item => item.GetProperty("sessionId").GetString() == sessionId);
+            batch.BeforeRefreshStateReadHookForTests = null;
+            Assert.Equal("ready", session.GetProperty("excelState").GetString());
             Assert.Equal(show, session.GetProperty("isExcelVisible").GetBoolean());
             Assert.Equal(0, session.GetProperty("activeOperations").GetInt32());
             Assert.True(session.GetProperty("canClose").GetBoolean());
@@ -504,8 +623,11 @@ public sealed partial class ServiceWorkbookLifecycleTests
             };
             try
             {
-                Assert.Equal(WorkbookRefreshState.Ready, batch.GetRefreshState());
-                Assert.True(service.SessionManager.ValidateClose(session).CanClose);
+                Assert.Equal(WorkbookRefreshState.Unknown, batch.GetRefreshState());
+                Assert.False(service.SessionManager.ValidateClose(session).CanClose);
+                Assert.True(SpinWait.SpinUntil(
+                    () => service.SessionManager.ValidateClose(session).CanClose,
+                    TimeSpan.FromSeconds(10)));
                 if (saveAs)
                 {
                     var response = await service.ProcessAsync(new ServiceRequest
@@ -518,9 +640,10 @@ public sealed partial class ServiceWorkbookLifecycleTests
                     Assert.Equal(targetPath, batch.WorkbookPath, ignoreCase: true);
                     Assert.True(batch.Execute((context, _) => context.Book.Saved));
                 }
+                var inspectionsBeforeClose = Volatile.Read(ref inspections);
                 await CloseSessionAsync(service, session, save: !saveAs);
                 sessions.TryRemove(session, out _);
-                Assert.True(inspections >= 3, "Save and close must inspect actual Excel readiness.");
+                Assert.True(inspections > inspectionsBeforeClose, "Close must inspect actual Excel readiness.");
                 Assert.False(batch.HasTimedOutOperation);
             }
             finally
@@ -940,6 +1063,31 @@ public sealed partial class ServiceWorkbookLifecycleTests
         });
     }
 
+    // Status reads wait only briefly for Excel, so a freshly started Excel can
+    // report "unknown" at first. Poll like an agent would until it settles.
+    internal static async Task<string> WaitForSettledSessionListAsync(
+        ExcelMcpService service,
+        string sessionId)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            var list = await service.ProcessAsync(new ServiceRequest { Command = "session.list" });
+            RequireSuccess(list);
+            using (var document = JsonDocument.Parse(list.Result!))
+            {
+                var state = document.RootElement.GetProperty("sessions").EnumerateArray()
+                    .Where(item => item.GetProperty("sessionId").GetString() == sessionId)
+                    .Select(item => item.GetProperty("excelState").GetString())
+                    .FirstOrDefault();
+                if (state != "unknown" || DateTime.UtcNow >= deadline)
+                    return list.Result!;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+    }
+
     private static async Task RunWithCleanupAsync(
         Func<ExcelMcpService, string, ConcurrentDictionary<string, byte>, Task> test)
     {
@@ -948,6 +1096,7 @@ public sealed partial class ServiceWorkbookLifecycleTests
             $"ServiceWorkbookLifecycleTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         var sessions = new ConcurrentDictionary<string, byte>();
+        using var excelProcesses = new TestExcelProcessScope();
         var service = new ExcelMcpService();
         Exception? failure = null;
 
@@ -961,11 +1110,13 @@ public sealed partial class ServiceWorkbookLifecycleTests
         }
         finally
         {
-            foreach (var sessionId in sessions.Keys)
+            var remaining = service.SessionManager.ActiveSessionIds.ToHashSet(StringComparer.Ordinal);
+            foreach (var sessionId in sessions.Keys.Where(remaining.Contains))
             {
                 try
                 {
-                    await CloseSessionAsync(service, sessionId, save: false);
+                    // Directly, because a service that has shut down accepts no requests.
+                    service.SessionManager.CloseSession(sessionId, save: false);
                 }
                 catch (Exception ex)
                 {
@@ -976,10 +1127,17 @@ public sealed partial class ServiceWorkbookLifecycleTests
             try
             {
                 service.Dispose();
+                // A stopped service leaves what it could not close; release that here.
+                service.SessionManager.Dispose();
             }
             catch (Exception ex)
             {
                 failure = PersistentServiceCleanupFailures.Combine(failure, ex);
+            }
+
+            if (excelProcesses.FindLeftovers() is { } leftover)
+            {
+                failure = PersistentServiceCleanupFailures.Combine(failure, leftover);
             }
 
             try
@@ -1132,6 +1290,27 @@ public sealed partial class ServiceWorkbookLifecycleTests
         using var result = JsonDocument.Parse(response.Result!);
         return result.RootElement.GetProperty("values")[0][0].GetString();
     }
+
+    /// <summary>Reads Sheet1!A1 straight from Excel, for sessions left after the service stopped.</summary>
+    private static string? ReadMarker(AttachedWorkbookBatch batch) => batch.Execute((context, _) =>
+    {
+        Excel.Sheets? sheets = null;
+        Excel.Worksheet? sheet = null;
+        Excel.Range? cell = null;
+        try
+        {
+            sheets = context.Book.Worksheets;
+            sheet = (Excel.Worksheet)sheets["Sheet1"];
+            cell = sheet.Range["A1"];
+            return cell.Value2 as string;
+        }
+        finally
+        {
+            ComUtilities.Release(ref cell);
+            ComUtilities.Release(ref sheet);
+            ComUtilities.Release(ref sheets);
+        }
+    });
 
     private static async Task CloseSessionAsync(
         ExcelMcpService service,

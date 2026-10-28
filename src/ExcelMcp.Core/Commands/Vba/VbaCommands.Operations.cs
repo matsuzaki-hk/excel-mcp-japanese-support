@@ -1,11 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Reflection;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Models;
+using Vbe = Microsoft.Vbe.Interop;
 
 namespace Sbroenne.ExcelMcp.Core.Commands;
 
@@ -18,7 +17,17 @@ public partial class VbaCommands
     public OperationResult Run(IExcelBatch batch, string procedureName, TimeSpan? timeout, params string[] parameters)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(procedureName);
+        if (procedureName.Contains('!'))
+        {
+            throw new ArgumentException(
+                "Use an unqualified procedure name such as Module1.MySub. The selected session determines the workbook.",
+                nameof(procedureName));
+        }
         parameters ??= [];
+        if (parameters.Length > 30)
+        {
+            throw new ArgumentException("Excel accepts at most 30 macro parameters.", nameof(parameters));
+        }
 
         EnsureVbaFile(batch.WorkbookPath);
 
@@ -28,73 +37,43 @@ public partial class VbaCommands
 
         Func<OperationResult> execute = () => batch.Execute((ctx, ct) =>
         {
+            var owner = batch is AttachedWorkbookBatch attached ? attached.Owner : batch as ExcelBatch;
+            if (owner?.RequiresVbaApproval(ctx.Book) == true)
+                throw new InvalidOperationException(
+                    batch is AttachedWorkbookBatch
+                    ? "VBA macros were disabled when this workbook opened. Use Excel to review macro permissions " +
+                    "and run the procedure. This workbook was already open in Excel, so this session cannot reopen it " +
+                    "to enable macros. No procedure was run."
+                    : "VBA macros were disabled when this workbook opened. Obtain approval for file enable-macros " +
+                    "with approved:true and allow_reopen:true (CLI: session enable-macros --approved --allow-reopen) " +
+                    "before running a procedure. The saved workbook must be reopened; unsaved changes are not discarded.");
             var originalCulture = CultureInfo.CurrentCulture;
             var originalUiCulture = CultureInfo.CurrentUICulture;
-            object? originalAutomationSecurity = null;
             try
             {
                 var excelCulture = CultureInfo.GetCultureInfo("en-US");
                 CultureInfo.CurrentCulture = excelCulture;
                 CultureInfo.CurrentUICulture = excelCulture;
 
-                // Explicit macro execution is an opt-in operation. Temporarily switch automation
-                // security to low so Application.Run can execute on workbooks reopened by the
-                // automation host, then restore the previous setting after the call.
-                dynamic app = (dynamic)(object)ctx.App;
-                originalAutomationSecurity = app.AutomationSecurity;
-                app.AutomationSecurity = 1;
-
-                // Use late-bound COM dispatch via Type.InvokeMember to avoid dependency on
-                // Microsoft.Vbe.Interop.dll, which is not available on Click-to-Run Office
-                // installations. The early-bound PIA call ctx.App.Run() triggers assembly
-                // resolution of VBE types through the embedded Application interface metadata.
-                var args = new object[1 + parameters.Length];
-                args[0] = procedureName;
+                string qualifiedName = $"'{ctx.Book.Name.Replace("'", "''", StringComparison.Ordinal)}'!{procedureName}";
+                var args = new object[30];
+                Array.Fill(args, Type.Missing);
                 for (int i = 0; i < parameters.Length; i++)
                 {
-                    args[i + 1] = parameters[i];
+                    args[i] = parameters[i];
                 }
 
-                var excelApplicationType = Type.GetTypeFromProgID("Excel.Application")
-                    ?? throw new InvalidOperationException("Excel is not installed or not properly registered.");
-
-                excelApplicationType.InvokeMember(
-                    "Run",
-                    BindingFlags.InvokeMethod,
-                    null,
-                    ctx.App,
-                    args,
-                    excelCulture);
+                ctx.App.Run(qualifiedName,
+                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9],
+                    args[10], args[11], args[12], args[13], args[14], args[15], args[16], args[17], args[18], args[19],
+                    args[20], args[21], args[22], args[23], args[24], args[25], args[26], args[27], args[28], args[29]);
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath };
             }
-            catch (TargetInvocationException ex) when (ex.InnerException != null)
-            {
-                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-                throw;
-            }
             finally
             {
-                try
-                {
-                    if (originalAutomationSecurity != null)
-                    {
-                        try
-                        {
-                            // PIA gap: AutomationSecurity lives in office.dll (Microsoft.Office.Core),
-                            // so restoring it must stay late-bound to avoid loading a missing Office core assembly.
-                            ((dynamic)(object)ctx.App).AutomationSecurity = originalAutomationSecurity;
-                        }
-                        catch (COMException)
-                        {
-                        }
-                    }
-                }
-                finally
-                {
-                    CultureInfo.CurrentCulture = originalCulture;
-                    CultureInfo.CurrentUICulture = originalUiCulture;
-                }
+                CultureInfo.CurrentCulture = originalCulture;
+                CultureInfo.CurrentUICulture = originalUiCulture;
             }
         }, timeoutCts?.Token ?? default);
 
@@ -128,20 +107,18 @@ public partial class VbaCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? vbaProject = null;
-            dynamic? vbComponents = null;
-            dynamic? targetComponent = null;
+            Vbe.VBProject? vbaProject = null;
+            Vbe.VBComponents? vbComponents = null;
+            Vbe.VBComponent? targetComponent = null;
             try
             {
-                // PIA gap: VBProject is in Microsoft.Vbe.Interop, not the Excel PIA.
-                // No .NET 5+ compatible NuGet package exists for VBE types.
-                vbaProject = ((dynamic)ctx.Book).VBProject;
-                EnsureProjectUnlocked((object)vbaProject);
+                vbaProject = ctx.Book.VBProject;
+                EnsureProjectUnlocked(vbaProject);
                 vbComponents = vbaProject.VBComponents;
 
                 for (int i = 1; i <= vbComponents.Count; i++)
                 {
-                    dynamic? component = null;
+                    Vbe.VBComponent? component = null;
                     try
                     {
                         component = vbComponents.Item(i);
@@ -213,15 +190,17 @@ public partial class VbaCommands
             Directory.CreateDirectory(outputDirectory);
         }
 
-        return batch.Execute((ctx, ct) =>
+        return batch.Execute(ExportModules);
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+            Justification = "Per-module export failures are transported as FailedModules/ErrorMessage entries so the remaining modules still export.")]
+        VbaExportResult ExportModules(ExcelContext ctx, CancellationToken ct)
         {
-            dynamic? vbaProject = null;
-            dynamic? vbComponents = null;
+            Vbe.VBProject? vbaProject = null;
+            Vbe.VBComponents? vbComponents = null;
             try
             {
-                // PIA gap: VBProject is in Microsoft.Vbe.Interop, not the Excel PIA.
-                // No .NET 5+ compatible NuGet package exists for VBE types.
-                vbaProject = ((dynamic)ctx.Book).VBProject;
+                vbaProject = ctx.Book.VBProject;
                 vbComponents = vbaProject.VBComponents;
 
                 var result = new VbaExportResult
@@ -241,24 +220,22 @@ public partial class VbaCommands
                     // Export all modules
                     for (int i = 1; i <= vbComponents.Count; i++)
                     {
-                        dynamic? component = null;
+                        Vbe.VBComponent? component = null;
                         try
                         {
                             component = vbComponents.Item(i);
-                            var componentType = component.Type;
-                            // Only export standard modules (type = 1), class modules (type = 2), and forms (type = 3)
-                            // Skip document modules (type = 100) as they are tied to worksheets
-                            if (componentType is 1 or 2 or 3)
+                            // Only export standard modules, class modules, and forms.
+                            // Skip document modules as they are tied to worksheets.
+                            if (component.Type is Vbe.vbext_ComponentType.vbext_ct_StdModule
+                                or Vbe.vbext_ComponentType.vbext_ct_ClassModule
+                                or Vbe.vbext_ComponentType.vbext_ct_MSForm)
                             {
                                 modulesToExport.Add(component.Name);
                             }
                         }
                         finally
                         {
-                            if (component != null)
-                            {
-                                ComUtilities.Release(ref component);
-                            }
+                            ComUtilities.Release(ref component);
                         }
                     }
                 }
@@ -270,14 +247,13 @@ public partial class VbaCommands
                 // Export each module
                 foreach (var moduleName in modulesToExport)
                 {
-                    dynamic? component = null;
+                    Vbe.VBComponent? component = null;
                     try
                     {
                         // Find the component
-                        component = null;
                         for (int i = 1; i <= vbComponents.Count; i++)
                         {
-                            dynamic? comp = null;
+                            Vbe.VBComponent? comp = null;
                             try
                             {
                                 comp = vbComponents.Item(i);
@@ -304,8 +280,8 @@ public partial class VbaCommands
                         }
 
                         // Determine file extension based on component type
-                        // 1=Standard Module(.bas), 2=Class Module(.cls), 3=UserForm(.frm), 100=Document(skip)
-                        int componentType = component.Type;
+                        // StdModule=.bas, ClassModule=.cls, MSForm=.frm, Document=skip
+                        int componentType = (int)component.Type;
                         string extension = componentType switch
                         {
                             2 => ".cls",
@@ -376,6 +352,6 @@ public partial class VbaCommands
                 ComUtilities.Release(ref vbComponents);
                 ComUtilities.Release(ref vbaProject);
             }
-        });
+        }
     }
 }

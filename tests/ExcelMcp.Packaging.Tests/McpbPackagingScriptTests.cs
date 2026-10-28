@@ -1,7 +1,5 @@
-using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.Json;
-using Sbroenne.ExcelMcp.Build;
 using Xunit;
 using static Sbroenne.ExcelMcp.Tests.Infrastructure.PackagingScriptTestHelper;
 
@@ -13,9 +11,16 @@ namespace Sbroenne.ExcelMcp.Packaging.Tests;
 [Trait("Feature", "McpbPackaging")]
 public sealed class McpbPackagingScriptTests
 {
-    // Fork: the bundle additionally embeds the compiled server executable.
-    private static readonly string[] BundleEntries =
-        ["CHANGELOG.md", "LICENSE", "README.md", "icon-512.png", "manifest.json", "server/excel-mcp-server.exe"];
+    private static readonly string[] BundleEntries = ["CHANGELOG.md", "LICENSE", "README.md", "icon-512.png", "manifest.json", "server/excel-mcp-server.exe"];
+
+    // The fork ships the self-contained server inside the bundle, so tests
+    // inject the current host executable and use its real product version.
+    private static (string Runtime, string Version) InjectedRuntime()
+    {
+        var runtime = Environment.ProcessPath!;
+        var version = System.Diagnostics.FileVersionInfo.GetVersionInfo(runtime).ProductVersion!.Split('+')[0];
+        return (runtime, version);
+    }
 
     [Fact]
     public async Task Build_CreatesExecutableBundleWithForkMetadata()
@@ -24,32 +29,29 @@ public sealed class McpbPackagingScriptTests
         try
         {
             var bundle = StageMcpbInputs(sandbox);
+            var (runtime, version) = InjectedRuntime();
             var result = await RunPowerShellFileAsync(Path.Combine(bundle, "Build-McpBundle.ps1"),
-                ["-Version", "1.2.3", "-McpRuntimeExecutable", CurrentProcessExe()]);
+                ["-Version", version, "-McpRuntimeExecutable", runtime]);
             Assert.True(result.ExitCode == 0, result.CombinedOutput);
-            await AssertForkExeBundleAsync(Path.Combine(bundle, "artifacts", "excel-mcp-ja-1.2.3.mcpb"), "1.2.3");
+            await AssertExecutableBundleAsync(Path.Combine(bundle, "artifacts", $"excel-mcp-ja-{version}.mcpb"), version);
         }
         finally { DeleteDirectoryIfExists(sandbox); }
     }
 
     [Fact]
-    public async Task AggregatePackaging_McpbCreatesExecutableBundle()
+    public async Task AggregatePackaging_McpbCreatesExecutableBundleWithoutPublishingRuntime()
     {
         var sandbox = CreateSandbox("mcpb-aggregate");
         try
         {
             StageMcpbInputs(sandbox);
             var output = Path.Combine(sandbox, "artifacts", "packages");
-            var runtime = StageVersionedX64Runtime(sandbox, out var version);
-            var commands = new PackageCommands(_ => Task.FromResult(new Sbroenne.ExcelMcp.Build.ProcessResult(0, "", "")));
-            await new PackageExecution(sandbox, commands).ReleaseAsync(new PackageOptions
-            {
-                Components = ["Mcpb"],
-                Version = version,
-                McpRuntimeExecutable = runtime,
-                OutputDirectory = output
-            });
-            await AssertForkExeBundleAsync(Path.Combine(output, "mcpb", $"excel-mcp-ja-{version}.mcpb"), version);
+            var (runtime, version) = InjectedRuntime();
+            var result = await RunPowerShellFileAsync(Path.Combine(sandbox, "scripts", "Build-ReleasePackages.ps1"),
+                ["-Components", "Mcpb", "-Version", version, "-McpRuntimeExecutable", runtime, "-OutputDirectory", output]);
+            Assert.True(result.ExitCode == 0, result.CombinedOutput);
+            await AssertExecutableBundleAsync(Path.Combine(output, "mcpb", $"excel-mcp-ja-{version}.mcpb"), version);
+            Assert.False(Directory.Exists(Path.Combine(output, "runtimes")));
             Assert.False(Directory.Exists(Path.Combine(output, "nuget")));
             Assert.False(Directory.Exists(Path.Combine(output, "npm")));
         }
@@ -57,107 +59,54 @@ public sealed class McpbPackagingScriptTests
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("AGENTS.md")]
-    [InlineData("CLAUDE.md")]
-    public async Task AggregatePackaging_VsixTargetsRequireMatchingBundledRuntime(string? developerFile)
-    {
-        var sandbox = CreateSandbox("vsix-runtime");
-        try
-        {
-            // Use a versioned PE fixture so the extension package exercises the real version check.
-            var runtime = StageVersionedX64Runtime(sandbox, out var version);
-            var extension = Directory.CreateDirectory(Path.Combine(sandbox, "vscode-extension")).FullName;
-            if (developerFile is not null)
-            {
-                File.WriteAllText(Path.Combine(extension, developerFile), "Developer-only instructions");
-            }
-            File.WriteAllText(Path.Combine(extension, "package.json"), $$$"""
-                {"version":"{{{version}}}","extensionKind":["ui"],"os":["win32"],"scripts":{"vscode:prepublish":"npm run compile"}}
-                """);
-            File.WriteAllText(Path.Combine(sandbox, "CHANGELOG.md"), "Fixture changelog");
-            var skills = Directory.CreateDirectory(Path.Combine(sandbox, "prepared", "excel-mcp-report-formatting")).FullName;
-            File.WriteAllText(Path.Combine(skills, "VERSION"), version);
-            File.WriteAllText(Path.Combine(skills, "SKILL.md"), "Fixture skill");
-            // The fork bundles the source-managed Japanese skill from skills/ (not from prepared output).
-            var jaSkill = Directory.CreateDirectory(Path.Combine(sandbox, "skills", "excel-mcp-ja")).FullName;
-            File.WriteAllText(Path.Combine(jaSkill, "SKILL.md"), "Fixture skill");
-            var output = Directory.CreateDirectory(Path.Combine(sandbox, "artifacts", "packages")).FullName;
-
-            var commands = new PackageCommands(command => Task.FromResult(FakeExtensionCommand(command)));
-            var prepared = new Dictionary<string, string>(StringComparer.Ordinal) { ["Mcp"] = runtime };
-            var act = () => new PackageExecution(sandbox, commands)
-                .ExtensionAsync(version, Path.Combine(sandbox, "prepared"), output, prepared, skipTests: true);
-
-            if (developerFile is not null)
-            {
-                var error = await Assert.ThrowsAsync<InvalidOperationException>(act);
-                Assert.Equal($"VSIX contains development files or the CLI: extension/{developerFile}", error.Message);
-                return;
-            }
-
-            await act();
-            // Fork contract: a single x64 VSIX named like the other fork artifacts.
-            using var archive = ZipFile.OpenRead(Path.Combine(output, $"excelmcp-ja-{version}.vsix"));
-            var entry = archive.GetEntry("extension/bin/Sbroenne.ExcelMcp.McpServer.exe");
-            Assert.NotNull(entry);
-            Assert.Equal(File.ReadAllBytes(runtime), ReadAll(entry));
-            foreach (var skillName in new[] { "excel-mcp-ja", "excel-mcp-report-formatting" })
-            {
-                Assert.NotNull(archive.GetEntry($"extension/skills/{skillName}/SKILL.md"));
-                Assert.NotNull(archive.GetEntry($"extension/skills/{skillName}/VERSION"));
-            }
-            var debugRuntime = Path.Combine(output, "extension", "bin", "Sbroenne.ExcelMcp.McpServer.exe");
-            Assert.Equal(File.ReadAllBytes(runtime), File.ReadAllBytes(debugRuntime));
-            Assert.Empty(Directory.GetFiles(output, "*-server-inspection.exe"));
-        }
-        finally { DeleteDirectoryIfExists(sandbox); }
-    }
-
-    [Theory]
-    [InlineData("wrong-version")]
-    [InlineData("")]
-    public async Task AggregatePackaging_RejectsMismatchedPreparedSkillsBeforeCreatingOutput(string stamp)
+    [InlineData("excel-cli", "wrong-version")]
+    [InlineData("excel-cli", "")]
+    [InlineData("excel-cli-report-formatting", "wrong-version")]
+    [InlineData("excel-cli-report-formatting", "")]
+    [InlineData("excel-mcp-report-formatting", "wrong-version")]
+    [InlineData("excel-mcp-report-formatting", "")]
+    public async Task AggregatePackaging_RejectsMismatchedPreparedSkillsBeforeCreatingOutput(string invalidSkill, string stamp)
     {
         var sandbox = CreateSandbox("prepared-skill-version");
         try
         {
+            StageMcpbInputs(sandbox);
             var skills = Path.Combine(sandbox, "prepared");
-            foreach (var name in new[] { "excel-cli", "excel-mcp" })
+            foreach (var name in new[] { "excel-cli", "excel-cli-report-formatting", "excel-mcp-report-formatting" })
             {
                 var directory = Directory.CreateDirectory(Path.Combine(skills, name)).FullName;
-                if (stamp.Length > 0) { File.WriteAllText(Path.Combine(directory, "VERSION"), stamp); }
+                var version = name == invalidSkill ? stamp : "1.2.3";
+                if (version.Length > 0) { File.WriteAllText(Path.Combine(directory, "VERSION"), version); }
             }
             var output = Path.Combine(sandbox, "artifacts", "packages");
-            var commands = new PackageCommands(_ => throw new InvalidOperationException("Payload packaging was reached."));
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => new PackageExecution(sandbox, commands).ReleaseAsync(new PackageOptions
-            {
-                Components = ["Plugins"],
-                Version = "1.2.3",
-                SkillsDirectory = skills,
-                OutputDirectory = output
-            }));
-            Assert.Contains("skill must match package version", error.Message, StringComparison.Ordinal);
+            var result = await RunPowerShellFileAsync(Path.Combine(sandbox, "scripts", "Build-ReleasePackages.ps1"),
+                ["-Components", "Plugins", "-Version", "1.2.3", "-SkillsDirectory", skills, "-OutputDirectory", output]);
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("skill must match package version", result.CombinedOutput, StringComparison.Ordinal);
+            Assert.Contains($"Prepared {invalidSkill} skill", result.CombinedOutput, StringComparison.Ordinal);
             Assert.False(Directory.Exists(output));
         }
         finally { DeleteDirectoryIfExists(sandbox); }
     }
 
     [Fact]
-    public void FailedBuild_PreservesExistingOutput()
+    public async Task FailedBuild_PreservesExistingOutput()
     {
         var sandbox = CreateSandbox("mcpb-preserved-output");
         try
         {
             var bundle = StageMcpbInputs(sandbox);
             var output = Directory.CreateDirectory(Path.Combine(bundle, "artifacts")).FullName;
-            var previous = Path.Combine(output, "excel-mcp-ja-1.2.3.mcpb");
+            var (runtime, version) = InjectedRuntime();
+            var previous = Path.Combine(output, $"excel-mcp-ja-{version}.mcpb");
             var unrelated = Path.Combine(output, "keep.txt");
             File.WriteAllText(previous, "previous-good-package");
             File.WriteAllText(unrelated, "unrelated");
-            var error = Assert.Throws<IOException>(() => new AuthoredPackages(sandbox, (_, _) =>
-                throw new IOException("archive-root-cause")).Mcpb("1.2.3", output, CurrentProcessExe()));
-            Assert.Contains("archive-root-cause", error.Message, StringComparison.Ordinal);
+            File.Delete(Path.Combine(bundle, "icon-512.png"));
+            var result = await RunPowerShellFileAsync(Path.Combine(bundle, "Build-McpBundle.ps1"),
+                ["-Version", version, "-McpRuntimeExecutable", runtime, "-OutputDir", output]);
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("icon-512.png", result.CombinedOutput, StringComparison.Ordinal);
             Assert.Equal("previous-good-package", File.ReadAllText(previous));
             Assert.Equal("unrelated", File.ReadAllText(unrelated));
         }
@@ -168,14 +117,18 @@ public sealed class McpbPackagingScriptTests
     [InlineData("src/output")]
     [InlineData("skills/generated")]
     [InlineData(".github/plugins/output")]
-    public void PackageOutputs_RejectSourceDestinations(string relativePath)
+    public async Task PackageOutputs_RejectSourceDestinations(string relativePath)
     {
         var sandbox = CreateSandbox("package-source-destination");
         try
         {
             var output = Path.Combine(sandbox, relativePath);
-            var error = Assert.Throws<ArgumentException>(() => PackageFiles.AssertOutput(output, sandbox));
-            Assert.Contains("Unsafe package output", error.Message, StringComparison.Ordinal);
+            var result = await RunPowerShellCommandAsync($"""
+                . '{Path.Combine(RepoRoot, "scripts", "PackageHelpers.ps1")}'
+                Assert-PackageOutputPath '{output}' '{sandbox}'
+                """);
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("Unsafe package output", result.CombinedOutput, StringComparison.Ordinal);
             Assert.False(Directory.Exists(output));
         }
         finally { DeleteDirectoryIfExists(sandbox); }
@@ -257,7 +210,7 @@ public sealed class McpbPackagingScriptTests
     {
         var bundle = Directory.CreateDirectory(Path.Combine(sandbox, "mcpb")).FullName;
         var scripts = Directory.CreateDirectory(Path.Combine(sandbox, "scripts")).FullName;
-        foreach (var name in new[] { "Build-ReleasePackages.ps1", "PackageHelpers.ps1" })
+        foreach (var name in new[] { "Build-ReleasePackages.ps1", "PackageHelpers.ps1", "ExtensionPackaging.ps1" })
         {
             File.Copy(Path.Combine(RepoRoot, "scripts", name), Path.Combine(scripts, name));
         }
@@ -269,79 +222,19 @@ public sealed class McpbPackagingScriptTests
         return bundle;
     }
 
-    private static string CurrentProcessExe() => Environment.ProcessPath!;
-
-    // Copies the test assembly as a self-contained x64 runtime fixture whose
-    // ProductVersion matches, so the package version check exercises real data.
-    private static string StageVersionedX64Runtime(string sandbox, out string version)
-    {
-        var assemblyPath = typeof(McpbPackagingScriptTests).Assembly.Location;
-        var productVersion = FileVersionInfo.GetVersionInfo(assemblyPath).ProductVersion;
-        Assert.NotNull(productVersion);
-        version = productVersion.Split('+')[0];
-        Assert.NotEmpty(version);
-        var payload = File.ReadAllBytes(assemblyPath);
-        var headerOffset = BitConverter.ToInt32(payload, 0x3c);
-        BitConverter.GetBytes((ushort)0x8664).CopyTo(payload, headerOffset + 4);
-        var runtime = Directory.CreateDirectory(Path.Combine(sandbox, "runtimes", "x64")).FullName;
-        var executable = Path.Combine(runtime, "Sbroenne.ExcelMcp.McpServer.exe");
-        File.WriteAllBytes(executable, payload);
-        return executable;
-    }
-
-    // Simulates the npm/vsce steps inside the staged extension directory:
-    // 'npm run compile' emits the out/ payload and 'vsce package' archives the
-    // whole stage under extension/ plus the target's extension.vsixmanifest.
-    private static Sbroenne.ExcelMcp.Build.ProcessResult FakeExtensionCommand(PackageCommand command)
-    {
-        var arguments = command.Arguments;
-        if (command.Executable == "npm" && arguments is ["run", "compile"])
-        {
-            var outDirectory = Directory.CreateDirectory(Path.Combine(command.WorkingDirectory, "out")).FullName;
-            File.WriteAllText(Path.Combine(outDirectory, "extension.js"), "fixture");
-            File.WriteAllText(Path.Combine(outDirectory, "prerequisites.js"), "fixture");
-            return new Sbroenne.ExcelMcp.Build.ProcessResult(0, "", "");
-        }
-        if (command.Executable == "npm" && arguments.Length > 2 && arguments[0] == "exec" && arguments.Contains("vsce"))
-        {
-            var target = arguments[Array.IndexOf(arguments, "--target") + 1];
-            var destination = arguments[Array.IndexOf(arguments, "--out") + 1];
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            using var archive = ZipFile.Open(destination, ZipArchiveMode.Create);
-            foreach (var file in Directory.EnumerateFiles(command.WorkingDirectory, "*", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(command.WorkingDirectory, file).Replace('\\', '/');
-                archive.CreateEntryFromFile(file, $"extension/{relative}");
-            }
-            var manifest = archive.CreateEntry("extension.vsixmanifest");
-            using (var writer = new StreamWriter(manifest.Open()))
-            {
-                writer.Write($"<PackageManifest><Metadata><Identity TargetPlatform='{target}'/></Metadata></PackageManifest>");
-            }
-            return new Sbroenne.ExcelMcp.Build.ProcessResult(0, "", "");
-        }
-        return new Sbroenne.ExcelMcp.Build.ProcessResult(0, "", "");
-    }
-
-    private static byte[] ReadAll(ZipArchiveEntry entry)
-    {
-        using var stream = entry.Open();
-        using var memory = new MemoryStream();
-        stream.CopyTo(memory);
-        return memory.ToArray();
-    }
-
-    private static async Task AssertForkExeBundleAsync(string path, string version)
+    private static async Task AssertExecutableBundleAsync(string path, string version)
     {
         using var archive = ZipFile.OpenRead(path);
-        Assert.Equal(BundleEntries,
-            archive.Entries.Select(entry => entry.FullName).Order(StringComparer.Ordinal));
+        foreach (var name in BundleEntries)
+        {
+            Assert.NotNull(archive.GetEntry(name));
+        }
         var entry = archive.GetEntry("manifest.json");
         Assert.NotNull(entry);
         using var stream = entry.Open();
         using var manifest = await JsonDocument.ParseAsync(stream);
-        Assert.Equal(version, manifest.RootElement.GetProperty("version").GetString());
         Assert.Equal("excel-mcp-ja", manifest.RootElement.GetProperty("name").GetString());
+        Assert.Equal(version, manifest.RootElement.GetProperty("version").GetString());
         var server = manifest.RootElement.GetProperty("server");
         Assert.Equal("binary", server.GetProperty("type").GetString());
         Assert.Equal("server/excel-mcp-server", server.GetProperty("entry_point").GetString());

@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Models;
+using Sbroenne.ExcelMcp.Core.Utilities;
 using Excel = Microsoft.Office.Interop.Excel;
 
 
@@ -14,11 +15,38 @@ namespace Sbroenne.ExcelMcp.Core.Commands.Range;
 /// </summary>
 public static class RangeHelpers
 {
+    internal static (int Rows, int Columns) GetDimensions(Excel.Range range)
+    {
+        Excel.Range? rows = null;
+        Excel.Range? columns = null;
+        try
+        {
+            rows = range.Rows;
+            columns = range.Columns;
+            return (rows.Count, columns.Count);
+        }
+        finally
+        {
+            ComUtilities.Release(ref columns);
+            ComUtilities.Release(ref rows);
+        }
+    }
+
     /// <summary>
-    /// Visits every unique cell in an already-resolved native range.
+    /// Visits cells in native area/row/column order in an already-resolved range.
     /// The callback borrows the cell; this method owns and releases its reference.
     /// </summary>
     internal static void VisitCells(Excel.Range range, CancellationToken ct, Action<Excel.Range> visit)
+    {
+        VisitCellsWhile(range, ct, cell =>
+        {
+            visit(cell);
+            return true;
+        });
+    }
+
+    /// <summary>Visits cells until the borrowed-cell callback returns false, releasing all acquired references.</summary>
+    internal static void VisitCellsWhile(Excel.Range range, CancellationToken ct, Func<Excel.Range, bool> visit)
     {
         Excel.Areas? areas = null;
         try
@@ -47,7 +75,8 @@ public static class RangeHelpers
                             try
                             {
                                 cell = cells[row, column];
-                                visit(cell);
+                                if (!visit(cell))
+                                    return;
                             }
                             finally
                             {
@@ -91,16 +120,16 @@ public static class RangeHelpers
     /// Supports both regular ranges (Sheet1!A1:D10) and named ranges.
     /// Throws a categorized failure when the sheet, named range, or address cannot be resolved.
     /// </summary>
-    public static dynamic? ResolveRange(dynamic book, string sheetName, string rangeAddress, out string? specificError)
+    public static Excel.Range? ResolveRange(Excel.Workbook book, string sheetName, string rangeAddress, out string? specificError)
     {
         specificError = null;
 
         // Named range (empty sheetName)
         if (string.IsNullOrEmpty(sheetName))
         {
-            dynamic? names = null;
-            dynamic? name = null;
-            dynamic? refersToRange = null;
+            Excel.Names? names = null;
+            Excel.Name? name = null;
+            Excel.Range? refersToRange = null;
             try
             {
                 names = book.Names;
@@ -155,11 +184,8 @@ public static class RangeHelpers
     /// Resolves a range address to a Range COM object (backward compatibility).
     /// Supports both regular ranges (Sheet1!A1:D10) and named ranges.
     /// </summary>
-    public static dynamic? ResolveRange(dynamic book, string sheetName, string rangeAddress)
-    {
-        string? ignoredError;
-        return ResolveRange(book, sheetName, rangeAddress, out ignoredError);
-    }
+    public static Excel.Range? ResolveRange(Excel.Workbook book, string sheetName, string rangeAddress) =>
+        ResolveRange(book, sheetName, rangeAddress, out _);
 
     /// <summary>
     /// Gets appropriate error message for range resolution failure
@@ -173,9 +199,9 @@ public static class RangeHelpers
         return $"Sheet '{sheetName}' or range '{rangeAddress}' not found.";
     }
 
-    private static dynamic ResolveNameByExactKey(dynamic names, string rangeAddress)
+    private static Excel.Name ResolveNameByExactKey(Excel.Names names, string rangeAddress)
     {
-        dynamic? name = null;
+        Excel.Name? name = null;
         try
         {
             name = names.Item(rangeAddress);
@@ -201,12 +227,12 @@ public static class RangeHelpers
         }
     }
 
-    private static bool WorkbookContainsName(dynamic names, string rangeAddress)
+    private static bool WorkbookContainsName(Excel.Names names, string rangeAddress)
     {
-        int count = Convert.ToInt32(names.Count);
+        int count = names.Count;
         for (int index = 1; index <= count; index++)
         {
-            dynamic? currentName = null;
+            Excel.Name? currentName = null;
             try
             {
                 currentName = names.Item(index);
@@ -543,13 +569,13 @@ public partial class RangeCommands
         string sheetName,
         string rangeAddress,
         string action,
-        Action<dynamic> clearAction)
+        Action<Excel.Range> clearAction)
     {
         var result = new OperationResult { FilePath = batch.WorkbookPath, Action = action };
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? range = null;
+            Excel.Range? range = null;
             try
             {
                 range = RangeHelpers.ResolveRange(ctx.Book, sheetName, rangeAddress);
@@ -671,6 +697,7 @@ public partial class RangeCommands
             catch (Exception ex)
             {
                 primaryFailure = ex;
+                throw;
             }
             finally
             {
@@ -678,17 +705,7 @@ public partial class RangeCommands
                 {
                     if (copyStarted)
                     {
-                        try
-                        {
-                            ctx.App.CutCopyMode = (Excel.XlCutCopyMode)0;
-                        }
-                        catch (Exception cleanupFailure)
-                        {
-                            primaryFailure = primaryFailure is null
-                                ? cleanupFailure
-                                : new AggregateException("Copy failed and Excel's copy mode could not be cleared.",
-                                    primaryFailure, cleanupFailure);
-                        }
+                        OperationCleanup.Run(() => ctx.App.CutCopyMode = (Excel.XlCutCopyMode)0, primaryFailure);
                     }
                 }
                 finally
@@ -698,10 +715,6 @@ public partial class RangeCommands
                     ComUtilities.Release(ref tgtRange);
                     ComUtilities.Release(ref srcRange);
                 }
-            }
-            if (primaryFailure is not null)
-            {
-                ExceptionDispatchInfo.Capture(primaryFailure).Throw();
             }
             result.Success = true;
             return result;
@@ -716,15 +729,15 @@ public partial class RangeCommands
         string sheetName,
         string rangeAddress,
         string action,
-        Func<dynamic, dynamic> accessor,
-        Action<dynamic> operation)
+        Func<Excel.Range, Excel.Range> accessor,
+        Action<Excel.Range> operation)
     {
         var result = new OperationResult { FilePath = batch.WorkbookPath, Action = action };
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? range = null;
-            dynamic? target = null;
+            Excel.Range? range = null;
+            Excel.Range? target = null;
             try
             {
                 range = RangeHelpers.ResolveRange(ctx.Book, sheetName, rangeAddress, out string? specificError);

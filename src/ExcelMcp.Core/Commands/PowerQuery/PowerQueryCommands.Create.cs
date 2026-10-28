@@ -23,7 +23,7 @@ public partial class PowerQueryCommands
     /// <param name="targetCellAddress">Target cell address (e.g., "A1", "B5")</param>
     /// <exception cref="ArgumentException">Thrown when inputs are invalid</exception>
     /// <exception cref="InvalidOperationException">Thrown when query already exists or creation fails</exception>
-    public OperationResult Create(
+    public PowerQueryCreateResult Create(
         IExcelBatch batch,
         string queryName,
         string mCode,
@@ -56,7 +56,8 @@ public partial class PowerQueryCommands
         // Resolve target cell address (default to A1)
         targetCellAddress ??= "A1";
 
-        return batch.Execute((ctx, ct) =>
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        return ExcelBatchWait.Execute(batch, ComInteropConstants.DataOperationTimeout, (ctx, ct) =>
         {
             Excel.Queries? queries = null;
             Excel.WorkbookQuery? query = null;
@@ -84,8 +85,8 @@ public partial class PowerQueryCommands
                     FilePath = batch.WorkbookPath,
                     QueryName = queryName,
                     LoadDestination = loadMode,
-                    WorksheetName = targetSheet,
-                    TargetCellAddress = targetCellAddress,
+                    WorksheetName = loadMode is PowerQueryLoadMode.LoadToTable or PowerQueryLoadMode.LoadToBoth ? targetSheet : null,
+                    TargetCellAddress = loadMode is PowerQueryLoadMode.LoadToTable or PowerQueryLoadMode.LoadToBoth ? targetCellAddress : null,
                     QueryCreated = true
                 };
 
@@ -116,7 +117,13 @@ public partial class PowerQueryCommands
                         break;
                 }
 
-                return new OperationResult { Success = true, FilePath = batch.WorkbookPath };
+                if (loadMode != PowerQueryLoadMode.ConnectionOnly)
+                {
+                    ReadLoadMetrics(ctx.Book, queryName, result, ct);
+                    result.DataLoaded = true;
+                }
+                result.DurationMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                return result;
             }
             catch (Exception ex) when (queryCreated && !ct.IsCancellationRequested && CanReportMutationFailure(ex))
             {
@@ -128,7 +135,7 @@ public partial class PowerQueryCommands
                 ComUtilities.Release(ref query);
                 ComUtilities.Release(ref queries);
             }
-        }, cancellationToken: default);
+        });
     }
 
     /// <summary>
@@ -137,36 +144,29 @@ public partial class PowerQueryCommands
     /// </summary>
     private static Excel.WorkbookQuery? FindQueryByName(Excel.Queries queriesCollection, string queryName)
     {
-        try
+        int count = queriesCollection.Count;
+        for (int i = 1; i <= count; i++)
         {
-            int count = queriesCollection.Count;
-            for (int i = 1; i <= count; i++)
+            Excel.WorkbookQuery? query = null;
+            try
             {
-                Excel.WorkbookQuery? query = null;
-                try
-                {
-                    query = queriesCollection.Item(i);
-                    string name = query.Name ?? string.Empty;
+                query = queriesCollection.Item(i);
+                string name = query.Name ?? string.Empty;
 
-                    if (name.Equals(queryName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var result = query;
-                        query = null;
-                        return result; // Caller must release
-                    }
-                }
-                finally
+                if (name.Equals(queryName, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (query != null)
-                    {
-                        ComUtilities.Release(ref query);
-                    }
+                    var result = query;
+                    query = null;
+                    return result; // Caller must release
                 }
             }
-        }
-        catch (System.Runtime.InteropServices.COMException)
-        {
-            // Query not found or error accessing collection
+            finally
+            {
+                if (query != null)
+                {
+                    ComUtilities.Release(ref query);
+                }
+            }
         }
 
         return null;

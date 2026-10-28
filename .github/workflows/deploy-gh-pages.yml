@@ -34,9 +34,14 @@ on:
       - 'scripts/Restore-UsageAnalytics.ps1'
       - 'scripts/Update-StarHistory.ps1'
       - 'scripts/Restore-StarHistory.ps1'
+      - 'scripts/AnalyticsStorage.ps1'
   schedule:
     # After star-history.yml (02:17 UTC) so the site renders the same day's snapshot.
     - cron: "17 3 * * *"
+  workflow_run:
+    workflows: ['[Analytics] Weekly Usage']
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 # Allow only one concurrent deployment
@@ -46,6 +51,11 @@ concurrency:
 
 jobs:
   build:
+    # Scheduled workflows may be delayed; rebuild after analytics finishes, not just by clock time.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request')
     # Read-only: persisting the star history now lives in star-history.yml, so
     # this job - which installs third-party Python packages - no longer needs
     # write access to the repository.
@@ -111,7 +121,7 @@ jobs:
             -OutputPath './gh-pages/docs/assets/images/star-history.svg'
 
       - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
           cache: pip
@@ -120,16 +130,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r gh-pages/requirements.txt
 
-      - name: Build with MkDocs
-        working-directory: gh-pages
-        run: mkdocs build --strict --clean
-
       - name: Unit test site generator and sample packaging
         working-directory: gh-pages
         run: python -m unittest discover -s tests
 
       - name: Check sample data and build scripts
         run: python -m unittest discover -s samples/world-bank-dashboard -p "test_*.py"
+
+      - name: Build with MkDocs
+        working-directory: gh-pages
+        run: mkdocs build --strict --clean
 
       - name: Audit built site
         working-directory: gh-pages

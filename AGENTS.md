@@ -1,11 +1,56 @@
 # ExcelMcp agent instructions
 
 ExcelMcp automates installed desktop Excel through COM on Windows. Use
-PowerShell and the SDK selected by `global.json`. Desktop Excel is required
+PowerShell 7.4 or later (`pwsh`) and the SDK selected by `global.json`. Desktop Excel is required
 for COM tests; GitHub-hosted runners do not have Excel.
 
 MCP Server and `excelcli` are equal entry points: behavior, defaults, validation,
 results, and documentation must agree.
+
+ExcelMcp always operates in the current user's Windows session and security
+context. Discover and reconnect only to Excel instances accessible in that
+context; do not seek access to other users' sessions or elevate permissions.
+Workbook location does not change this scope. Running in the user's context
+does not authorize changes to unrelated workbooks.
+
+## Code Review Rules
+
+Report high-confidence defects introduced by the change, not style or unrelated
+cleanup. Establish a reachable failure, its affected caller/workbook state, and
+the missing or misleading test evidence. Review does not require builds,
+dependency installation, or edits unless requested.
+
+- Trace changed catches and fallbacks through their caller. Logging an error
+  then returning empty/default data, skipping a failed item, or reporting success
+  still hides failure. Optional COM reads may suppress only exact documented
+  unavailable-member HRESULTs; `0x800A03EC` is not a missing-property diagnosis.
+  Unexpected COM errors must fail with their context.
+- Check failure ownership: Core leaves execution errors to batch/Service;
+  transport boundaries may convert failures, not erase them. Preserve original
+  cause, cancellation, timeout, session recovery, and exact partial state.
+  Cancellation is not rollback; reject unrequested workbook cleanup.
+- Review COM ownership across every exit and failure path. Acquired references
+  need `finally` release, not session-owned objects. Process cleanup needs
+  PID/start-time identity and retained handles. EXL011 and EXL005 reject dynamic
+  declarations and late-bound calls in production and test builds.
+- Follow changed source contracts through generated Service, CLI options/batch
+  JSON, MCP schemas, and manual exceptions. Names, defaults, validation, results,
+  and timeouts must agree. Adapters must not acquire Core/session ownership.
+- Check MCP protocol output, including bootstrap paths, not just direct console
+  calls. Telemetry must never wait on setup, export, flush, or disposal on product
+  paths, delay incremental results/cancellation/exit, or alter results/errors.
+  Bound queues; verify local delivery separately from responsiveness and privacy.
+- Check guidance against implemented inputs, defaults, and capabilities.
+  Distinguish MCP snake_case inputs, CLI flags, nested JSON keys, and outputs.
+  Flag nonexistent actions, forced unrequested work, emojis, required unattended
+  screenshots, and consent prose presented as implemented server elicitation.
+- Tests must establish returned fields and actual Excel state, including the
+  partial state after failure; success alone or mocked COM is not evidence.
+  Compiler checks catch supported patterns, not correct HRESULT semantics,
+  complete COM ownership, runtime state, or matching entry-point behavior.
+- Use `ponytail-review` when available after correctness/security review for
+  concrete behavior-preserving simplifications. Required COM cleanup,
+  validation, failure reporting, tests, and generated contracts are not bloat.
 
 For an unfamiliar area, start with [CONTEXT.md](CONTEXT.md) for the system map
 and terminology. [Architecture decisions](docs/DECISIONS.md) explain current
@@ -26,22 +71,37 @@ Paths are relative to the repository root.
 
 | Work | Required guidance |
 | --- | --- |
-| `src/**/*.cs` | [Runtime boundaries](docs/agents/rules/architecture-patterns.md) |
-| Core commands/action models, Service, CLI, MCP, generators, or `.github/usage-analytics-weights.json` | [Generated contracts](docs/agents/rules/coverage-prevention-strategy.md) |
-| Core or ComInterop C# | [COM safety](docs/agents/rules/excel-com-interop.md) |
-| Connection commands/sanitizer or connection tests/helpers/fixtures | [Connections](docs/agents/rules/excel-connection-types-guide.md) |
+| `src/**/*.cs` | [Runtime boundaries](src/AGENTS.md) |
+| Core commands/action models, Service, CLI, MCP, generators, or `.github/usage-analytics-weights.json` | [Generated contracts](src/ExcelMcp.Core/AGENTS.md) |
+| Core or ComInterop C# | [COM safety](src/ExcelMcp.ComInterop/AGENTS.md) |
+| Connection commands/sanitizer or connection tests/helpers/fixtures | [Connections](src/ExcelMcp.Core/Commands/Connection/AGENTS.md) |
 | `tests/**/*.cs` | [Testing strategy](tests/AGENTS.md) |
-| Workflows, project files, SDK/build configuration, PowerShell scripts, `.changeset/**` | [Build and release](docs/agents/rules/development-workflow.md) |
-| README/index files, FEATURES, CHANGELOG, SECURITY, PRIVACY, docs, specs, skills, or website | [Documentation](docs/agents/rules/documentation-structure.md) |
-| Skill sources, Core command metadata, generators, MCP, or Build-AgentSkills.ps1 | [Product agent guidance](docs/agents/rules/mcp-llm-guidance.md) |
-| MCP Server or MCP generator | [MCP boundaries](docs/agents/rules/mcp-server-guide.md) |
+| Workflows, project files, SDK/build configuration, PowerShell scripts, `.changeset/**` | [Build and release](scripts/AGENTS.md) |
+| README/index files, FEATURES, CHANGELOG, SECURITY, PRIVACY, docs, specs, skills, or website | [Documentation](docs/AGENTS.md) |
+| Skill sources, Core command metadata, generators, MCP, or Build-AgentSkills.ps1 | [Product agent guidance](skills/AGENTS.md) |
+| MCP Server or MCP generator | [MCP boundaries](src/ExcelMcp.McpServer/AGENTS.md) |
 | `llm-tests/**` | [LLM evaluations](llm-tests/AGENTS.md) |
-| Repository/agent instructions, CONTEXT, or `docs/agents/**` | [Instruction maintenance](docs/agents/rules/meta.md) |
+| Repository/agent instructions, CONTEXT, or `docs/agents/**` | [Instruction maintenance](docs/AGENTS.md#instruction-maintenance) |
 | `vscode-extension/**` | [Extension](vscode-extension/AGENTS.md) |
 | `videos/excel-mcp-intro/**` | [Video](videos/excel-mcp-intro/AGENTS.md) |
 | `videos/agentic-world-bank-briefing/**` | [Agentic workflow video](videos/agentic-world-bank-briefing/AGENTS.md) |
 
 ## Implementation
+
+The build enforces supported COM, contract, result, dynamic-access, and test
+patterns. Fix diagnostics at their source; a suppression needs a reason, not an
+assumption that passing compilation proves runtime correctness.
+
+- Use typed Excel interop in production and tests. EXL011 rejects dynamic
+  declarations and late-bound operations; EXL005 rejects casts to `dynamic`.
+  Comments do not exempt them. The compiler checks whether the referenced PIA
+  exposes a member; runtime availability still needs real-Excel validation.
+- The user-approved document-property exception is confined to
+  `ExcelDocumentProperties` in ComInterop. Its private native COM calls cover
+  only workbook property collections/items, resolve member identifiers from
+  Excel, and validate item identities. Do not reuse it for other features or
+  add a general member-name, reflection, or dynamic fallback. Compiler checks
+  remain enabled everywhere.
 
 - Core `[ServiceCategory]` interfaces drive generated Service, CLI, and MCP
   routing. Change contracts/generators, not emitted code. Follow a changed
@@ -57,22 +117,49 @@ Paths are relative to the repository root.
   destructive consequences without adding file-copy steps. Copying or exporting
   is appropriate only when part of the user's request.
 - Production code must access workbook contents through Excel COM. Never open
-  an Excel file as a ZIP/OOXML package or parse/modify its internal XML outside
-  tests. Pre-open binary container detection may read only IRM/AIP protection
-  metadata; it must not parse workbook content.
+  an Excel workbook file as a ZIP/OOXML package or parse/modify its internal XML
+  outside tests. The isolated Power Query user-settings archive reader is not a
+  workbook-content path. Pre-open binary container detection may read only
+  IRM/AIP protection metadata; it must not parse workbook content.
 - Behavioral changes require a focused failing regression test before the fix.
   Documentation/configuration-only changes do not need synthetic tests.
-- Do not automatically clean up or roll back workbook changes when an
-  operation fails. Report the exact partial state and error so the agent can
-  inspect the workbook and decide whether cleanup is appropriate.
-- `Success == true` requires an empty or null `ErrorMessage`.
 - MCP Server and `excelcli` are the only supported product entry points. Do not
   preserve or add public Core/ComInterop compatibility APIs for hypothetical
   external consumers when neither entry point uses them.
 - Keep customer/workbook data, credentials, connection strings, and private
   paths out of public artifacts. Keep temporary notes outside the repository.
+- ExcelMcp acts for the current user. Task-relevant workbook contents, names,
+  formulas, VBA/Power Query code, and file paths may be read and returned to
+  that user through supported operations; do not hide them merely because
+  they are private. This is not public disclosure or permission to access
+  unrelated workbooks. Credential protections still apply; do not put private
+  information in public artifacts or usage reporting.
+- Returning an owned Excel dialog's visible text to its user for troubleshooting
+  is allowed; this is not public disclosure. Do not copy it into public artifacts
+  or telemetry, read password/input values, or answer the dialog automatically.
+
+## Errors
+
+- Handle failures only where the layer owns recovery or failure transport.
+  Preserve the original exception and operation context. Optional reads must not
+  treat arbitrary COM failures as absent data. A deliberate best-effort boundary
+  must explain what failed and why continuing cannot misrepresent the operation.
+  Cleanup must preserve the primary failure as well as any cleanup failure.
+- Do not automatically clean up or roll back workbook changes when an
+  operation fails. Report the exact partial state and error so the agent can
+  inspect the workbook and decide whether cleanup is appropriate.
 
 ## Build and validation
+
+For telemetry development, use the local Aspire dashboard first; see
+[local telemetry development](docs/DEVELOPMENT.md#local-development-with-telemetry).
+Verify actual logs/traces from both `excelcli` and MCP, including short-lived CLI
+commands, as well as non-blocking behavior when the receiver is unavailable or
+stalled. Passing in-memory tests or fast shutdown alone does not prove delivery.
+If Aspire is unavailable, report the blocker; do not fall back to production.
+Sending test telemetry to production Azure or changing its ingestion rules
+requires explicit user approval for that specific test or deployment; available
+credentials are not approval.
 
 ```powershell
 dotnet restore Sbroenne.ExcelMcp.sln
@@ -82,13 +169,33 @@ dotnet build Sbroenne.ExcelMcp.sln -c Release --no-restore
 Build with zero warnings. Use targeted tests; see the
 [testing strategy](tests/AGENTS.md). Run every Excel-dependent test command
 sequentially; never overlap Excel test fixtures, test hosts, or E2E runs.
-Use the changed-area plan from `tools\ExcelMcp.Build\ValidationPolicy.cs` for
-PR and local validation. Include affected dependencies, not unrelated features.
-Run its selected Excel cases locally; shared lifecycle changes also select
-acceptance and ComInterop diagnostics. `scripts\Test-E2E.ps1` remains an explicit
-complete acceptance command and the cloud runner's compatible entry point.
-Report selected Excel work as not run when Excel is unavailable; build-only
-checks do not cover COM. Unknown inputs must fail selection, not select everything.
+You may close or stop any Excel copy on the machine, for example one left by a
+test run; test code still must not. Report each copy you closed by process
+number and start time.
+The commit hook builds selected inputs and runs selected `Fast` unit tests from
+CLI, MCP Server, Core, and Service (`Commit` group), excluding
+`AdapterTestKind=System` and `Speed=Slow`. ComInterop-specific, process, tooling,
+package, Excel, and acceptance checks do not run on
+every commit. CI owns hosted checks; run local process checks when changing
+their boundary, not on every push. A passing hook is not complete PR validation.
+Local validation must follow the changed behavior, not merely the directory
+containing a changed file. Start with a focused regression and the existing
+tests for affected callers and failure paths. Run relevant Excel tests locally
+when workbook behavior or Excel ownership changes; build-only checks do not
+cover COM. Shared service, routing, or lifecycle files do not by themselves
+require all feature tests, complete acceptance, or all ComInterop diagnostics.
+Expand coverage when the change affects a shared contract or lifetime,
+focused tests reveal wider failures, or a specific risk is not covered.
+Run the full suite only when that wider scope is justified or explicitly requested.
+
+Use `scripts\Get-ValidationPlan.ps1` to identify candidate checks, then review
+the selection against the actual change. If it selects unrelated features,
+run narrower existing test filters or runner groups and record the commands,
+results, and reason for the narrower scope in the PR. Do not describe an
+unrun broad selection as passed. This local scope decision does not waive
+Git hooks or required CI checks. Unknown inputs must fail selection, not select
+everything. `scripts\Test-E2E.ps1` remains the explicit complete acceptance
+command; run it on a local Windows desktop with Excel.
 
 The Python evaluation suite under `llm-tests/` is on-demand only, not part of the
 normal development lifecycle. This includes offline checks, Excel fixture checks,
@@ -97,52 +204,15 @@ only when the user explicitly requests evaluation work. Unrun evaluations or
 unavailable Python/SDK dependencies are not implementation, commit, PR, or merge blockers.
 This does not waive required .NET/COM/E2E validation or normal Git hooks.
 
-Run applicable existing checks, not replacement audits:
+Generate a candidate plan, review its scope, and run applicable existing checks,
+not replacement audits. Run the complete plan only when its selection is relevant:
 
 ```powershell
-& .\scripts\check-com-leaks.ps1
 & .\build.ps1 plan --base-ref origin/main --output artifacts\validation-plan.json
 & .\build.ps1 validate --plan artifacts\validation-plan.json
-& .\scripts\check-success-flag.ps1
-& .\scripts\check-doc-counts.ps1 -SkipBuild
-& .\scripts\check-dynamic-casts.ps1
-& .\scripts\check-workbook-package-access.ps1
 ```
 
-`-SkipBuild` requires a successful Release solution build in this worktree.
-Otherwise omit it. PRs record the root cause, affected contracts, and validation.
-
-## Code Review Rules
-
-Report high-confidence defects introduced by the change, not style or unrelated
-cleanup. These checks apply to review tasks; they do not require installing
-dependencies, running builds, or editing code unless requested.
-
-When `ponytail-review` is available, use it as an additional review pass for
-concrete, behavior-preserving simplifications introduced by the change. It must
-not replace correctness or security review. Required Excel COM cleanup,
-validation, error handling, tests, generated contracts, and matching MCP/CLI
-behavior are not unnecessary complexity.
-
-- Typed PIAs first, except documented runtime gaps (`Application.Run`, VBE,
-  Office-core). Do not reintroduce unavailable dependencies. Dynamic COM numeric
-  values need `Convert.*`, not direct casts.
-- Acquired COM references require `finally` cleanup, excluding session-owned
-  objects. Process cleanup uses PID/start-time identity, never process names.
-- `0x800A03EC` is not a unique diagnosis. Preserve batch/Service error context,
-  cancellation, and session recovery; a timeout must not become success.
-- Core contracts must agree across generated Service, CLI options/batch JSON,
-  MCP schemas, and manual tool exceptions, including defaults and timeouts.
-- MCP stdout, including bootstrap output, is JSON-RPC only.
-- Agent-facing descriptions, server instructions, skills, and recovery messages
-  must agree with actual defaults and advertised capabilities. Flag stale input
-  names, nonexistent actions, missing parameter documentation, emojis, forced
-  unrequested work, and screenshots required without an interactive desktop.
-  Consent advice is not proof that server-side elicitation is implemented.
-  Distinguish MCP input names from nested JSON keys, outputs, and CLI batch keys.
-- Tests establish actual Excel state and returned fields, not only `Success`.
-  Generated artifacts must change through their source; use code-derived counts
-  rather than copied literals.
+PRs record the root cause, affected contracts, and validation.
 
 ## Git and release
 
@@ -164,7 +234,7 @@ behavior are not unnecessary complexity.
   `ponytail-review` when available on the complete branch diff, following its
   scope in the Code Review Rules. Then verify that the PR description and
   changeset claim only what the diff does, and search the whole repository,
-  including samples, workflows, `.squad` templates, and docs, for stale
+  including samples, workflows, and docs, for stale
   references to anything renamed or removed.
 - Before finalizing a PR, resolve every review thread after addressing it, or
   dismiss it with a clear recorded reason when no change is appropriate. Never
@@ -176,10 +246,9 @@ behavior are not unnecessary complexity.
 - Plugin publication changes must follow
   `.github/workflows/docs/publish-plugins-setup.md#maintenance-and-updates`;
   the published repository is output-only.
-- Unchanged plugin output must not create publication commits/tags. Marketplace
-  updates are opt-in and maintain one owned PR; follow
-  `.github/workflows/docs/awesome-copilot-update-setup.md` for comparison,
-  guarded writes, catch-up, and pinned workflow compilation.
+- Unchanged plugin output must not create publication commits/tags. Awesome
+  Copilot listings are edited manually using the actual published output commit;
+  follow `.github/workflows/docs/publish-plugins-setup.md#awesome-copilot-listings-are-manual`.
 
 ## 日本語対応フォーク固有ルール
 
@@ -229,13 +298,15 @@ behavior are not unnecessary complexity.
 
 ### カウントと監査
 
-- 公開サーフェスは upstream の `doc-counts.json` が正準 (v2.2.1 時点で
-  31 tools / 412 operations)。`scripts/check-doc-counts.ps1` がコード生成
-  マニフェストから導出し、全ドキュメントの表記を検証する。カウント変更時は
-  README / FEATURES / docs / gh-pages / mcpb / vscode-extension / skills
-  すべてを同期する。
+- 公開サーフェスは upstream の `doc-counts.json` が正準 (v2.5.7 時点で
+  33 tools / 429 operations)。カウント検証は upstream v2.5.x で
+  `scripts/check-doc-counts.ps1` から `src/ExcelMcp.Analyzers` の
+  EXL030 (DocumentationAnalyzer) へ移り、Release ビルド時にコンパイラ
+  診断として強制される。カウント変更時は EXL030 の期待値どおりに
+  doc-counts.json と各ドキュメント表記を同期する。
 - `((dynamic))` キャストには直前に正当化コメント (PIA gap 等) が必須。
-  `scripts/check-dynamic-casts.ps1` で強制される。
+  upstream v2.5.x で `src/ExcelMcp.Analyzers` の SafetyAnalyzer による
+  コンパイル時診断に移行した。
 
 ### CI / ワークフロー
 

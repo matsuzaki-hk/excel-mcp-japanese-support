@@ -1,9 +1,9 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
-using Microsoft.CSharp.RuntimeBinder;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Models;
+using Sbroenne.ExcelMcp.Core.Utilities;
 using Excel = Microsoft.Office.Interop.Excel;
 
 namespace Sbroenne.ExcelMcp.Core.Commands;
@@ -23,20 +23,24 @@ public partial class NamedRangeCommands
             FilePath = batch.WorkbookPath
         };
 
-        return batch.Execute((ctx, ct) =>
+        return batch.Execute(ListNames);
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+            Justification = "RefersToRange can reject formula/external names; reports that specific getter failure per-name as Unavailable with native HRESULT. Other metadata and preview failures propagate.")]
+        NamedRangeListResult ListNames(ExcelContext ctx, CancellationToken ct)
         {
-            dynamic? namesCollection = null;
+            Excel.Names? namesCollection = null;
             try
             {
                 namesCollection = ctx.Book.Names;
-                int count = Convert.ToInt32(namesCollection.Count);
+                int count = namesCollection.Count;
 
                 for (int i = 1; i <= count; i++)
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    dynamic? nameObj = null;
-                    dynamic? refersToRange = null;
+                    Excel.Name? nameObj = null;
+                    Excel.Range? refersToRange = null;
                     try
                     {
                         nameObj = namesCollection.Item(i);
@@ -47,7 +51,7 @@ public partial class NamedRangeCommands
                             continue;
                         }
 
-                        string refersTo = nameObj.RefersTo?.ToString() ?? string.Empty;
+                        string refersTo = ((object?)nameObj.RefersTo)?.ToString() ?? string.Empty;
 
                         var info = new NamedRangeInfo
                         {
@@ -59,22 +63,18 @@ public partial class NamedRangeCommands
                         try
                         {
                             refersToRange = nameObj.RefersToRange;
-                            PopulateListValuePreview(refersToRange, info);
                         }
-                        catch (Exception ex) when (IsRecoverableNamedRangeException(ex))
+                        catch (COMException ex) when (ex.HResult == unchecked((int)0x800A03EC) || ComErrors.IsMemberUnavailable(ex))
                         {
                             // Named range may not have a valid RefersToRange (e.g., formula-based or external reference)
                             // Continue with metadata only - this is expected for some named ranges.
                             info.ValueType = "Unavailable";
-                            info.ValueOmittedReason = ex.Message;
+                            info.ValueOmittedReason = $"{ex.Message} (HRESULT 0x{ex.HResult:X8}).";
                         }
+                        if (refersToRange is not null)
+                            PopulateListValuePreview(refersToRange, info);
 
                         result.NamedRanges.Add(info);
-                    }
-                    catch (Exception ex) when (IsRecoverableNamedRangeException(ex))
-                    {
-                        // Skip corrupted or inaccessible named ranges - continue listing remaining
-                        continue;
                     }
                     finally
                     {
@@ -90,10 +90,10 @@ public partial class NamedRangeCommands
             {
                 ComUtilities.Release(ref namesCollection);
             }
-        });
+        }
     }
 
-    private static bool ShouldSkipNameFromList(dynamic nameObj, string name)
+    private static bool ShouldSkipNameFromList(Excel.Name nameObj, string name)
     {
         if (IsHiddenName(nameObj))
         {
@@ -103,17 +103,7 @@ public partial class NamedRangeCommands
         return IsBuiltInName(name);
     }
 
-    private static bool IsHiddenName(dynamic nameObj)
-    {
-        try
-        {
-            return !Convert.ToBoolean(nameObj.Visible);
-        }
-        catch (Exception ex) when (IsRecoverableNamedRangeException(ex))
-        {
-            return true;
-        }
-    }
+    private static bool IsHiddenName(Excel.Name nameObj) => !nameObj.Visible;
 
     private static bool IsBuiltInName(string name)
     {
@@ -128,20 +118,25 @@ public partial class NamedRangeCommands
         return bangIndex >= 0 ? name[(bangIndex + 1)..].Trim('\'') : name;
     }
 
-    private static Excel.Name? FindNameByKey(dynamic workbook, string name)
+    private static Excel.Name? FindNameByKey(Excel.Workbook workbook, string name)
     {
-        dynamic? names = null;
+        Excel.Names? names = null;
         Excel.Name? nameObj = null;
         try
         {
             names = workbook.Names;
-            nameObj = (Excel.Name)names.Item(name);
-            var result = nameObj;
-            nameObj = null;
-            return result;
-        }
-        catch (Exception ex) when (IsRecoverableNamedRangeException(ex))
-        {
+            int count = names.Count;
+            for (int index = 1; index <= count; index++)
+            {
+                nameObj = names.Item(index);
+                if (string.Equals(nameObj.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    var result = nameObj;
+                    nameObj = null;
+                    return result;
+                }
+                ComUtilities.Release(ref nameObj);
+            }
             return null;
         }
         finally
@@ -151,7 +146,7 @@ public partial class NamedRangeCommands
         }
     }
 
-    private static void PopulateListValuePreview(dynamic refersToRange, NamedRangeInfo info)
+    private static void PopulateListValuePreview(Excel.Range refersToRange, NamedRangeInfo info)
     {
         var areaCount = GetAreaCount(refersToRange);
         if (areaCount > 1)
@@ -172,7 +167,7 @@ public partial class NamedRangeCommands
             return;
         }
 
-        var rawValue = refersToRange?.Value2;
+        object? rawValue = refersToRange.Value2;
 
         if (rawValue is object[,] array2D)
         {
@@ -186,13 +181,13 @@ public partial class NamedRangeCommands
         }
     }
 
-    private static int GetAreaCount(dynamic range)
+    private static int GetAreaCount(Excel.Range range)
     {
-        dynamic? areas = null;
+        Excel.Areas? areas = null;
         try
         {
             areas = range.Areas;
-            return Convert.ToInt32(areas.Count);
+            return areas.Count;
         }
         finally
         {
@@ -200,17 +195,10 @@ public partial class NamedRangeCommands
         }
     }
 
-    private static long GetCellCount(dynamic range)
+    private static long GetCellCount(Excel.Range range)
     {
-        return Convert.ToInt64(range.CountLarge);
+        return Convert.ToInt64((object)range.CountLarge, CultureInfo.InvariantCulture);
     }
-
-    private static bool IsRecoverableNamedRangeException(Exception ex) =>
-        ex is COMException
-            or InvalidCastException
-            or RuntimeBinderException
-            or SafeArrayRankMismatchException
-            or SafeArrayTypeMismatchException;
 
     internal static object ParseWriteValue(string value)
     {
@@ -234,9 +222,10 @@ public partial class NamedRangeCommands
         return batch.Execute((ctx, ct) =>
         {
             Excel.Name? nameObj = null;
-            dynamic? refersToRange = null;
+            Excel.Range? refersToRange = null;
             int originalCalculation = -1;
             bool calculationChanged = false;
+            Exception? operationFailure = null;
 
             try
             {
@@ -260,21 +249,26 @@ public partial class NamedRangeCommands
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath }; // Dummy return for batch.Execute
             }
+            catch (Exception ex)
+            {
+                operationFailure = ex;
+                throw;
+            }
             finally
             {
-                if (calculationChanged && originalCalculation != -1)
+                try
                 {
-                    try
+                    if (calculationChanged && originalCalculation != -1)
                     {
-                        ctx.App.Calculation = (Excel.XlCalculation)originalCalculation;
-                    }
-                    catch (System.Runtime.InteropServices.COMException)
-                    {
-                        // Ignore errors restoring calculation mode
+                        OperationCleanup.Run(() => ctx.App.Calculation = (Excel.XlCalculation)originalCalculation,
+                            operationFailure);
                     }
                 }
-                ComUtilities.Release(ref refersToRange);
-                ComUtilities.Release(ref nameObj);
+                finally
+                {
+                    ComUtilities.Release(ref refersToRange);
+                    ComUtilities.Release(ref nameObj);
+                }
             }
         });
     }
@@ -285,7 +279,7 @@ public partial class NamedRangeCommands
         return batch.Execute((ctx, ct) =>
         {
             Excel.Name? nameObj = null;
-            dynamic? refersToRange = null;
+            Excel.Range? refersToRange = null;
             try
             {
                 nameObj = FindNameByKey(ctx.Book, name);
@@ -294,7 +288,7 @@ public partial class NamedRangeCommands
                     throw new InvalidOperationException($"Named range '{name}' not found.");
                 }
 
-                string refersTo = nameObj.RefersTo?.ToString() ?? "";
+                string refersTo = ((object?)nameObj.RefersTo)?.ToString() ?? "";
                 refersToRange = nameObj.RefersToRange;
                 object? rawValue = refersToRange?.Value2;
                 object? value;
@@ -344,7 +338,7 @@ public partial class NamedRangeCommands
         {
             Excel.Name? existing = null;
             Excel.Name? created = null;
-            dynamic? namesCollection = null;
+            Excel.Names? namesCollection = null;
             try
             {
                 // Check if parameter already exists

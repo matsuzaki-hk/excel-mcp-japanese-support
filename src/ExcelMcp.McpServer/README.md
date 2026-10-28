@@ -47,7 +47,8 @@ npm resolves `@latest` at launch using its normal cache policy.
 **Standalone executable:**
 
 ```powershell
-# Download ExcelMcp-MCP-Server-{version}-windows.zip from GitHub Releases,
+# Download the x64 ExcelMcp-MCP-Server-{version}-windows.zip or ARM64
+# ExcelMcp-MCP-Server-{version}-windows-arm64.zip from GitHub Releases,
 # extract mcp-excel.exe, and configure the client with { "command": "mcp-excel" }.
 ```
 
@@ -71,9 +72,9 @@ dotnet tool install --global Sbroenne.ExcelMcp.McpServer
 
 ## 🛠️ What You Can Do
 
-**60 MCP tools across 31 feature areas, with 412 operations** covering Power Query, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, Named Ranges, File/Session management, Calculation Mode, Slicers, Conditional Formatting, Screenshots, and Window Management.
+**63 MCP tools across 33 feature areas, with 429 operations** covering Power Query, Data Model/DAX, What-If Analysis, PivotTables, Excel Tables, Charts, Drawings, VBA, Ranges, Worksheets, Workbooks, QueryTables, XML Maps, Connections, Named Ranges, File/Session management, Calculation Mode, Slicers, Conditional Formatting, Screenshots, and Window Management.
 
-📚 **[Feature Overview →](https://github.com/sbroenne/mcp-server-excel/blob/main/FEATURES.md)** - Capabilities grouped by goal. Current actions and inputs for all 412 operations are described by the server's tools.
+📚 **[Feature Overview →](https://github.com/sbroenne/mcp-server-excel/blob/main/FEATURES.md)** - Capabilities grouped by goal. Current actions and inputs for all 429 operations are described by the server's tools.
 
 **AI-Powered Workflows:**
 - 💬 Natural language Excel commands through GitHub Copilot, Claude, or ChatGPT

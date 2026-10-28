@@ -19,26 +19,25 @@ public partial class SheetCommands
         return batch.Execute((ctx, ct) =>
         {
             // Get the workbook to list from
-            dynamic workbook = filePath != null ? batch.GetWorkbook(filePath) : ctx.Book;
+            Excel.Workbook workbook = filePath != null ? batch.GetWorkbook(filePath) : ctx.Book;
 
-            dynamic? sheets = null;
+            Excel.Sheets? sheets = null;
             try
             {
                 sheets = workbook.Worksheets;
                 for (int i = 1; i <= sheets.Count; i++)
                 {
-                    dynamic? sheet = null;
+                    Excel.Worksheet? sheet = null;
                     try
                     {
-                        sheet = sheets.Item(i);
-                        string sheetName = sheet.Name;
+                        sheet = (Excel.Worksheet)sheets[i];
                         // Decode Unicode escape sequences in sheet names
-                        sheetName = System.Text.RegularExpressions.Regex.Unescape(sheetName);
+                        string sheetName = System.Text.RegularExpressions.Regex.Unescape(sheet.Name);
                         result.Worksheets.Add(new WorksheetInfo
                         {
                             Name = sheetName,
                             Index = i,
-                            Visible = (int)sheet.Visible == -1  // xlSheetVisible = -1
+                            Visible = Convert.ToInt32((object)sheet.Visible, System.Globalization.CultureInfo.InvariantCulture) == -1
                         });
                     }
                     finally
@@ -245,8 +244,8 @@ public partial class SheetCommands
         {
             Excel.Worksheet? sheet = null;
             Excel.Worksheet? targetSheet = null;
-            dynamic? sheets = null;
-            dynamic? lastSheet = null;
+            Excel.Sheets? sheets = null;
+            Excel.Worksheet? lastSheet = null;
             try
             {
                 sheet = ComUtilities.FindSheet(ctx.Book, sheetName);
@@ -259,7 +258,7 @@ public partial class SheetCommands
                 if (string.IsNullOrWhiteSpace(beforeSheet) && string.IsNullOrWhiteSpace(afterSheet))
                 {
                     sheets = ctx.Book.Worksheets;
-                    lastSheet = sheets.Item(sheets.Count);
+                    lastSheet = (Excel.Worksheet)sheets[sheets.Count];
                     sheet.Move(After: lastSheet);
                 }
                 else
@@ -334,10 +333,10 @@ public partial class SheetCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? sourceWb = null;
-            dynamic? targetWb = null;
+            Excel.Workbook? sourceWb = null;
+            Excel.Workbook? targetWb = null;
             Excel.Worksheet? sourceSheetObj = null;
-            dynamic? targetSheets = null;
+            Excel.Sheets? targetSheets = null;
             Excel.Worksheet? targetPositionSheet = null;
             Excel.Worksheet? copiedSheet = null;
 
@@ -361,7 +360,7 @@ public partial class SheetCommands
                 if (targetSheetName is not null)
                 {
                     EnsureSheetNameAvailable(
-                        (Excel.Workbook)targetWb, targetSheetName, ct);
+                        targetWb, targetSheetName, ct);
                 }
 
                 if (!string.IsNullOrWhiteSpace(beforeSheet))
@@ -389,7 +388,7 @@ public partial class SheetCommands
                 else
                 {
                     // Copy to end of target workbook
-                    dynamic? lastSheet = targetSheets.Item(targetSheets.Count);
+                    Excel.Worksheet? lastSheet = (Excel.Worksheet)targetSheets[targetSheets.Count];
                     try
                     {
                         sourceSheetObj.Copy(After: lastSheet);
@@ -405,7 +404,7 @@ public partial class SheetCommands
                 // Rename if requested - use correct position based on where sheet was copied
                 if (targetSheetName is not null && copiedSheetPosition.HasValue)
                 {
-                    copiedSheet = (Excel.Worksheet)targetSheets.Item(copiedSheetPosition.Value);
+                    copiedSheet = (Excel.Worksheet)targetSheets[copiedSheetPosition.Value];
                     var copiedSheetCurrentName = copiedSheet.Name;
                     SetSheetNameWithContext(copiedSheet, targetSheetName, copiedSheetCurrentName, isNewSheet: true);
                 }
@@ -414,7 +413,7 @@ public partial class SheetCommands
                 try
                 {
                     ExcelShutdownService.SaveWorkbookWithTimeout(
-                        (Excel.Workbook)targetWb, Path.GetFileName(targetFile), batch.Logger, ct);
+                        targetWb, Path.GetFileName(targetFile), batch.Logger, ct);
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -470,10 +469,10 @@ public partial class SheetCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? sourceWb = null;
-            dynamic? targetWb = null;
+            Excel.Workbook? sourceWb = null;
+            Excel.Workbook? targetWb = null;
             Excel.Worksheet? sourceSheetObj = null;
-            dynamic? targetSheets = null;
+            Excel.Sheets? targetSheets = null;
             Excel.Worksheet? targetPositionSheet = null;
 
             try
@@ -513,7 +512,7 @@ public partial class SheetCommands
                 else
                 {
                     // Move to end of target workbook
-                    dynamic? lastSheet = targetSheets.Item(targetSheets.Count);
+                    Excel.Worksheet? lastSheet = (Excel.Worksheet)targetSheets[targetSheets.Count];
                     try
                     {
                         sourceSheetObj.Move(After: lastSheet);
@@ -529,10 +528,10 @@ public partial class SheetCommands
                 try
                 {
                     ExcelShutdownService.SaveWorkbookWithTimeout(
-                        (Excel.Workbook)sourceWb, Path.GetFileName(sourceFile), batch.Logger, ct);
+                        sourceWb, Path.GetFileName(sourceFile), batch.Logger, ct);
                     sourceSaveCompleted = true;
                     ExcelShutdownService.SaveWorkbookWithTimeout(
-                        (Excel.Workbook)targetWb, Path.GetFileName(targetFile), batch.Logger, ct);
+                        targetWb, Path.GetFileName(targetFile), batch.Logger, ct);
                 }
                 catch (InvalidOperationException ex)
                 {

@@ -10,7 +10,17 @@ public enum FileWriteAction
     [JsonStringEnumMemberName("close")]
     Close,
     [JsonStringEnumMemberName("create")]
-    Create
+    Create,
+    [JsonStringEnumMemberName("save")]
+    Save,
+    [JsonStringEnumMemberName("attach")]
+    Attach,
+    [JsonStringEnumMemberName("enable-editing")]
+    EnableEditing,
+    [JsonStringEnumMemberName("enable-connections")]
+    EnableConnections,
+    [JsonStringEnumMemberName("enable-macros")]
+    EnableMacros
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<FileReadAction>))]
@@ -19,31 +29,9 @@ public enum FileReadAction
     [JsonStringEnumMemberName("list")]
     List,
     [JsonStringEnumMemberName("test")]
-    Test
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<WorksheetWriteAction>))]
-public enum WorksheetWriteAction
-{
-    [JsonStringEnumMemberName("create")]
-    Create,
-    [JsonStringEnumMemberName("rename")]
-    Rename,
-    [JsonStringEnumMemberName("copy")]
-    Copy,
-    [JsonStringEnumMemberName("delete")]
-    Delete,
-    [JsonStringEnumMemberName("move")]
-    Move,
-    [JsonStringEnumMemberName("copy-to-file")]
-    CopyToFile,
-    [JsonStringEnumMemberName("move-to-file")]
-    MoveToFile
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<WorksheetReadAction>))]
-public enum WorksheetReadAction
-{
-    [JsonStringEnumMemberName("list")]
-    List
+    Test,
+    [JsonStringEnumMemberName("discover")]
+    Discover,
+    [JsonStringEnumMemberName("notices")]
+    Notices
 }

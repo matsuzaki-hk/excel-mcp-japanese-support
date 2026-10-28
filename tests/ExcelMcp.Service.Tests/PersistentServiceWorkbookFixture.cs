@@ -70,6 +70,39 @@ public class PersistentServiceWorkbookFixture : IAsyncLifetime, IDisposable
         Directory.CreateDirectory(_tempDirectory);
         var workbookPath = Path.Combine(_tempDirectory, _workbookFileName);
         WorkbookPath = workbookPath;
+        if (_createWorkbook is not null)
+        {
+            using var templateProcesses = new TestExcelProcessScope();
+            Exception? failure = null;
+            try
+            {
+                _createWorkbook(workbookPath);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            try
+            {
+                if (templateProcesses.FindLeftovers() is { } leftover)
+                    failure = PersistentServiceCleanupFailures.Combine(failure, leftover);
+            }
+            catch (Exception ex)
+            {
+                failure = PersistentServiceCleanupFailures.Combine(failure, ex);
+            }
+            if (failure is not null)
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+
+            if (SessionManager.GetTrackedExcelProcesses().Count != 0)
+            {
+                throw new InvalidOperationException(
+                    "Workbook fixture creation left tracked Excel identities: " +
+                    $"{string.Join(", ", SessionManager.GetTrackedExcelProcesses())}");
+            }
+        }
+
+        SessionManager.ExcelProcessIdentityTracked += OnExcelProcessTracked;
         _service = new ExcelMcpService();
         ServiceResponse response;
         if (_createWorkbook is null)
@@ -81,7 +114,6 @@ public class PersistentServiceWorkbookFixture : IAsyncLifetime, IDisposable
         }
         else
         {
-            _createWorkbook(workbookPath);
             response = await SendAsync(
                 "session.open",
                 new { filePath = workbookPath, show = _show },
@@ -93,11 +125,6 @@ public class PersistentServiceWorkbookFixture : IAsyncLifetime, IDisposable
         if (string.IsNullOrWhiteSpace(_sessionId))
         {
             throw new InvalidOperationException("session.create returned no session ID.");
-        }
-
-        foreach (var identity in SessionManager.GetTrackedExcelProcesses())
-        {
-            _launchedIdentities.TryAdd(identity, 0);
         }
 
         if (_service.SessionCount != 1 || _launchedIdentities.Count != 1)
@@ -167,6 +194,18 @@ public class PersistentServiceWorkbookFixture : IAsyncLifetime, IDisposable
 
         try
         {
+            if (TestExcelProcessScope.FindLeftovers(_launchedIdentities.Keys.ToArray()) is { } leftover)
+            {
+                failure = PersistentServiceCleanupFailures.Combine(failure, leftover);
+            }
+        }
+        finally
+        {
+            SessionManager.ExcelProcessIdentityTracked -= OnExcelProcessTracked;
+        }
+
+        try
+        {
             if (Directory.Exists(_tempDirectory))
             {
                 Directory.Delete(_tempDirectory, recursive: true);
@@ -181,10 +220,7 @@ public class PersistentServiceWorkbookFixture : IAsyncLifetime, IDisposable
                     ex));
         }
 
-        if (failure is not null)
-        {
-            throw failure;
-        }
+        PersistentServiceCleanupFailures.ThrowIfFailed(failure);
     }
 
     public void Dispose()
@@ -198,6 +234,7 @@ public class PersistentServiceWorkbookFixture : IAsyncLifetime, IDisposable
         {
             _service = null;
             _sessionId = null;
+            SessionManager.ExcelProcessIdentityTracked -= OnExcelProcessTracked;
             GC.SuppressFinalize(this);
         }
     }
@@ -242,17 +279,15 @@ public class PersistentServiceWorkbookFixture : IAsyncLifetime, IDisposable
             throw new InvalidOperationException("session.open returned no session ID.");
         }
 
-        foreach (var identity in SessionManager.GetTrackedExcelProcesses())
-        {
-            _launchedIdentities.TryAdd(identity, 0);
-        }
-
         if (_service.SessionCount != 1)
         {
             throw new InvalidOperationException(
                 $"Fixture reopen expected one session, but found {_service.SessionCount}.");
         }
     }
+
+    private void OnExcelProcessTracked(ExcelProcessIdentity identity) =>
+        _launchedIdentities.TryAdd(identity, 0);
 
     internal void ExecuteRawVerification(
         Action<ExcelContext, CancellationToken> operation)
@@ -467,6 +502,12 @@ public class PersistentServiceWorkbookFixture : IAsyncLifetime, IDisposable
 
 internal static class PersistentServiceCleanupFailures
 {
+    internal static void ThrowIfFailed(Exception? failure)
+    {
+        if (failure is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
     internal static void Run(Action test, params Action[] cleanup)
     {
         Exception? failure = Record.Exception(test);
@@ -476,8 +517,7 @@ internal static class PersistentServiceCleanupFailures
             if (cleanupFailure is not null)
                 failure = Combine(failure, cleanupFailure);
         }
-        if (failure is not null)
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        ThrowIfFailed(failure);
     }
 
     internal static Exception Combine(

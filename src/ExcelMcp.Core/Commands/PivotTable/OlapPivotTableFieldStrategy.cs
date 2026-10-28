@@ -10,24 +10,18 @@ namespace Sbroenne.ExcelMcp.Core.Commands.PivotTable;
 /// Strategy for OLAP (Online Analytical Processing) PivotTable field operations.
 /// Uses CubeFields API for Data Model-based PivotTables.
 ///
-/// CRITICAL: In OLAP PivotTables, PivotFields do not exist until the corresponding
-/// CubeField is added to the PivotTable. Must call CreatePivotFields() first.
+/// Unplaced OLAP hierarchies may need CreatePivotFields() before their fields
+/// can be manipulated. Measures and materialized fields do not need this call.
 /// Reference: https://learn.microsoft.com/en-us/office/vba/api/excel.cubefield.createpivotfields
 /// </summary>
 public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
 {
-    /// <inheritdoc/>
-    public bool CanHandle(dynamic pivot)
+    private static Excel.CubeField GetFieldForManipulation(Excel.PivotTable pivot, string fieldName)
     {
-        // OLAP/Data Model PivotTables have CubeFields collection
-        return PivotTableHelpers.IsOlapPivotTable(pivot);
-    }
-
-    /// <inheritdoc/>
-    public dynamic GetFieldForManipulation(dynamic pivot, string fieldName)
-    {
-        dynamic? cubeFields = null;
-        dynamic? cubeField = null;
+        Excel.CubeFields? cubeFields = null;
+        Excel.CubeField? cubeField = null;
+        Excel.PivotFields? existingFields = null;
+        bool ownershipTransferred = false;
         try
         {
             cubeFields = pivot.CubeFields;
@@ -37,9 +31,9 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
             // (e.g., "ACR" incorrectly matching "[DisambiguationTable].[ACRTypeKey]")
             try
             {
-                cubeField = cubeFields.Item(fieldName);
+                cubeField = cubeFields[fieldName];
             }
-            catch (System.Runtime.InteropServices.COMException)
+            catch (System.Runtime.InteropServices.COMException ex) when (ComErrors.IsMemberUnavailable(ex))
             {
                 // Field not found by exact name - return null to trigger error
                 cubeField = null;
@@ -50,39 +44,38 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 throw new InvalidOperationException($"Field '{fieldName}' not found in OLAP PivotTable. Use the exact CubeField name (e.g., '[Measures].[ACR]' or '[TableName].[ColumnName]').");
             }
 
-            // CreatePivotFields() initializes PivotFields for fields not yet in the PivotTable.
-            // It may throw if PivotFields already exist (field already in Values area).
-            // Safe to ignore error - if PivotFields exist, we're good; if they don't and this fails,
-            // subsequent operations will provide a more specific error.
-            // Reference: https://learn.microsoft.com/en-us/office/vba/api/excel.cubefield.createpivotfields
-            try
+            // CreatePivotFields initializes a hierarchy before it is placed. Measures and
+            // already materialized hierarchies do not need (and can reject) this call.
+            if ((int)cubeField.CubeFieldType == (int)Excel.XlCubeFieldType.xlHierarchy &&
+                cubeField.Orientation == Excel.XlPivotFieldOrientation.xlHidden)
             {
-                cubeField.CreatePivotFields();
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                // PivotFields may already exist (field already added to PivotTable)
+                existingFields = (Excel.PivotFields)cubeField.PivotFields;
+                if (existingFields.Count == 0)
+                    cubeField.CreatePivotFields();
             }
 
+            ownershipTransferred = true;
             return cubeField; // Return CubeField, not PivotField
         }
-        catch (Exception ex) when (cubeField == null)
+        catch (Exception ex) when (cubeField is null && CreatedObjectFailure.CanReport(ex))
         {
             throw new InvalidOperationException($"Field '{fieldName}' not found in OLAP PivotTable. Use the exact CubeField name (e.g., '[Measures].[ACR]' or '[TableName].[ColumnName]').", ex);
         }
         finally
         {
+            ComUtilities.Release(ref existingFields);
+            if (!ownershipTransferred)
+                ComUtilities.Release(ref cubeField);
             ComUtilities.Release(ref cubeFields);
-            // Note: Don't release cubeField - we're returning it
         }
     }
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldListResult ListFields(dynamic pivot, string workbookPath)
+    public PivotFieldListResult ListFields(Excel.PivotTable pivot, string workbookPath)
     {
         var fields = new List<PivotFieldInfo>();
-        dynamic? cubeFields = null;
+        Excel.CubeFields? cubeFields = null;
 
         try
         {
@@ -91,11 +84,11 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
 
             for (int i = 1; i <= fieldCount; i++)
             {
-                dynamic? cubeField = null;
+                Excel.CubeField? cubeField = null;
                 try
                 {
-                    cubeField = cubeFields.Item(i);
-                    int orientation = Convert.ToInt32(cubeField.Orientation);
+                    cubeField = cubeFields[i];
+                    int orientation = (int)cubeField.Orientation;
 
                     // Skip hidden fields
                     if (orientation == XlPivotFieldOrientation.xlHidden)
@@ -113,10 +106,6 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                     // Values come from OLAP dimension hierarchies
 
                     fields.Add(fieldInfo);
-                }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    // Skip field if COM access fails - continue with other fields
                 }
                 finally
                 {
@@ -139,31 +128,32 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult AddRowField(dynamic pivot, string fieldName, int? position, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Field-operation failure transport returns Success=false with the original native message; cancellation and disconnected sessions propagate.")]
+    public PivotFieldResult AddRowField(Excel.PivotTable pivot, string fieldName, int? position, string workbookPath)
     {
-        dynamic? cubeField = null;
+        Excel.CubeField? cubeField = null;
         try
         {
             cubeField = GetFieldForManipulation(pivot, fieldName);
 
             // Check if field is already placed
-            int currentOrientation = Convert.ToInt32(cubeField.Orientation);
+            int currentOrientation = (int)cubeField.Orientation;
             if (currentOrientation != XlPivotFieldOrientation.xlHidden)
             {
                 throw new InvalidOperationException($"Field '{fieldName}' is already placed in {PivotTableHelpers.GetAreaName(currentOrientation)} area. Remove it first.");
             }
 
             // CRITICAL: Set Orientation on CubeField, NOT on PivotField
-            cubeField.Orientation = XlPivotFieldOrientation.xlRowField;
+            cubeField.Orientation = Excel.XlPivotFieldOrientation.xlRowField;
             if (position.HasValue)
             {
-                cubeField.Position = (double)position.Value;
+                cubeField.Position = position.Value;
             }
 
             // NOTE: No RefreshTable() needed - orientation change takes effect immediately
             // RefreshTable() causes RPC disconnection on rapid operations (issue #426)
 
-            if (cubeField.Orientation != XlPivotFieldOrientation.xlRowField)
+            if (cubeField.Orientation != Excel.XlPivotFieldOrientation.xlRowField)
             {
                 throw new InvalidOperationException($"Field '{fieldName}' was not successfully added to Row area.");
             }
@@ -174,13 +164,13 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 FieldName = fieldName,
                 CustomName = cubeField.Caption?.ToString() ?? fieldName,
                 Area = PivotFieldArea.Row,
-                Position = Convert.ToInt32(cubeField.Position),
+                Position = Convert.ToInt32((object)cubeField.Position, System.Globalization.CultureInfo.InvariantCulture),
                 DataType = "Cube",
                 AvailableValues = [],
                 FilePath = workbookPath
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -197,29 +187,30 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult AddColumnField(dynamic pivot, string fieldName, int? position, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Column-field failure transport returns Success=false with the original native message; cancellation and disconnected sessions propagate.")]
+    public PivotFieldResult AddColumnField(Excel.PivotTable pivot, string fieldName, int? position, string workbookPath)
     {
-        dynamic? cubeField = null;
+        Excel.CubeField? cubeField = null;
         try
         {
             cubeField = GetFieldForManipulation(pivot, fieldName);
 
-            int currentOrientation = Convert.ToInt32(cubeField.Orientation);
+            int currentOrientation = (int)cubeField.Orientation;
             if (currentOrientation != XlPivotFieldOrientation.xlHidden)
             {
                 throw new InvalidOperationException($"Field '{fieldName}' is already placed in {PivotTableHelpers.GetAreaName(currentOrientation)} area. Remove it first.");
             }
 
-            cubeField.Orientation = XlPivotFieldOrientation.xlColumnField;
+            cubeField.Orientation = Excel.XlPivotFieldOrientation.xlColumnField;
             if (position.HasValue)
             {
-                cubeField.Position = (double)position.Value;
+                cubeField.Position = position.Value;
             }
 
             // NOTE: No RefreshTable() needed - orientation change takes effect immediately
             // RefreshTable() causes RPC disconnection on rapid operations (issue #426)
 
-            if (cubeField.Orientation != XlPivotFieldOrientation.xlColumnField)
+            if (cubeField.Orientation != Excel.XlPivotFieldOrientation.xlColumnField)
             {
                 throw new InvalidOperationException($"Field '{fieldName}' was not successfully added to Column area.");
             }
@@ -230,13 +221,13 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 FieldName = fieldName,
                 CustomName = cubeField.Caption?.ToString() ?? fieldName,
                 Area = PivotFieldArea.Column,
-                Position = Convert.ToInt32(cubeField.Position),
+                Position = Convert.ToInt32((object)cubeField.Position, System.Globalization.CultureInfo.InvariantCulture),
                 DataType = "Cube",
                 AvailableValues = [],
                 FilePath = workbookPath
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -253,19 +244,20 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult AddValueField(dynamic pivot, string fieldName, AggregationFunction aggregationFunction, string? customName, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Value-field failure transport reports Success=false and the original error; cancellation and disconnected sessions propagate without pretending the operation completed.")]
+    public PivotFieldResult AddValueField(Excel.PivotTable pivot, string fieldName, AggregationFunction aggregationFunction, string? customName, string workbookPath)
     {
-        dynamic? cubeField = null;
-        dynamic? worksheet = null;
-        dynamic? workbook = null;
-        dynamic? model = null;
-        dynamic? modelTables = null;
-        dynamic? table = null;
-        dynamic? measures = null;
-        dynamic? newMeasure = null;
-        dynamic? formatObject = null;
-        dynamic? dataField = null;
-        dynamic? pivotFields = null;
+        Excel.CubeField? cubeField = null;
+        Excel.Worksheet? worksheet = null;
+        Excel.Workbook? workbook = null;
+        Excel.Model? model = null;
+        Excel.ModelTables? modelTables = null;
+        Excel.ModelTable? table = null;
+        Excel.ModelMeasures? measures = null;
+        Excel.ModelMeasure? newMeasure = null;
+        object? formatObject = null;
+        Excel.PivotField? dataField = null;
+        Excel.PivotFields? pivotFields = null;
 
         try
         {
@@ -284,8 +276,8 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                         $"Field '{fieldName}' is not a measure of the connected external cube. " +
                         "Measures must be defined on the cube server; workbook DAX measures cannot be created for this PivotTable.");
                 }
-                worksheet = pivot.Parent;
-                workbook = worksheet.Parent;
+                worksheet = (Excel.Worksheet)pivot.Parent;
+                workbook = (Excel.Workbook)worksheet.Parent;
                 model = workbook.Model;
                 if (model != null && IsExistingMeasure(model, fieldName, out existingMeasureName))
                 {
@@ -300,7 +292,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
             {
                 existingMeasureName = GetBareMeasureName(cubeField.Name?.ToString() ?? fieldName);
                 // Check if measure is already in values area
-                int currentOrientation = Convert.ToInt32(cubeField.Orientation);
+                int currentOrientation = (int)cubeField.Orientation;
                 if (currentOrientation == XlPivotFieldOrientation.xlDataField)
                 {
                     pivotFields = cubeField.PivotFields;
@@ -362,7 +354,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
             modelTables = model.ModelTables;
             for (int i = 1; i <= modelTables.Count; i++)
             {
-                dynamic? t = null;
+                Excel.ModelTable? t = null;
                 try
                 {
                     t = modelTables.Item(i);
@@ -424,7 +416,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 FilePath = workbookPath
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -451,25 +443,26 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult AddFilterField(dynamic pivot, string fieldName, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Filter-field failure transport returns Success=false with the original native message; cancellation and disconnected sessions propagate.")]
+    public PivotFieldResult AddFilterField(Excel.PivotTable pivot, string fieldName, string workbookPath)
     {
-        dynamic? cubeField = null;
+        Excel.CubeField? cubeField = null;
         try
         {
             cubeField = GetFieldForManipulation(pivot, fieldName);
 
-            int currentOrientation = Convert.ToInt32(cubeField.Orientation);
+            int currentOrientation = (int)cubeField.Orientation;
             if (currentOrientation != XlPivotFieldOrientation.xlHidden)
             {
                 throw new InvalidOperationException($"Field '{fieldName}' is already placed in {PivotTableHelpers.GetAreaName(currentOrientation)} area. Remove it first.");
             }
 
-            cubeField.Orientation = XlPivotFieldOrientation.xlPageField;
+            cubeField.Orientation = Excel.XlPivotFieldOrientation.xlPageField;
 
             // NOTE: No RefreshTable() needed - orientation change takes effect immediately
             // RefreshTable() causes RPC disconnection on rapid operations (issue #426)
 
-            if (cubeField.Orientation != XlPivotFieldOrientation.xlPageField)
+            if (cubeField.Orientation != Excel.XlPivotFieldOrientation.xlPageField)
             {
                 throw new InvalidOperationException($"Field '{fieldName}' was not successfully added to Filter area.");
             }
@@ -480,13 +473,13 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 FieldName = fieldName,
                 CustomName = cubeField.Caption?.ToString() ?? fieldName,
                 Area = PivotFieldArea.Filter,
-                Position = Convert.ToInt32(cubeField.Position),
+                Position = Convert.ToInt32((object)cubeField.Position, System.Globalization.CultureInfo.InvariantCulture),
                 DataType = "Cube",
                 AvailableValues = [],
                 FilePath = workbookPath
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -503,20 +496,21 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult RemoveField(dynamic pivot, string fieldName, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Removal failure transport returns Success=false and the original error; it performs no rollback, and cancellation/disconnection propagate.")]
+    public PivotFieldResult RemoveField(Excel.PivotTable pivot, string fieldName, string workbookPath)
     {
-        dynamic? cubeField = null;
+        Excel.CubeField? cubeField = null;
         try
         {
             cubeField = GetFieldForManipulation(pivot, fieldName);
 
-            int currentOrientation = Convert.ToInt32(cubeField.Orientation);
+            int currentOrientation = (int)cubeField.Orientation;
             if (currentOrientation == XlPivotFieldOrientation.xlHidden)
             {
                 throw new InvalidOperationException($"Field '{fieldName}' is not currently placed in any area");
             }
 
-            cubeField.Orientation = XlPivotFieldOrientation.xlHidden;
+            cubeField.Orientation = Excel.XlPivotFieldOrientation.xlHidden;
 
             // NOTE: No RefreshTable() needed - orientation change takes effect immediately
             // RefreshTable() causes RPC disconnection on rapid operations (issue #426)
@@ -529,7 +523,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 FilePath = workbookPath
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -546,9 +540,10 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult SetFieldName(dynamic pivot, string fieldName, string customName, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Reports this unsupported OLAP rename as Success=false with the original NotSupportedException message.")]
+    public PivotFieldResult SetFieldName(Excel.PivotTable pivot, string fieldName, string customName, string workbookPath)
     {
-        dynamic? cubeField = null;
+        Excel.CubeField? cubeField = null;
         try
         {
             // OLAP limitation: Cannot set Caption on CubeFields via COM
@@ -558,7 +553,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 "To change field names: (1) Rename the dimension/hierarchy in the Data Model, or on the cube server, (2) Refresh the PivotTable. " +
                 "Reference: https://learn.microsoft.com/en-us/excel/vba/api/excel.cubefield.caption");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -575,13 +570,14 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult SetFieldFunction(dynamic pivot, string fieldName, AggregationFunction aggregationFunction, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Aggregation failure transport reports Success=false and the actual error; cancellation and disconnected sessions are not converted to results.")]
+    public PivotFieldResult SetFieldFunction(Excel.PivotTable pivot, string fieldName, AggregationFunction aggregationFunction, string workbookPath)
     {
-        dynamic? worksheet = null;
-        dynamic? workbook = null;
-        dynamic? model = null;
-        dynamic? measures = null;
-        dynamic? measure = null;
+        Excel.Worksheet? worksheet = null;
+        Excel.Workbook? workbook = null;
+        Excel.Model? model = null;
+        Excel.ModelMeasures? measures = null;
+        Excel.ModelMeasure? measure = null;
         try
         {
             if (!UsesWorkbookDataModel(pivot))
@@ -589,8 +585,8 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                     $"Cannot update measure '{fieldName}' - an external cube measure is defined on the cube server and must be changed there.");
             // For OLAP PivotTables, we need to update the DAX measure in the Data Model
             // Get workbook and model
-            worksheet = pivot.Parent;
-            workbook = worksheet.Parent;
+            worksheet = (Excel.Worksheet)pivot.Parent;
+            workbook = (Excel.Workbook)worksheet.Parent;
             model = workbook.Model;
 
             if (model == null)
@@ -606,7 +602,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
             measures = model.ModelMeasures;
             for (int i = 1; i <= measures.Count; i++)
             {
-                dynamic? m = null;
+                Excel.ModelMeasure? m = null;
                 try
                 {
                     m = measures.Item(i);
@@ -661,7 +657,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 FilePath = workbookPath
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -682,82 +678,108 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult SetFieldFormat(dynamic pivot, string fieldName, string numberFormat, string workbookPath)
+    public PivotFieldResult SetFieldFormat(Excel.PivotTable pivot, string fieldName, string numberFormat, string workbookPath)
     {
-        dynamic? cubeField = null;
-        dynamic? pivotFields = null;
-        dynamic? pivotField = null;
+        Excel.CubeField? cubeField = null;
+        Excel.PivotFields? dataFields = null;
+        Excel.PivotField? dataField = null;
+        Excel.Range? dataRange = null;
+        Excel.Range? cells = null;
+        Excel.Range? firstDataCell = null;
         try
         {
-            // For OLAP PivotTables, find the CubeField and set NumberFormat on its PivotField
-            // This works for measures in the Values area (including [Measures].[Name] format)
-            cubeField = GetFieldForManipulation(pivot, fieldName);
-
-            // Verify the field is in the Values area (only data fields can have number formats)
-            int orientation = Convert.ToInt32(cubeField.Orientation);
-            if (orientation != XlPivotFieldOrientation.xlDataField)
+            cubeField = FindMeasureCubeField(pivot, fieldName);
+            if (cubeField is not null && cubeField.Orientation != Excel.XlPivotFieldOrientation.xlDataField)
             {
                 throw new InvalidOperationException(
-                    $"Field '{fieldName}' is not in the Values area (Orientation={orientation}). " +
+                    $"Field '{fieldName}' is not in the Values area (Orientation={cubeField.Orientation}). " +
                     "Only value fields can have number formats.");
             }
 
-            // Access the PivotFields collection to set the NumberFormat
-            // OLAP CubeFields expose their formatting through PivotFields
-            pivotFields = cubeField.PivotFields;
-            if (pivotFields == null || pivotFields.Count == 0)
+            // CubeField.PivotFields exposes cube metadata, not the displayed data field.
+            dataFields = (Excel.PivotFields)((Excel.PivotTable)pivot).DataFields;
+            string? cubeFieldName = cubeField?.Name;
+            for (int index = 1; index <= dataFields.Count; index++)
+            {
+                Excel.PivotField? candidate = null;
+                Excel.CubeField? candidateCubeField = null;
+                try
+                {
+                    candidate = dataFields.Item(index);
+                    candidateCubeField = candidate.CubeField;
+                    bool matches = cubeFieldName is not null
+                        ? string.Equals(candidateCubeField.Name, cubeFieldName, StringComparison.OrdinalIgnoreCase)
+                        : string.Equals(candidate.Caption, fieldName, StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(candidateCubeField.Caption, fieldName, StringComparison.OrdinalIgnoreCase);
+                    if (matches)
+                    {
+                        if (dataField is not null)
+                        {
+                            throw new InvalidOperationException(
+                                $"Measure caption '{fieldName}' is ambiguous in the OLAP PivotTable. Use its exact CubeField name.");
+                        }
+
+                        dataField = candidate;
+                        candidate = null;
+                    }
+                }
+                finally
+                {
+                    ComUtilities.Release(ref candidateCubeField);
+                    ComUtilities.Release(ref candidate);
+                }
+            }
+
+            if (dataField is null)
             {
                 throw new InvalidOperationException(
-                    $"Cannot format OLAP field '{fieldName}' - PivotFields not available. " +
-                    "Ensure the field has been added to the Values area.");
+                    $"Cannot format OLAP measure '{fieldName}' because its data field was not found. " +
+                    "Use its exact CubeField name or displayed caption and ensure it is in the Values area.");
             }
 
-            // Get the first (and typically only) PivotField and set its NumberFormat
-            pivotField = pivotFields.Item(1);
-            ((Excel.PivotField)pivotField).NumberFormat = numberFormat;
-
-            // NOTE: No RefreshTable() needed - NumberFormat is a visual-only property
-            // RefreshTable() would re-query the Data Model which is very slow for OLAP PivotTables
-
-            // Read back the format to verify it was set
-            string? appliedFormat = null;
-            try
+            dataField.NumberFormat = numberFormat;
+            string? appliedFormat = dataField.NumberFormat;
+            string? renderedText = null;
+            dataRange = dataField.DataRange;
+            if (dataRange is not null)
             {
-                appliedFormat = ((Excel.PivotField)pivotField).NumberFormat;
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                // If we can't read it back, use what we set
-                appliedFormat = numberFormat;
+                cells = dataRange.Cells;
+                firstDataCell = (Excel.Range)cells[1, 1];
+                renderedText = ((object?)firstDataCell.Text)?.ToString();
             }
 
             return new PivotFieldResult
             {
                 Success = true,
                 FieldName = fieldName,
-                CustomName = cubeField.Caption?.ToString() ?? fieldName,
+                CustomName = dataField.Caption,
                 Area = PivotFieldArea.Value,
                 NumberFormat = appliedFormat,
+                RenderedText = renderedText,
                 DataType = "Cube",
                 FilePath = workbookPath
             };
         }
         finally
         {
-            ComUtilities.Release(ref pivotField);
-            ComUtilities.Release(ref pivotFields);
+            ComUtilities.Release(ref firstDataCell);
+            ComUtilities.Release(ref cells);
+            ComUtilities.Release(ref dataRange);
+            ComUtilities.Release(ref dataField);
+            ComUtilities.Release(ref dataFields);
             ComUtilities.Release(ref cubeField);
         }
     }
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldFilterResult SetFieldFilter(dynamic pivot, string fieldName, List<string> filterValues, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Reports unsupported OLAP item filtering as Success=false with the actual NotSupportedException message.")]
+    public PivotFieldFilterResult SetFieldFilter(Excel.PivotTable pivot, string fieldName, List<string> filterValues, string workbookPath)
     {
-        dynamic? cubeField = null;
-        dynamic? pivotFields = null;
-        dynamic? pivotField = null;
-        dynamic? pivotItems = null;
+        Excel.CubeField? cubeField = null;
+        Excel.PivotFields? pivotFields = null;
+        Excel.PivotField? pivotField = null;
+        Excel.PivotItems? pivotItems = null;
         try
         {
             // OLAP limitation: Cannot set Visible property on OLAP PivotItems
@@ -767,7 +789,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 "To filter OLAP data: (1) Use PivotTable's built-in filter buttons in Excel, (2) Use OLAP Slicers for interactive filtering, or (3) Modify the source Data Model. " +
                 "Reference: https://learn.microsoft.com/en-us/excel/vba/api/excel.pivotitem.visible");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldFilterResult
             {
@@ -787,7 +809,8 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// <inheritdoc/>
 
     /// <inheritdoc/>
-    public PivotFieldResult SortField(dynamic pivot, string fieldName, SortDirection direction, string workbookPath)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Sort failure transport returns Success=false with the actual error; cancellation and disconnected sessions propagate.")]
+    public PivotFieldResult SortField(Excel.PivotTable pivot, string fieldName, SortDirection direction, string workbookPath)
     {
         Excel.CubeField? cubeField = null;
         Excel.PivotFields? pivotFields = null;
@@ -823,7 +846,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                 FilePath = workbookPath
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -845,9 +868,10 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// OLAP CubeFields automatically create date hierarchies from Data Model columns.
     /// Manual grouping via Group() is NOT supported for OLAP PivotTables.
     /// </summary>
-    public PivotFieldResult GroupByDate(dynamic pivot, string fieldName, DateGroupingInterval interval, string workbookPath, ILogger? logger = null)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Grouping prerequisite failure transport returns Success=false and the real access error; cancellation and disconnection propagate.")]
+    public PivotFieldResult GroupByDate(Excel.PivotTable pivot, string fieldName, DateGroupingInterval interval, string workbookPath, ILogger? logger = null)
     {
-        dynamic? cubeField = null;
+        Excel.CubeField? cubeField = null;
         try
         {
             cubeField = GetFieldForManipulation(pivot, fieldName);
@@ -867,7 +891,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                                "Then use RemoveField/AddField to place its levels in PivotTable areas."
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -883,9 +907,10 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     }
 
     /// <inheritdoc/>
-    public PivotFieldResult GroupByNumeric(dynamic pivot, string fieldName, double? start, double? endValue, double intervalSize, string workbookPath, ILogger? logger = null)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Numeric-grouping prerequisite failure transport returns Success=false and the real access error; cancellation and disconnection propagate.")]
+    public PivotFieldResult GroupByNumeric(Excel.PivotTable pivot, string fieldName, double? start, double? endValue, double intervalSize, string workbookPath, ILogger? logger = null)
     {
-        dynamic? cubeField = null;
+        Excel.CubeField? cubeField = null;
         try
         {
             cubeField = GetFieldForManipulation(pivot, fieldName);
@@ -905,7 +930,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                                "Then use that field in the PivotTable."
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             return new PivotFieldResult
             {
@@ -921,7 +946,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     }
 
     /// <inheritdoc/>
-    public PivotFieldResult CreateCalculatedField(dynamic pivot, string fieldName, string formula, string workbookPath, ILogger? logger = null)
+    public PivotFieldResult CreateCalculatedField(Excel.PivotTable pivot, string fieldName, string formula, string workbookPath, ILogger? logger = null)
     {
         // CRITICAL: OLAP PivotTables do NOT support CalculatedFields collection
         // The CalculatedFields collection returns Nothing for OLAP PivotTables
@@ -946,11 +971,11 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
         };
     }
     /// <inheritdoc/>
-    public OperationResult SetLayout(dynamic pivot, int rowLayout, string workbookPath, ILogger? logger = null)
+    public OperationResult SetLayout(Excel.PivotTable pivot, int rowLayout, string workbookPath, ILogger? logger = null)
     {
         // OLAP PivotTables support all three layout forms
         // xlCompactRow=0, xlTabularRow=1, xlOutlineRow=2
-        pivot.RowAxisLayout(rowLayout);
+        pivot.RowAxisLayout((Excel.XlLayoutRowType)rowLayout);
 
         // NOTE: No RefreshTable() needed - Layout is a visual-only property
 
@@ -966,8 +991,9 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
         };
     }
     /// <inheritdoc/>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002", Justification = "Partial subtotal failure transport returns Success=false and describes the real error, completed hierarchy levels and uncertain attempted level without rollback; cancellation and disconnection propagate.")]
     public PivotFieldResult SetSubtotals(
-        dynamic pivot,
+        Excel.PivotTable pivot,
         string fieldName,
         bool showSubtotals,
         string workbookPath,
@@ -1015,7 +1041,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
                     : "Subtotals disabled for OLAP field."
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
         {
             if (logger?.IsEnabled(LogLevel.Error) is true)
             {
@@ -1036,7 +1062,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
         }
     }
     /// <inheritdoc/>
-    public OperationResult SetGrandTotals(dynamic pivot, bool showRowGrandTotals, bool showColumnGrandTotals, string workbookPath, ILogger? logger = null)
+    public OperationResult SetGrandTotals(Excel.PivotTable pivot, bool showRowGrandTotals, bool showColumnGrandTotals, string workbookPath, ILogger? logger = null)
     {
         pivot.RowGrand = showRowGrandTotals;
         pivot.ColumnGrand = showColumnGrandTotals;
@@ -1066,7 +1092,7 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
             "No changes have been rolled back. Inspect the hierarchy before retrying.";
     }
 
-    private static bool UsesWorkbookDataModel(dynamic pivot)
+    private static bool UsesWorkbookDataModel(Excel.PivotTable pivot)
     {
         Excel.PivotCache? cache = null;
         Excel.WorkbookConnection? connection = null;
@@ -1088,9 +1114,9 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// OLAP CubeFields reference Data Model columns in format: [TableName].[ColumnName]
     /// NOTE: This only searches hierarchy fields (CubeFieldType=1), not measures.
     /// </summary>
-    private static (string tableName, string columnName) FindTableAndColumn(dynamic pivot, string fieldName)
+    private static (string tableName, string columnName) FindTableAndColumn(Excel.PivotTable pivot, string fieldName)
     {
-        dynamic? cubeFields = null;
+        Excel.CubeFields? cubeFields = null;
         try
         {
             cubeFields = pivot.CubeFields;
@@ -1099,12 +1125,12 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
             // Only look at hierarchies (table columns), not measures
             for (int i = 1; i <= cubeFields.Count; i++)
             {
-                dynamic? cf = null;
+                Excel.CubeField? cf = null;
                 try
                 {
-                    cf = cubeFields.Item(i);
+                    cf = cubeFields[i];
                     string cfName = cf.Name?.ToString() ?? "";
-                    int cubeFieldType = Convert.ToInt32(cf.CubeFieldType);
+                    int cubeFieldType = (int)cf.CubeFieldType;
 
                     // Skip measures - we're looking for table columns only
                     if (cubeFieldType == XlCubeFieldType.xlMeasure)
@@ -1216,270 +1242,24 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     private static partial Regex SingleAggregationFormula();
 
     /// <summary>
-    /// Parse number format string and create appropriate ModelFormat object.
-    /// Supports: currency, percentage, decimal, whole number, general.
-    /// </summary>
-    private static object? GetModelFormatObject(Excel.Model model, string numberFormat)
-    {
-        // Currency formats: $#,##0.00, $#,##0, etc.
-        if (numberFormat.Contains('$'))
-        {
-            dynamic? currencyFormat = null;
-            try
-            {
-                currencyFormat = model.ModelFormatCurrency;
-
-                // Parse decimal places from format string
-                int decimalIndex = numberFormat.IndexOf('.');
-                if (decimalIndex >= 0)
-                {
-                    // Count zeros after decimal point
-                    int decimalPlaces = 0;
-                    for (int i = decimalIndex + 1; i < numberFormat.Length && numberFormat[i] == '0'; i++)
-                    {
-                        decimalPlaces++;
-                    }
-                    currencyFormat.DecimalPlaces = decimalPlaces;
-                }
-                else
-                {
-                    currencyFormat.DecimalPlaces = 0;
-                }
-
-                currencyFormat.Symbol = "$";
-                return currencyFormat;
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                if (currencyFormat != null)
-                    ComUtilities.Release(ref currencyFormat);
-                throw;
-            }
-        }
-
-        // Percentage formats: 0.00%, 0%, etc.
-        if (numberFormat.Contains('%'))
-        {
-            dynamic? percentFormat = null;
-            try
-            {
-                percentFormat = model.ModelFormatPercentageNumber;
-
-                // Parse decimal places
-                int decimalIndex = numberFormat.IndexOf('.');
-                if (decimalIndex >= 0)
-                {
-                    int decimalPlaces = 0;
-                    for (int i = decimalIndex + 1; i < numberFormat.Length && numberFormat[i] == '0'; i++)
-                    {
-                        decimalPlaces++;
-                    }
-                    percentFormat.DecimalPlaces = decimalPlaces;
-                }
-                else
-                {
-                    percentFormat.DecimalPlaces = 0;
-                }
-
-                return percentFormat;
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                if (percentFormat != null)
-                    ComUtilities.Release(ref percentFormat);
-                throw;
-            }
-        }
-
-        // Decimal number formats: 0.00, #,##0.00, etc.
-        if (numberFormat.Contains('.'))
-        {
-            dynamic? decimalFormat = null;
-            try
-            {
-                decimalFormat = model.ModelFormatDecimalNumber;
-
-                // Parse decimal places
-                int decimalIndex = numberFormat.IndexOf('.');
-                int decimalPlaces = 0;
-                for (int i = decimalIndex + 1; i < numberFormat.Length && (numberFormat[i] == '0' || numberFormat[i] == '#'); i++)
-                {
-                    decimalPlaces++;
-                }
-                decimalFormat.DecimalPlaces = decimalPlaces;
-
-                // Check for thousand separator
-                if (numberFormat.Contains(','))
-                {
-                    decimalFormat.UseThousandSeparator = true;
-                }
-
-                return decimalFormat;
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                if (decimalFormat != null)
-                    ComUtilities.Release(ref decimalFormat);
-                throw;
-            }
-        }
-
-        // Whole number formats: 0, #,##0, etc.
-        if (numberFormat.Contains('0') || numberFormat.Contains('#'))
-        {
-            dynamic? wholeFormat = null;
-            try
-            {
-                wholeFormat = model.ModelFormatWholeNumber;
-
-                // Check for thousand separator
-                if (numberFormat.Contains(','))
-                {
-                    wholeFormat.UseThousandSeparator = true;
-                }
-
-                return wholeFormat;
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                if (wholeFormat != null)
-                    ComUtilities.Release(ref wholeFormat);
-                throw;
-            }
-        }
-
-        // Default: General format
-        return model.ModelFormatGeneral;
-    }
-
-    /// <summary>
-    /// Modify an existing format object's properties based on the format string.
-    /// The format object is already attached to a measure and we modify it in place.
-    /// </summary>
-    private static void ModifyFormatObject(dynamic formatObject, string numberFormat)
-    {
-        // Try to determine the format type and modify accordingly
-        // Currency format
-        if (numberFormat.Contains('$'))
-        {
-            try
-            {
-                // Parse decimal places
-                int decimalIndex = numberFormat.IndexOf('.');
-                if (decimalIndex >= 0)
-                {
-                    int decimalPlaces = 0;
-                    for (int i = decimalIndex + 1; i < numberFormat.Length && numberFormat[i] == '0'; i++)
-                    {
-                        decimalPlaces++;
-                    }
-                    formatObject.DecimalPlaces = decimalPlaces;
-                }
-                else
-                {
-                    formatObject.DecimalPlaces = 0;
-                }
-
-                formatObject.Symbol = "$";
-                return;
-            }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
-            {
-                // Format object doesn't support currency properties - fall through to try other types
-            }
-        }
-
-        // Percentage format
-        if (numberFormat.Contains('%'))
-        {
-            try
-            {
-                int decimalIndex = numberFormat.IndexOf('.');
-                if (decimalIndex >= 0)
-                {
-                    int decimalPlaces = 0;
-                    for (int i = decimalIndex + 1; i < numberFormat.Length && numberFormat[i] == '0'; i++)
-                    {
-                        decimalPlaces++;
-                    }
-                    formatObject.DecimalPlaces = decimalPlaces;
-                }
-                else
-                {
-                    formatObject.DecimalPlaces = 0;
-                }
-                return;
-            }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
-            {
-                // Format object doesn't support percentage properties - fall through
-            }
-        }
-
-        // Decimal number format
-        if (numberFormat.Contains('.'))
-        {
-            try
-            {
-                int decimalIndex = numberFormat.IndexOf('.');
-                int decimalPlaces = 0;
-                for (int i = decimalIndex + 1; i < numberFormat.Length && (numberFormat[i] == '0' || numberFormat[i] == '#'); i++)
-                {
-                    decimalPlaces++;
-                }
-                formatObject.DecimalPlaces = decimalPlaces;
-
-                if (numberFormat.Contains(','))
-                {
-                    formatObject.UseThousandSeparator = true;
-                }
-                return;
-            }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
-            {
-                // Format object doesn't support decimal properties - fall through
-            }
-        }
-
-        // Whole number format
-        if (numberFormat.Contains('0') || numberFormat.Contains('#'))
-        {
-            try
-            {
-                if (numberFormat.Contains(','))
-                {
-                    formatObject.UseThousandSeparator = true;
-                }
-                return;
-            }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
-            {
-                // Format object doesn't support whole number properties - fall through
-            }
-        }
-
-        // If we get here, it's probably ModelFormatGeneral which has no configurable properties
-    }
-
-    /// <summary>
     /// Finds a measure CubeField by exact name, accepting "[Measures].[Name]" or bare "Name".
     /// Only measures match, so "ACR" never matches a hierarchy such as "[Table].[ACRTypeKey]".
     /// Caller owns the returned COM object.
     /// </summary>
-    private static dynamic? FindMeasureCubeField(dynamic pivot, string name)
+    private static Excel.CubeField? FindMeasureCubeField(Excel.PivotTable pivot, string name)
     {
         string qualified = GetQualifiedMeasureName(name);
-        dynamic? cubeFields = null;
+        Excel.CubeFields? cubeFields = null;
         try
         {
             cubeFields = pivot.CubeFields;
             for (int i = 1; i <= cubeFields.Count; i++)
             {
-                dynamic? cf = null;
+                Excel.CubeField? cf = null;
                 try
                 {
-                    cf = cubeFields.Item(i);
-                    if (Convert.ToInt32(cf.CubeFieldType) != XlCubeFieldType.xlMeasure)
+                    cf = cubeFields[i];
+                    if ((int)cf.CubeFieldType != XlCubeFieldType.xlMeasure)
                         continue;
 
                     string cfName = cf.Name?.ToString() ?? "";
@@ -1522,14 +1302,14 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
     /// Returns true if the measure exists, and outputs the measure name.
     /// Handles formats: "[Measures].[Name]" or "Name" (exact match only).
     /// </summary>
-    private static bool IsExistingMeasure(dynamic model, string fieldName, out string? measureName)
+    private static bool IsExistingMeasure(Excel.Model model, string fieldName, out string? measureName)
     {
         measureName = null;
-        dynamic? measures = null;
+        Excel.ModelMeasures? measures = null;
         try
         {
             measures = model.ModelMeasures;
-            if (measures == null || measures.Count == 0)
+            if (measures is null || measures.Count == 0)
             {
                 return false;
             }
@@ -1539,9 +1319,9 @@ public partial class OlapPivotTableFieldStrategy : IPivotTableFieldStrategy
 
             // Search for measure by name (EXACT match only - no partial matching)
             // Partial matching causes disambiguation bugs where "ACR" could match "ACRTypeKey"
-            for (int i = 1; i <= measures.Count; i++)
+            for (int i = 1; i <= measures!.Count; i++)
             {
-                dynamic? measure = null;
+                Excel.ModelMeasure? measure = null;
                 try
                 {
                     measure = measures.Item(i);

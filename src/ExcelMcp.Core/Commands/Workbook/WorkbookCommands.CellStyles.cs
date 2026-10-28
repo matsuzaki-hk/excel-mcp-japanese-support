@@ -80,8 +80,9 @@ public partial class WorkbookCommands
                 existing = TryFindCellStyle(styles, styleName, ct);
                 if (existing is not null)
                     throw new ArgumentException($"Cell style '{styleName}' already exists.", nameof(styleName));
-                source = RangeHelpers.ResolveRange(ctx.Book, sourceSheetName, sourceCellAddress);
-                if (Convert.ToDouble(source.CountLarge) != 1)
+                source = RangeHelpers.ResolveRange(ctx.Book, sourceSheetName, sourceCellAddress)
+                    ?? throw new InvalidOperationException("Excel returned no source range for the requested cell style.");
+                if (Convert.ToDouble((object)source.CountLarge, System.Globalization.CultureInfo.InvariantCulture) != 1)
                     throw new ArgumentException("sourceCellAddress must select exactly one cell.", nameof(sourceCellAddress));
                 ct.ThrowIfCancellationRequested();
                 style = AddCellStyleFromSource(ctx.App, styles, styleName, source);
@@ -200,6 +201,8 @@ public partial class WorkbookCommands
             throw new InvalidOperationException("Built-in cell styles are read-only. Create a custom style from one source cell instead.");
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Collects operation and view restoration failures, releases every acquired COM reference, then rethrows the original or combined failures.")]
     private static Excel.Style AddCellStyleFromSource(Excel.Application app, Excel.Styles styles,
         string styleName, Excel.Range source)
     {

@@ -99,12 +99,35 @@ guard a later edit against changes made since the read.
 
 ## Run a macro
 
+Normal opens disable VBA macros, including `.xlsm` files. Reading or editing
+the VBA project does not enable execution. After inspecting the code, obtain
+separate approval to reopen the saved workbook with macros enabled:
+
+```powershell
+excelcli -q session notices --session $session
+excelcli -q session enable-macros --session $session --approved --allow-reopen
+```
+
+For MCP, use `file_read` action `notices`, then `file` action `enable-macros`
+with `workbook_session_id`, `approved:true`, and `allow_reopen:true`.
+These approval flags are not a built-in confirmation dialog.
+Reopening can execute opening event code. It is refused for unsaved,
+read-only, attached, or remote workbooks, and when another workbook is open
+in the same Excel instance. Nothing is automatically saved or discarded.
+Company restrictions can still block macros. For an attached workbook,
+make the security decision in Excel instead.
+
+Once execution is enabled, run the selected procedure:
+
 ```powershell
 excelcli -q vba run --session $session --procedure-name "Module1.GenerateReport" --timeout-seconds 120
 ```
 
-The procedure name uses `Module.Procedure` form. Pass arguments with
-`--parameters` when the macro takes them.
+The procedure name uses `Module.Procedure` form; do not include a workbook name
+or `!` prefix. ExcelMcp selects the macro from the session's workbook even when
+another workbook is active. The macro's own code can still change other open
+workbooks, so inspect it before running. Pass arguments with `--parameters`
+when the macro takes them.
 
 Set a timeout that matches the work. A macro that waits on a dialog will otherwise
 hold the session until the default limit expires.
@@ -155,10 +178,16 @@ After running a macro, check the effect rather than trusting a success flag:
 
 ```powershell
 excelcli -q range get-values --session $session --sheet Summary --range A1:D20
-excelcli -q screenshot capture-sheet --session $session --sheet Summary
 ```
 
 ## Known gotchas
+
+**Disabled opening is separate from project access.** `vba run` does not
+silently enable macros, reopen the workbook, or lower macro-opening settings.
+New workbooks can run code added by the caller; an existing workbook opened
+with macros disabled needs the separate approved reopen described above.
+Excel's VBA setting does not suppress legacy Excel 4.0 macros; those can
+still need a response in Excel.
 
 **Access denied while listing or changing modules** can mean disabled project
 trust or a password-locked project. Use `vba status` to distinguish them.

@@ -48,7 +48,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
           cache: pip
@@ -64,6 +64,11 @@ jobs:
       - name: Check sample data and build scripts
         run: python -m unittest discover -s samples/world-bank-dashboard -p "test_*.py"
 
+      # This source check does not need a finished site.
+      - name: Verify deploy path filter covers every mirrored source
+        working-directory: gh-pages
+        run: python check_deploy_paths.py
+
       - name: Build with MkDocs
         working-directory: gh-pages
         run: mkdocs build --strict --clean
@@ -72,35 +77,26 @@ jobs:
         working-directory: gh-pages
         run: python audit_site.py
 
-      # Guards against the deploy workflow's hand-written paths: filter drifting
-      # from the canonical sources listed in sitegen/sources.py, which would publish a
-      # silently stale site until the nightly cron caught up.
-      - name: Verify deploy path filter covers every mirrored source
-        working-directory: gh-pages
-        run: python check_deploy_paths.py
-
   changes:
     name: Select validation
     runs-on: ubuntu-26.04
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       tests: ${{ steps.select.outputs.tests }}
-      packages: ${{ steps.select.outputs.packages }}
-      package_build: ${{ steps.select.outputs.package_build }}
-      npm: ${{ steps.select.outputs.npm }}
-      source_checks_group: ${{ steps.select.outputs.source_checks_group }}
+      build_only: ${{ steps.select.outputs.build_only }}
+      documentation_checks_group: ${{ steps.select.outputs.documentation_checks_group }}
       documentation_counts: ${{ steps.select.outputs.documentation_counts }}
       full_solution_build: ${{ steps.select.outputs.full_solution_build }}
       full_solution_build_group: ${{ steps.select.outputs.full_solution_build_group }}
+      packages: ${{ steps.select.outputs.packages }}
+      npm: ${{ steps.select.outputs.npm }}
+      package_skills: ${{ steps.select.outputs.package_skills }}
+      package_dotnet: ${{ steps.select.outputs.package_dotnet }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
-        with:
-          global-json-file: global.json
       - name: Select changed inputs
         id: select
         shell: pwsh
@@ -151,12 +147,15 @@ jobs:
           node-version: '24'
           package-manager-cache: false
       # Separate checkouts keep rebuild/process regressions from racing packaging.
+      - name: Install Microsoft ADO build tools
+        shell: pwsh
+        run: ./scripts/Install-AdoBuildTools.ps1
       - name: Restore and build selected inputs
         shell: pwsh
         run: |
           ./scripts/Build-CiInputs.ps1 -PlanFile artifacts/ci-plan.json -Group '${{ matrix.group }}'
       - name: Generate complete skill inputs
-        if: matrix.group == needs.changes.outputs.source_checks_group && needs.changes.outputs.documentation_counts == 'true'
+        if: matrix.group == needs.changes.outputs.documentation_checks_group && needs.changes.outputs.documentation_counts == 'true'
         shell: pwsh
         run: ./scripts/Build-AgentSkills.ps1 -GenerateOnly
       - name: Selected Excel-free tests
@@ -164,21 +163,6 @@ jobs:
         run: |
           ./scripts/Invoke-ExcelFreeTests.ps1 -Group '${{ matrix.group }}' `
             -PlanFile artifacts/ci-plan.json -ResultsDirectory 'TestResults/${{ matrix.group }}'
-      - name: Source correctness checks
-        if: matrix.group == needs.changes.outputs.source_checks_group
-        shell: pwsh
-        run: |
-          foreach ($script in @('check-com-leaks','check-workbook-package-access','check-success-flag','check-dynamic-casts')) {
-            & "./scripts/$script.ps1"
-            if ($LASTEXITCODE -ne 0) { throw "$script failed." }
-          }
-
-      - name: Documentation count checks
-        if: matrix.group == needs.changes.outputs.source_checks_group && needs.changes.outputs.documentation_counts == 'true'
-        shell: pwsh
-        run: |
-          & ./scripts/check-doc-counts.ps1 -SkipBuild
-          if ($LASTEXITCODE -ne 0) { throw 'Reviewed documentation counts are stale.' }
       - name: Verify entry-point builds
         if: needs.changes.outputs.full_solution_build == 'true' && matrix.group == needs.changes.outputs.full_solution_build_group
         shell: pwsh
@@ -196,10 +180,10 @@ jobs:
           path: TestResults/${{ matrix.group }}/**/*.trx
           if-no-files-found: error
 
-  packages:
-    name: Affected packages
+  build-only:
+    name: Build-only changed inputs
     needs: changes
-    if: needs.changes.outputs.packages == 'true'
+    if: needs.changes.outputs.build_only == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -214,14 +198,38 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
+      - name: Install Microsoft ADO build tools
+        shell: pwsh
+        run: ./scripts/Install-AdoBuildTools.ps1
+      - name: Restore and build selected inputs
+        shell: pwsh
+        run: ./build.ps1 build --plan artifacts/ci-plan.json
+
+  packages:
+    name: Package checks
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Setup .NET
+        if: needs.changes.outputs.package_dotnet == 'true'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
       - name: Cache NuGet downloads
-        if: needs.changes.outputs.package_build == 'true'
+        if: needs.changes.outputs.package_dotnet == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('global.json', 'Directory.*', 'NuGet.Config', '**/*.csproj', '**/*.props', '**/*.targets') }}
+      - name: Install Microsoft ADO build tools
+        if: needs.changes.outputs.package_dotnet == 'true'
+        shell: pwsh
+        run: ./scripts/Install-AdoBuildTools.ps1
       - name: Setup Node.js
-        if: needs.changes.outputs.package_build == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -230,17 +238,42 @@ jobs:
             vscode-extension/package-lock.json
             npm-packages/shared/package-lock.json
 
+      - name: Read selection
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ci-validation-plan
+          path: artifacts
       - name: Generate complete skill inputs
+        if: needs.changes.outputs.package_skills == 'true'
         shell: pwsh
         run: ./scripts/Build-AgentSkills.ps1 -GenerateOnly
-      - name: Build and verify affected distributable packages
+      - name: Setup Python for skill validation
+        if: needs.changes.outputs.package_skills == 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - name: Install pinned Agent Skills validator
+        if: needs.changes.outputs.package_skills == 'true'
+        run: python -m pip install "git+https://github.com/agentskills/agentskills.git@69ef37e9424c0a7ea9dd2293b559e43ec8176379#subdirectory=skills-ref"
+      - name: Validate generated skills before packaging
+        if: needs.changes.outputs.package_skills == 'true'
         shell: pwsh
         run: |
-          $plan = Get-Content artifacts/ci-plan.json -Raw | ConvertFrom-Json
-          $components = @('Cli','Mcp','Extension','Mcpb','Plugins') | Where-Object { $plan.$_ }
-          if (-not $components) { throw 'Selected package job has no components.' }
-          ./scripts/Build-ReleasePackages.ps1 -Components $components -SkillsDirectory artifacts/generated-skills
-          if ($LASTEXITCODE -ne 0) { throw 'Selected package validation failed.' }
+          $PSNativeCommandUseErrorActionPreference = $true
+          foreach ($name in @('excel-cli', 'excel-cli-report-formatting', 'excel-mcp-report-formatting')) {
+            skills-ref validate "artifacts/generated-skills/$name"
+          }
+      - name: Build and verify distributable packages
+        shell: pwsh
+        run: |
+          . ./scripts/ValidationExecution.ps1
+          $plan = Read-ValidationPlan artifacts/ci-plan.json
+          if (-not $plan.PackageComponents.Count) { throw 'Package job has no selected components.' }
+          $arguments = @{ Components = [string[]]$plan.PackageComponents }
+          if (@($plan.PackageComponents | Where-Object { $_ -in @('Extension', 'Plugins') }).Count) {
+            $arguments.SkillsDirectory = 'artifacts/generated-skills'
+          }
+          ./scripts/Build-ReleasePackages.ps1 @arguments
 
   npm:
     name: npm launchers
@@ -256,10 +289,6 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: npm-packages/shared/package-lock.json
-      - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
-        with:
-          global-json-file: global.json
       - name: npm launcher and packaging tests (MCP + CLI)
         shell: pwsh
         run: |
@@ -271,27 +300,25 @@ jobs:
   ci-gate:
     name: CI Gate
     if: always()
-    needs: [changes, tests, packages, npm]
+    needs: [changes, tests, build-only, packages, npm]
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
-        with:
-          global-json-file: global.json
       - name: Verify every selected result
         shell: pwsh
         env:
           DETECTION: ${{ needs.changes.result }}
           TESTS: ${{ needs.tests.result }}
+          BUILD_ONLY: ${{ needs.build-only.result }}
           PACKAGES: ${{ needs.packages.result }}
           NPM: ${{ needs.npm.result }}
           SELECTED_TESTS: ${{ needs.changes.outputs.tests }}
+          SELECTED_BUILD_ONLY: ${{ needs.changes.outputs.build_only }}
           SELECTED_PACKAGES: ${{ needs.changes.outputs.packages }}
           SELECTED_NPM: ${{ needs.changes.outputs.npm }}
         run: |
           ./scripts/Test-CiCompletion.ps1 -Detection $env:DETECTION -Tests $env:TESTS `
-            -Packages $env:PACKAGES -Npm $env:NPM `
-            -SelectedTests $env:SELECTED_TESTS -SelectedPackages $env:SELECTED_PACKAGES `
-            -SelectedNpm $env:SELECTED_NPM
+            -Packages $env:PACKAGES -Npm $env:NPM -BuildOnly $env:BUILD_ONLY `
+            -SelectedTests $env:SELECTED_TESTS -SelectedBuildOnly $env:SELECTED_BUILD_ONLY `
+            -SelectedPackages $env:SELECTED_PACKAGES -SelectedNpm $env:SELECTED_NPM

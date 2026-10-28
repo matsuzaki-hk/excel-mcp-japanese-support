@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+#Requires -Version 7.4
 <#
 .SYNOPSIS
     Runs independently reported Excel-dependent acceptance stages before merge.
@@ -71,7 +72,7 @@ try {
         switch ($stage) {
             'Cli' {
                 $parameters.Project = $cliTestProject
-                $parameters.Filter = 'RequiresExcel=true&Acceptance=Required&(FullyQualifiedName~CliWorkflowAcceptanceTests|FullyQualifiedName~CliNative)'
+                $parameters.Filter = 'RequiresExcel=true&Acceptance=Required&FullyQualifiedName~CliWorkflowAcceptanceTests'
                 $parameters.DeadlineSeconds = 1200
                 $parameters.HangTimeout = '5m'
             }

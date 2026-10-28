@@ -10,6 +10,8 @@ internal sealed class OwnedExcelProcessScope : IDisposable
     private readonly OwnedExcelProcessScope? _previous = Current.Value;
     private readonly ConcurrentDictionary<ExcelProcessIdentity, byte> _owned = new();
 
+    internal ExcelProcessIdentity[] Identities => _owned.Keys.ToArray();
+
     internal OwnedExcelProcessScope()
     {
         Current.Value = this;
@@ -35,11 +37,6 @@ internal sealed class OwnedExcelProcessScope : IDisposable
             () => _owned.Keys.All(OwnedProcessGuard.TryConfirmExited),
             TimeSpan.FromSeconds(15));
         var remaining = _owned.Keys.Where(identity => !OwnedProcessGuard.TryConfirmExited(identity)).ToArray();
-        foreach (var identity in remaining)
-        {
-            OwnedProcessGuard.TryTerminate(identity, TimeSpan.Zero, TimeSpan.FromSeconds(5), out _);
-        }
-
         Assert.True(exited, $"Owned Excel processes survived shutdown: {string.Join(", ", remaining)}");
     }
 

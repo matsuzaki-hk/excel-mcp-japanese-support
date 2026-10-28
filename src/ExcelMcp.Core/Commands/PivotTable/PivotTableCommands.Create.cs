@@ -28,18 +28,18 @@ public partial class PivotTableCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? sourceWorksheet = null;
-            dynamic? sourceRangeObj = null;
-            dynamic? destWorksheet = null;
-            dynamic? destRangeObj = null;
-            dynamic? pivotCaches = null;
+            Excel.Worksheet? sourceWorksheet = null;
+            Excel.Range? sourceRangeObj = null;
+            Excel.Worksheet? destWorksheet = null;
+            Excel.Range? destRangeObj = null;
+            Excel.PivotCaches? pivotCaches = null;
             Excel.PivotCache? pivotCache = null;
-            dynamic? pivotTable = null;
-            dynamic? sourceRows = null;
+            Excel.PivotTable? pivotTable = null;
+            Excel.Range? sourceRows = null;
 
             try
             {
-                sourceWorksheet = ctx.Book.Worksheets[sourceSheet];
+                sourceWorksheet = Utilities.WorksheetLookup.Get(ctx.Book, sourceSheet);
                 sourceRangeObj = sourceWorksheet.Range[sourceRange];
                 sourceRows = sourceRangeObj.Rows;
                 int sourceRowCount = sourceRows.Count;
@@ -52,11 +52,11 @@ public partial class PivotTableCommands
                 var availableFields = new List<string>();
                 var blankHeaderColumns = new List<int>();
 
-                dynamic? headerRow = null;
+                Excel.Range? headerRow = null;
                 try
                 {
-                    headerRow = sourceRows[1];
-                    var headerValues = ExcelValueNormalizer.Normalize(headerRow.Value2);
+                    headerRow = (Excel.Range)sourceRows[1];
+                    var headerValues = ExcelValueNormalizer.Normalize((object?)headerRow.Value2);
 
                     for (int column = 0; column < headerValues.ColumnCount; column++)
                     {
@@ -88,7 +88,8 @@ public partial class PivotTableCommands
                     ComUtilities.Release(ref headerRow);
                 }
 
-                destWorksheet = ctx.Book.Worksheets[destinationSheet];
+                destWorksheet = Utilities.WorksheetLookup.Get(ctx.Book, destinationSheet);
+                EnsurePivotTableNameAvailable(destWorksheet, pivotTableName, destinationSheet);
                 destRangeObj = destWorksheet.Range[destinationCell];
 
                 string sourceDataRef = $"'{sourceSheet.Replace("'", "''", StringComparison.Ordinal)}'!{sourceRange}";
@@ -100,7 +101,7 @@ public partial class PivotTableCommands
                 {
                     pivotCaches = ctx.Book.PivotCaches();
                     pivotCache = (Excel.PivotCache)pivotCaches.Create(
-                        SourceType: 1,
+                        SourceType: Excel.XlPivotTableSourceType.xlDatabase,
                         SourceData: sourceDataRef,
                         Version: 4
                     );
@@ -149,19 +150,19 @@ public partial class PivotTableCommands
         ValidateCacheSharingInputs(shareCacheWith, shareCacheWithSheet);
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? table = null;
-            dynamic? destWorksheet = null;
-            dynamic? destRangeObj = null;
-            dynamic? pivotCaches = null;
+            Excel.ListObject? table = null;
+            Excel.Worksheet? destWorksheet = null;
+            Excel.Range? destRangeObj = null;
+            Excel.PivotCaches? pivotCaches = null;
             Excel.PivotCache? pivotCache = null;
-            dynamic? pivotTable = null;
-            dynamic? tableRange = null;
-            dynamic? tableRows = null;
-            dynamic? tableSheet = null;
+            Excel.PivotTable? pivotTable = null;
+            Excel.Range? tableRange = null;
+            Excel.Range? tableRows = null;
+            Excel.Worksheet? tableSheet = null;
 
             try
             {
-                dynamic? sheets = null;
+                Excel.Sheets? sheets = null;
                 bool tableFound = false;
 
                 try
@@ -169,19 +170,19 @@ public partial class PivotTableCommands
                     sheets = ctx.Book.Worksheets;
                     for (int i = 1; i <= sheets.Count; i++)
                     {
-                        dynamic? sheet = null;
-                        dynamic? listObjects = null;
+                        Excel.Worksheet? sheet = null;
+                        Excel.ListObjects? listObjects = null;
                         try
                         {
-                            sheet = sheets.Item(i);
+                            sheet = (Excel.Worksheet)sheets[i];
                             listObjects = sheet.ListObjects;
 
                             for (int j = 1; j <= listObjects.Count; j++)
                             {
-                                dynamic? tbl = null;
+                                Excel.ListObject? tbl = null;
                                 try
                                 {
-                                    tbl = listObjects.Item(j);
+                                    tbl = listObjects.Item[j];
                                     if (tbl.Name == tableName)
                                     {
                                         table = tbl;
@@ -212,7 +213,7 @@ public partial class PivotTableCommands
                     ComUtilities.Release(ref sheets);
                 }
 
-                if (!tableFound || table == null)
+                if (!tableFound || table is null)
                 {
                     throw new InvalidOperationException($"Table '{tableName}' not found in workbook");
                 }
@@ -228,11 +229,11 @@ public partial class PivotTableCommands
                 }
 
                 // Get headers
-                dynamic? headerRowCol = null;
+                Excel.Range? headerRowCol = null;
                 try
                 {
                     headerRowCol = table.HeaderRowRange;
-                    var headerValues = ExcelValueNormalizer.Normalize(headerRowCol.Value2);
+                    var headerValues = ExcelValueNormalizer.Normalize((object?)headerRowCol.Value2);
 
                     foreach (var value in headerValues.Values[0])
                     {
@@ -249,11 +250,12 @@ public partial class PivotTableCommands
                 }
 
                 // Resolve the destination before Excel creates anything.
-                destWorksheet = ctx.Book.Worksheets[destinationSheet];
+                destWorksheet = Utilities.WorksheetLookup.Get(ctx.Book, destinationSheet);
+                EnsurePivotTableNameAvailable(destWorksheet, pivotTableName, destinationSheet);
                 destRangeObj = destWorksheet.Range[destinationCell];
 
                 // Create PivotCache from table
-                tableSheet = table.Parent;
+                tableSheet = (Excel.Worksheet)table.Parent;
                 string sourceDataRef = $"{tableSheet.Name}!{table.Name}";
 
                 if (shareCacheWith is not null)
@@ -263,7 +265,7 @@ public partial class PivotTableCommands
                 {
                     pivotCaches = ctx.Book.PivotCaches();
                     pivotCache = (Excel.PivotCache)pivotCaches.Create(
-                        SourceType: 1,
+                        SourceType: Excel.XlPivotTableSourceType.xlDatabase,
                         SourceData: sourceDataRef
                     );
                 }
@@ -310,15 +312,15 @@ public partial class PivotTableCommands
         string destinationSheet, string destinationCell,
         string pivotTableName)
     {
-        return batch.Execute((ctx, ct) =>
+        return ExcelBatchWait.Execute(batch, TimeSpan.FromMinutes(5), (ctx, ct) =>
         {
-            dynamic? model = null;
-            dynamic? modelTable = null;
-            dynamic? destWorksheet = null;
-            dynamic? destRangeObj = null;
-            dynamic? pivotCaches = null;
-            dynamic? pivotCache = null;
-            dynamic? pivotTable = null;
+            Excel.Model? model = null;
+            Excel.ModelTable? modelTable = null;
+            Excel.Worksheet? destWorksheet = null;
+            Excel.Range? destRangeObj = null;
+            Excel.PivotCaches? pivotCaches = null;
+            Excel.PivotCache? pivotCache = null;
+            Excel.PivotTable? pivotTable = null;
 
             try
             {
@@ -327,21 +329,21 @@ public partial class PivotTableCommands
                 model = ctx.Book.Model;
 
                 // Find the table in the Data Model
-                dynamic? modelTables = null;
+                Excel.ModelTables? modelTables = null;
                 bool tableFound = false;
                 try
                 {
                     modelTables = model.ModelTables;
 
                     // Check if Data Model has any tables
-                    if (modelTables == null || modelTables.Count == 0)
+                    if (modelTables is null || modelTables.Count == 0)
                     {
                         throw new InvalidOperationException("Data Model does not contain any tables");
                     }
 
-                    for (int i = 1; i <= modelTables.Count; i++)
+                    for (int i = 1; i <= modelTables!.Count; i++)
                     {
-                        dynamic? tbl = null;
+                        Excel.ModelTable? tbl = null;
                         try
                         {
                             tbl = modelTables.Item(i);
@@ -366,7 +368,7 @@ public partial class PivotTableCommands
                     ComUtilities.Release(ref modelTables);
                 }
 
-                if (!tableFound || modelTable == null)
+                if (!tableFound || modelTable is null)
                 {
                     throw new InvalidOperationException($"Table '{tableName}' not found in Data Model");
                 }
@@ -377,20 +379,20 @@ public partial class PivotTableCommands
 
                 try
                 {
-                    recordCount = ComUtilities.SafeGetInt(modelTable, "RecordCount");
+                    recordCount = modelTable.RecordCount;
 
                     // Get columns
-                    dynamic? modelColumns = null;
+                    Excel.ModelTableColumns? modelColumns = null;
                     try
                     {
                         modelColumns = modelTable.ModelTableColumns;
                         for (int i = 1; i <= modelColumns.Count; i++)
                         {
-                            dynamic? column = null;
+                            Excel.ModelTableColumn? column = null;
                             try
                             {
                                 column = modelColumns.Item(i);
-                                var colName = ComUtilities.SafeGetString(column, "Name");
+                                var colName = column.Name;
                                 if (!string.IsNullOrWhiteSpace(colName))
                                 {
                                     headers.Add(colName);
@@ -418,7 +420,8 @@ public partial class PivotTableCommands
                 }
 
                 // STEP 2: Resolve the destination before Excel creates anything.
-                destWorksheet = ctx.Book.Worksheets[destinationSheet];
+                destWorksheet = Utilities.WorksheetLookup.Get(ctx.Book, destinationSheet);
+                EnsurePivotTableNameAvailable(destWorksheet, pivotTableName, destinationSheet);
                 destRangeObj = destWorksheet.Range[destinationCell];
 
                 // STEP 3: Create PivotCache from Data Model
@@ -427,7 +430,7 @@ public partial class PivotTableCommands
 
                 // xlExternal = 2
                 pivotCache = pivotCaches.Create(
-                    SourceType: 2,
+                    SourceType: Excel.XlPivotTableSourceType.xlExternal,
                     SourceData: "ThisWorkbookDataModel"
                 );
 
@@ -463,13 +466,45 @@ public partial class PivotTableCommands
         });
     }
 
+    private static void EnsurePivotTableNameAvailable(
+        Excel.Worksheet worksheet,
+        string pivotTableName,
+        string destinationSheet)
+    {
+        Excel.PivotTables? pivotTables = null;
+        Excel.PivotTable? existing = null;
+        try
+        {
+            pivotTables = (Excel.PivotTables)worksheet.PivotTables();
+            int pivotTableCount = Convert.ToInt32(pivotTables.Count);
+            for (int index = 1; index <= pivotTableCount; index++)
+            {
+                existing = pivotTables.Item(index);
+                string existingName = existing.Name?.ToString() ?? string.Empty;
+                if (existingName.Equals(pivotTableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"PivotTable '{pivotTableName}' already exists on sheet '{destinationSheet}'. " +
+                        "Choose a different PivotTable name.");
+                }
+
+                ComUtilities.Release(ref existing);
+            }
+        }
+        finally
+        {
+            ComUtilities.Release(ref existing);
+            ComUtilities.Release(ref pivotTables);
+        }
+    }
+
     /// <summary>
     /// Refreshes a newly created PivotTable and reads its location. If either step fails, the error
     /// names the PivotTable that remains in the workbook.
     /// </summary>
-    private static string FinishCreatedPivotTable(dynamic pivotTable, string pivotTableName, string sheetName)
+    private static string FinishCreatedPivotTable(Excel.PivotTable pivotTable, string pivotTableName, string sheetName)
     {
-        dynamic? tableRange2 = null;
+        Excel.Range? tableRange2 = null;
         string step = $"Refreshing the new PivotTable '{pivotTableName}'";
         try
         {

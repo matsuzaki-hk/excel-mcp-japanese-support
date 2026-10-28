@@ -165,7 +165,7 @@ internal static class DaemonAutoStart
 
                 throw new TimeoutException(
                     $"Daemon is running but not responding after {FormatDuration(BusyDaemonWaitTimeout)}. " +
-                    "Stop it with 'excelcli service stop' or terminate the stuck excelcli process, then retry.");
+                    "Its Excel workbooks remain owned; inspect their state before deciding how to proceed.");
             }
         }
 
@@ -273,7 +273,11 @@ internal static class DaemonAutoStart
         }
         catch (AbandonedMutexException)
         {
-            try { mutex?.ReleaseMutex(); } catch (ApplicationException) { }
+            try { mutex?.ReleaseMutex(); }
+            catch (ApplicationException ex)
+            {
+                System.Diagnostics.Trace.TraceWarning("Abandoned startup mutex release failed: {0}", ex.Message);
+            }
             return false;
         }
         catch (WaitHandleCannotBeOpenedException)
@@ -377,15 +381,15 @@ internal static class DaemonAutoStart
                         $"Could not acquire the daemon starting marker for CLI pipe '{pipeName}'.");
                 }
 
+                var previousProcesses = OwnedProcessCleanup.CaptureTrackedProcesses(pipeName);
                 var cleanupResult = OwnedProcessCleanup
-                    .CleanupAsync(pipeName, cancellationToken)
+                    .CleanupAsync(pipeName, previousProcesses, cancellationToken)
                     .GetAwaiter()
                     .GetResult();
                 if (!cleanupResult.Success)
                 {
                     throw new InvalidOperationException(
-                        $"{cleanupResult.ErrorMessage ?? $"Tracked processes for CLI pipe '{pipeName}' could not be stopped."} " +
-                        "Run 'excelcli service stop' and retry.");
+                        cleanupResult.ErrorMessage ?? "Recorded Excel copies could not be checked. No Excel applications were closed.");
                 }
 
                 // No daemon running — start it.

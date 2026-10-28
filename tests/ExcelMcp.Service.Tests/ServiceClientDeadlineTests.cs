@@ -117,13 +117,15 @@ public sealed class ServiceClientDeadlineTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         var responseSource = new TaskCompletionSource<ServiceResponse>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var abandoned = new TaskCompletionSource<ServiceRequest>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         using var host = new DaemonHost(
             _ =>
             {
                 requestStarted.TrySetResult(true);
                 return responseSource.Task;
             },
-            static () => 0);
+            requestAbandoned: (request, _) => abandoned.TrySetResult(request));
         var hostTask = host.RunAsync(pipeName);
         var clock = new ManualTimerTimeProvider();
         using var client = new ServiceClient(
@@ -141,19 +143,26 @@ public sealed class ServiceClientDeadlineTests
         Assert.False(response.Success);
         Assert.Equal("Timeout", response.ErrorCategory);
         Assert.Equal("Service request timed out", response.ErrorMessage);
+        Assert.Equal("sheet.list",
+            (await abandoned.Task.WaitAsync(TimeSpan.FromSeconds(5))).Command);
+        Assert.False(responseSource.Task.IsCompleted);
 
         responseSource.TrySetResult(new ServiceResponse { Success = true });
         host.RequestShutdown();
         await hostTask.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
-    [Fact]
-    public async Task SendAsync_ExternalCancellationIsNotReportedAsTimeout()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_ExternalCancellationIsNotReportedAsTimeout(bool waitWithoutDeadline)
     {
         var pipeName = $"excelmcp-client-cancel-{Guid.NewGuid():N}";
         var requestStarted = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var responseSource = new TaskCompletionSource<ServiceResponse>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var abandoned = new TaskCompletionSource<ServiceRequest>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         using var host = new DaemonHost(
             _ =>
@@ -161,13 +170,13 @@ public sealed class ServiceClientDeadlineTests
                 requestStarted.TrySetResult(true);
                 return responseSource.Task;
             },
-            static () => 0);
+            requestAbandoned: (request, _) => abandoned.TrySetResult(request));
         var hostTask = host.RunAsync(pipeName);
         var clock = new ManualTimerTimeProvider();
         using var client = new ServiceClient(
             pipeName,
             connectTimeout: TimeSpan.FromSeconds(5),
-            requestTimeout: TimeSpan.FromSeconds(10),
+            requestTimeout: waitWithoutDeadline ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(10),
             clock);
         using var cancellation = new CancellationTokenSource();
 
@@ -176,10 +185,19 @@ public sealed class ServiceClientDeadlineTests
             cancellation.Token);
         await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
+        if (waitWithoutDeadline)
+        {
+            clock.Advance(TimeSpan.FromSeconds(65));
+            Assert.False(sendTask.IsCompleted);
+        }
+
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => sendTask.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal("sheet.list",
+            (await abandoned.Task.WaitAsync(TimeSpan.FromSeconds(5))).Command);
+        Assert.False(responseSource.Task.IsCompleted);
         responseSource.TrySetResult(new ServiceResponse { Success = true });
         host.RequestShutdown();
         await hostTask.WaitAsync(TimeSpan.FromSeconds(5));

@@ -20,14 +20,19 @@ public sealed class FixtureProcessOwnershipTests(ITestOutputHelper output)
         {
             using var independent = ExcelBatch.CreateNewWorkbook(Path.Join(directory, "independent.xlsx"), isMacroEnabled: false);
             using var ownership = new OwnedExcelProcessScope();
-            using var owned = ExcelBatch.CreateNewWorkbook(Path.Join(directory, "owned.xlsx"), isMacroEnabled: false);
+            var owned = ExcelBatch.CreateNewWorkbook(Path.Join(directory, "owned.xlsx"), isMacroEnabled: false);
 
-            var error = Assert.Throws<Xunit.Sdk.TrueException>(() => ownership.AssertAllExited());
+            var operation = Record.Exception(() =>
+            {
+                var error = Assert.Throws<Xunit.Sdk.TrueException>(() => ownership.AssertAllExited());
 
-            Assert.Contains("survived shutdown", error.Message, StringComparison.Ordinal);
-            Assert.False(owned.IsExcelProcessAlive());
-            Assert.True(independent.IsExcelProcessAlive());
-            independent.Execute((context, _) => Assert.Equal("independent.xlsx", context.Book.Name));
+                Assert.Contains("survived shutdown", error.Message, StringComparison.Ordinal);
+                Assert.True(owned.IsExcelProcessAlive());
+                Assert.True(independent.IsExcelProcessAlive());
+                independent.Execute((context, _) => Assert.Equal("independent.xlsx", context.Book.Name));
+            });
+            var cleanup = Record.Exception(owned.Dispose);
+            Assert.All(new[] { operation, cleanup }, failure => Assert.Null(failure));
         }
         finally
         {

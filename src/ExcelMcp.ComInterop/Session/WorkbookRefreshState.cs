@@ -17,7 +17,21 @@ internal interface IExcelBatchRefreshState
 internal sealed class ExcelBusyException(string message, Exception? innerException = null)
     : InvalidOperationException(message, innerException)
 {
-    internal static void ThrowIfNotReady(WorkbookRefreshState state, string operation)
+    internal const string DialogGuidance =
+        "Excel is waiting for input in a dialog. Check the Excel window and ask the user to respond there. " +
+        "ExcelMcp does not identify the dialog type, answer, or dismiss it.";
+
+    internal static string GetDialogGuidance(IExcelBatchWindowControl? windowControl)
+    {
+        var details = windowControl?.DialogDetails;
+        var visibilityError = windowControl?.DialogVisibilityError;
+        return $"{DialogGuidance} " +
+            (string.IsNullOrWhiteSpace(details) ? "Readable dialog text is unavailable." : details) +
+            (visibilityError is null ? "" : $" {visibilityError}");
+    }
+
+    internal static void ThrowIfNotReady(
+        WorkbookRefreshState state, string operation, IExcelBatchWindowControl? windowControl = null)
     {
         if (state == WorkbookRefreshState.Ready)
         {
@@ -28,7 +42,7 @@ internal sealed class ExcelBusyException(string message, Exception? innerExcepti
         {
             WorkbookRefreshState.Refreshing => "An Excel data refresh is still running.",
             WorkbookRefreshState.Busy => "Excel is busy. A refresh or another Excel operation may still be running.",
-            WorkbookRefreshState.DialogOpen => "Excel has a dialog open. Check the Excel window for a prompt; it may require sign-in or other user input.",
+            WorkbookRefreshState.DialogOpen => GetDialogGuidance(windowControl),
             _ => "Excel's refresh state could not be confirmed."
         };
         throw new ExcelBusyException(

@@ -23,11 +23,11 @@ All ExcelMcp components are released together with a single version tag:
 
 When you run the release workflow, all components are released together:
 
-1. **CLI** → Standalone self-contained exe (`excelcli.exe`) shipped as:
+1. **CLI** → Standalone self-contained x64 and ARM64 executables (`excelcli.exe`) shipped as:
    - npm launcher and Windows runtime packages (primary distribution)
-   - ZIP file (primary distribution)
+   - x64 and ARM64 ZIP files (primary distribution)
    - NuGet package (secondary distribution)
-2. **MCP Server** → npm launcher and Windows runtime packages + standalone self-contained exe ZIP [primary] + NuGet pack [secondary]
+2. **MCP Server** → npm launcher and Windows runtime packages + standalone self-contained x64 and ARM64 exe ZIPs [primary] + NuGet pack [secondary]
 3. **VS Code Extension** → Self-contained Windows x64 and ARM64 VSIX packages (bundle the MCP executable and skill) → VS Code Marketplace
 4. **MCPB** → Claude Desktop bundle (`.mcpb` file)
 5. **GitHub Copilot Plugins** → `publish-plugins.yml` compares prepared output and
@@ -50,7 +50,9 @@ When you run the release workflow, all components are released together:
 | `@sbroenne/excelcli-win32-x64@{version}` | npm | npm registry (self-contained Windows CLI runtime) |
 | `@sbroenne/excelcli-win32-arm64@{version}` | npm | npm registry (self-contained native Windows ARM64 CLI runtime) |
 | `ExcelMcp-MCP-Server-{version}-windows.zip` | ZIP | GitHub Release (primary — contains `mcp-excel.exe`) |
+| `ExcelMcp-MCP-Server-{version}-windows-arm64.zip` | ZIP | GitHub Release (primary — contains native ARM64 `mcp-excel.exe`) |
 | `ExcelMcp-CLI-{version}-windows.zip` | ZIP | GitHub Release (primary — contains `excelcli.exe`) |
+| `ExcelMcp-CLI-{version}-windows-arm64.zip` | ZIP | GitHub Release (primary — contains native ARM64 `excelcli.exe`) |
 | `SHA256SUMS` | GNU-style SHA-256 manifest (`<hash>  <filename>`) | GitHub Release (covers every GitHub package asset, the metadata patch, and build-input record) |
 | `RELEASE-INPUTS.json` and `release-metadata.patch` | Build-input record and exact metadata patch | GitHub Release (workflow path/source commit, patch digest, final release commit/tag, and artifact digests; not a signed provenance attestation) |
 | `Sbroenne.ExcelMcp.CLI.{version}.nupkg` | NuGet | NuGet.org (secondary — contains `excelcli.exe`, requires .NET 10 runtime) |
@@ -102,15 +104,22 @@ The workflow will:
 
 The release shares prepared inputs instead of repeating builds in each package job:
 
-`Build-ReleasePackages.ps1` forwards to the internal SDK-native tool under
-`tools\ExcelMcp.Build`. The same typed preparation is available locally through
-`build.ps1 package`; it builds and verifies output but never publishes it.
-Standalone preparation commands preserve their arguments and share these
-operations rather than implementing separate packaging rules.
+`Build-ReleasePackages.ps1` directly coordinates the existing PowerShell
+package commands and standard SDK, npm, and VSIX tools. Actions and optional
+local troubleshooting use that same command; it builds and verifies output
+but never publishes it. No C# packaging bootstrap or options-JSON bridge is
+involved. Shared PowerShell selects tests and verifies their results; standard
+.NET and xUnit commands own compilation, test discovery, and execution.
+Complete local packaging is not a normal commit prerequisite.
+
+Hosted jobs validate generated skills before packaging. Extension source checks
+run before runtime publishing, and both VSIX targets reuse one compilation.
+Finished-package inspection, launcher checks, and native ARM64 checks remain
+separate requirements; source checks cannot establish their results.
 
 1. **version** → Calculates the version from the latest tag and dispatch input
 2. **prepare-release** → Compiles changesets once and uploads the exact metadata patch and notes
-3. **build-packages** → Applies that patch and calls `Build-ReleasePackages.ps1` for all NuGet, npm, runtime ZIP, VSIX, MCPB, and plugin outputs. ARM64 archives are checked here; `verify-arm64` then installs and executes both prepared npm distributions on native Windows ARM64 before tag creation.
+3. **build-packages** → Applies that patch and calls `Build-ReleasePackages.ps1` for all NuGet, npm, x64 and ARM64 runtime ZIP, VSIX, MCPB, and plugin outputs. ARM64 archives are checked here; `verify-arm64` then installs and executes both prepared npm distributions on native Windows ARM64 before tag creation.
 4. **create-tag** → Applies the same patch, checks that `main` has not advanced, commits only allowed release metadata, then tags that commit
 5. **create-release** → Prepares a draft, uploads and verifies all GitHub assets and checksums, then publishes it with prepared notes
 6. **publish** → Publishes npm and NuGet packages
@@ -125,7 +134,7 @@ Other destinations retain their documented recovery procedures.
 
 ### GitHub asset integrity and replay
 
-`scripts\Publish-GitHubRelease.ps1` requires all six prepared GitHub package
+`scripts\Publish-GitHubRelease.ps1` requires all eight prepared GitHub package
 assets before creating a draft. It includes the exact metadata patch and
 `RELEASE-INPUTS.json`, then calculates checksums for the complete payload.
 Only draft assets may be replaced. Before publishing, every expected GitHub
@@ -163,7 +172,7 @@ before enabling it or tightening release-writer permissions.
 
 After workflow completes:
 
-- [ ] GitHub Release created with all artifacts (MCP Server ZIP, CLI ZIP, `SHA256SUMS`, VSIX, MCPB, plugin ZIP)
+- [ ] GitHub Release created with both MCP Server ZIPs and both CLI ZIPs (x64 and ARM64), `SHA256SUMS`, VSIX, MCPB, and plugin ZIP
 - [ ] All six npm packages (MCP Server and CLI launchers plus their x64 and ARM64 Windows runtimes) are available at the release version
 - [ ] NuGet packages available on NuGet.org (may take 10-30 min for full propagation)
 - [ ] VS Code Marketplace updated (verify self-contained extension works without .NET)
@@ -198,10 +207,10 @@ The `publish-plugins.yml` workflow consumes prepared release plugins:
    commit/push/tag entirely, retaining the actual earlier plugin version/tag.
    Root-overlay changes are included; root-only publication does not update
    Awesome Copilot listings.
-6. **Listing updates are manual** — the guarded
-   [Awesome Copilot updater](../.github/workflows/docs/awesome-copilot-update-setup.md)
-   is never run by a release; maintainers run it after real changed-plugin
-   publication, so listing problems never affect release status.
+6. **Listing updates are manual** — maintainers
+   [edit Awesome Copilot listings](../.github/workflows/docs/publish-plugins-setup.md#awesome-copilot-listings-are-manual)
+   using actual published output commits after changed-plugin publication.
+   Listing problems never affect release status.
 
 Maintainers can also replay plugin publication for an existing release tag without cutting a new release:
 
@@ -287,15 +296,15 @@ The release workflow injects the correct version from the tag.
 4. **Artifact builds** consume that prepared changelog, so packaged VS Code and MCPB changelog files include the version being released.
 5. **After all builds pass**, the `create-tag` job regenerates the metadata using the same release date and verifies it byte-for-byte against the prepared artifact. It commits `CHANGELOG.md`, synchronized version metadata, and consumed `.changeset/*.md` deletions to `main` through the Git Data API, then points the release tag at that exact commit.
 
-Advertised tool and operation totals are generated from code by running
-`scripts/check-doc-counts.ps1 -Update` and reviewed in the same PR as the code.
-Strict CI rejects stale counts before merge. The command writes the canonical include file
-`doc-counts.json` (repo root) plus every managed headline claim across the
-repository. Release automation and the website never derive or restate these
-numbers themselves — they read `doc-counts.json` or the headlines it already
-wrote, both of which are always current on `main` by the time a release or a
-site build runs. Feature PRs update operation tables and per-category counts,
-but do not manually update repeated headline totals.
+Advertised tool and operation totals are validated by EXL030 during MCP
+compilation against the compiled Core manifest and documentation inputs.
+Authors update the canonical include `doc-counts.json` (repo root), affected
+headline claims, and canonical feature headings using the diagnostic's exact
+expected values, review them in the same PR as the code, then rebuild.
+There is no separate count updater. Release automation and the website consume
+those reviewed totals rather than independently deriving headline values.
+Compiler count validation does not replace compiled tool-surface behavior,
+prepared-skill identity tests, or release package validation.
 
 Root `package.json` and `.changeset/config.json` (using `@changesets/changelog-github` for PR-linked entries) exist solely to drive this tooling — they have no bearing on the actual MCP Server / CLI / VS Code Extension / MCPB version, which remains fully controlled by the `version_bump` / `custom_version` workflow inputs as described above.
 
@@ -368,10 +377,11 @@ Pass `-Architecture x64` (the default) or `-Architecture arm64` to both scripts.
 The executable's PE machine type must match the package architecture.
 Both launcher dependencies are stamped to the same release version.
 
-`Build-ReleasePackages.ps1` builds both npm architectures and bundles a matching
-native server in each VSIX target. It reuses the prepared ARM64 npm server for
-the ARM64 VSIX, or publishes it when only the extension is selected. Standalone
-ZIPs currently bundle x64 executables. MCPB contains metadata only and runs
+`Build-ReleasePackages.ps1` builds both npm architectures, standalone ZIPs, and
+VSIX targets with matching native servers. It reuses the prepared ARM64 npm
+server for the ARM64 VSIX, or publishes it when only the extension is selected.
+The x64 standalone ZIP names retain their existing filenames; ARM64 ZIPs end in
+`-windows-arm64.zip`. MCPB contains metadata only and runs
 `npx -y @sbroenne/mcp-server-excel@latest`; npm selects the runtime matching
 the Node.js process architecture at launch.
 All four npm runtime packages are published before either launcher.

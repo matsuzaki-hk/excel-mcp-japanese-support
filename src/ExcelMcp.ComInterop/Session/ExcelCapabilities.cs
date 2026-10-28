@@ -7,6 +7,12 @@ namespace Sbroenne.ExcelMcp.ComInterop.Session;
 /// </summary>
 public sealed class ExcelCapabilities
 {
+    internal static string AutoSaveWarning(bool? enabled) => enabled switch
+    {
+        true => "Excel AutoSave is enabled. Excel may save edits automatically, even without an explicit save. Closing without saving cannot undo changes already saved.",
+        false => "Excel AutoSave is off.",
+        null => "Excel AutoSave status is unavailable. Excel may save edits automatically if AutoSave is enabled."
+    };
     private readonly Func<bool> _probeFormula2;
     private bool? _supportsFormula2;
 
@@ -18,35 +24,20 @@ public sealed class ExcelCapabilities
     /// </summary>
     public bool SupportsFormula2 => _supportsFormula2 ??= _probeFormula2();
 
-    internal static bool ReadAutoSave(Func<bool> read)
+    internal static bool? ReadAutoSaveStatus(Func<bool> read)
     {
         try
         {
             return read();
         }
-        catch (COMException ex) when (IsAutoSaveUnavailable(ex))
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
-            return false;
+            return null;
         }
     }
 
-    internal static void DisableAutoSave(Action disable)
-    {
-        try
-        {
-            disable();
-        }
-        catch (COMException ex) when (IsAutoSaveUnavailable(ex))
-        {
-            // Older Excel has no AutoSave to disable.
-        }
-    }
-
-    private static bool IsAutoSaveUnavailable(COMException exception) => exception.HResult is
-        unchecked((int)0x80020003) or // DISP_E_MEMBERNOTFOUND
-        unchecked((int)0x80020006) or // DISP_E_UNKNOWNNAME
-        unchecked((int)0x80004001);   // E_NOTIMPL
-
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "The Formula2 getter alone may return Excel's generic error on older Excel, but only after the same cell's legacy Formula getter succeeds. Writes and other probe failures propagate.")]
     internal static bool ProbeFormula2(Func<object?> readFormula, Func<object?> readFormula2)
     {
         // Confirm the probe cell is readable before interpreting Excel's generic error

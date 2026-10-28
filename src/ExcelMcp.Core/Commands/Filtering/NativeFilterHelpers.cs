@@ -143,6 +143,8 @@ internal static class NativeFilterHelpers
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Criterion inspection reports unavailable state, original HResult and ReadError explicitly instead of inventing an empty criterion.")]
     private static FilterCriterion ReadCriterion(Func<object> getter)
     {
         object? native = null;
@@ -169,7 +171,7 @@ internal static class NativeFilterHelpers
     private static object? ReadValue(object? value)
     {
         if (value is Excel.Interior interior)
-            return Convert.ToInt32(interior.Color, CultureInfo.InvariantCulture);
+            return Convert.ToInt32((object)interior.Color, CultureInfo.InvariantCulture);
         if (value is Excel.Icon icon)
         {
             Excel.IconSet? parent = null;

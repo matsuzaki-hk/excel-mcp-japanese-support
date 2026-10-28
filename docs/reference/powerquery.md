@@ -35,13 +35,151 @@ Set explicit M column types for dates and relationship keys. Query refresh
 synchronizes its model load; refresh dependent PivotTables afterward.
 See [Data Model](datamodel.md).
 
+## Power Query tracing
+
+Create, load-to, update, and refresh results include `durationMs`, measured from
+submission to destination inspection (excluding optional remote M formatting).
+`rowsLoaded` reports verified rows without counting a worksheet/model load twice.
+`worksheetRowsLoaded` excludes headers and totals; `modelRowsLoaded` comes from
+Excel's model record count. Unavailable counts are omitted/null, not zero.
+If both destination counts disagree, inspect the separate counts; the combined
+count is unavailable. An explicit connection-only create/load-to reports zero
+loaded rows. Definition-only update does not claim a new row count.
+Refresh-all includes `queryMetrics` for successfully refreshed queries.
+These counts describe loaded rows, not a guarantee that every cell is error-free.
+
+Recognized wrong-credential errors use `Authentication` with guidance to check
+Excel Data Source Settings. Power BI/XMLA sources commonly need Organizational
+account rather than Windows credentials. Unsupported Analysis Services culture
+errors use `Culture` and suggest an explicit `Culture = "en-US"` option in
+`AnalysisServices.Database`. M code and saved credentials are never changed
+automatically. Saved credential types and per-source privacy levels are not
+listed: Excel's published automation interface does not expose them.
+
+Tracing is controlled by a setting for the current Windows user and does not
+belong to a workbook or session. Enable it with:
+
+```cli
+excelcli settings set-pq-tracing --enabled true
+```
+
+```mcp
+settings(action: 'set-pq-tracing', enabled: true)
+```
+
+Restart Excel for a tracing change to take effect. The setting stays as chosen
+until you change it; closing a workbook, session, or ExcelMCP service does not
+restore it. Any Excel process started while tracing is on may write trace files.
+
+Troubleshoot one workbook session at a time. There is no need to empty the
+trace folder: filter by the workbook session and refresh time instead. One
+Excel process can produce several files, including Power Query helper-process
+logs; the session filter matches the Excel process ID and start time, so a
+recycled process ID does not pull in earlier files.
+
+Use `trace: true` on Power Query `refresh` or `refresh-all` to attach a compact
+summary for that refresh. For existing traces, use `powerquery_trace_read` to list or summarize files:
+
+```mcp
+powerquery(action: 'refresh', query_name: 'SalesData', trace: true)
+powerquery_trace_read(action: 'summarize', workbook_session_id: sessionId)
+```
+
+```cli
+excelcli powerquery refresh --session $session --query-name SalesData --trace
+excelcli powerquerytrace summarize --workbook-session-id $session --since 15m
+```
+
+If optional trace collection fails, the refresh outcome is preserved.
+`traceSummary.success` is false and `traceSummary.errorMessage` explains the
+trace-read failure; `traceNote` distinguishes that failure from the refresh.
+Do not repeat a completed refresh merely to collect traces.
+
+Summaries hide native query text and exception messages by default. Set
+`include_query_text: true` (CLI: `--include-query-text`) only when those details
+are needed; they can contain sensitive information. Trace files are stored by
+Excel under the current user's local application data folder. They may contain
+source names, query text, and error details. Manage or remove these files
+outside ExcelMcp. Use the returned `traceCursor` as `since` on the next summary
+to inspect only newer entries.
+
+The global setting can also be read with `settings_read` action
+`get-pq-tracing` and changed with `settings` action `set-pq-tracing`; CLI
+commands are `excelcli settings get-pq-tracing` and
+`excelcli settings set-pq-tracing --enabled true`.
+
+### Native database query approval
+
+Use `settings_read` action `get-native-query-approval` (CLI:
+`excelcli settings get-native-query-approval`) to inspect whether Power Query
+requires approval before running new native database queries. The result says
+whether the setting was explicitly stored and includes the settings file path.
+If the setting is absent, Excel's default is reported: approval is required.
+
+The setting is global for the current Windows user and affects every workbook.
+Disabling approval allows new native database queries to run without that
+approval; it is not a required automation setup. The setting change requires
+explicit confirmation and all Excel processes must be closed. ExcelMcp does not
+stop Excel. Restart Excel after a change.
+
+Only the observed Office 16.0 Power Query settings archive is supported:
+`%LOCALAPPDATA%\Microsoft\Office\16.0\PowerQuery\User.zip`. This file format
+is not a documented Excel automation API, and the setting mapping has only
+been verified for the Office 16.0 installation under test. Missing archives,
+ambiguous entries, unsupported values or structures, and read/write/verification
+failures are reported as errors rather than guessed.
+
+Before a change, ExcelMcp creates a timestamped `.bak` archive beside
+`User.zip` and returns its path. Keep that backup if recovery may be needed.
+With Excel closed, use Excel's Data > Get Data > Query Options > Global >
+Security page to inspect or restore the option manually; this is also the
+manual alternative to changing it through ExcelMcp.
+
+## Workbook privacy setting
+
+Use `get-privacy-settings` to read this workbook's Power Query privacy behavior
+and `set-privacy-settings` to change it. Set `ignorePrivacyLevels` (CLI flag:
+`--ignore-privacy-levels`; MCP input: `ignore_privacy_levels`; batch JSON key:
+`ignorePrivacyLevels`) to `true` only when authorized. Ignoring privacy levels
+can let data from different sources be combined and sent between them. The
+response reports the configured workbook setting, not a guarantee of effective
+behavior; Excel's global privacy option may override it.
+
+```mcp
+powerquery_read(action: 'get-privacy-settings', workbook_session_id: sessionId)
+```
+
+```mcp
+powerquery(action: 'set-privacy-settings', workbook_session_id: sessionId, ignore_privacy_levels: true)
+```
+
+```cli
+excelcli powerquery set-privacy-settings --session $sessionId --ignore-privacy-levels true
+```
+
+```json
+{"command":"powerquery.set-privacy-settings","args":{"ignorePrivacyLevels":true}}
+```
+
+This is a workbook-level setting. It is stored when the workbook is saved, and
+Excel honors it for users whose global privacy choice is the default
+“Combine data according to each file's Privacy Level settings.”
+
+Formula.Firewall failures are reported with
+`errorCategory: "PrivacyFirewall"` and point to
+`powerquery set-privacy-settings --ignore-privacy-levels true` (MCP action
+`set-privacy-settings` with `ignore_privacy_levels: true`). Other privacy
+failures keep the `Privacy` category.
+
 ## Recovering a failed create
 
 Create adds the query before loading; a load failure can leave the query and
 load objects behind. Repeating create then fails with "already exists".
-Create and update report recognized privacy/firewall failures with
-`errorCategory: "Privacy"` and `exceptionType: "PowerQueryCommandException"`,
-like evaluate and refresh. The error message describes the retained changes.
+Create and update report recognized Formula.Firewall failures with
+`errorCategory: "PrivacyFirewall"` and
+`exceptionType: "PowerQueryCommandException"`, like evaluate and refresh.
+Other privacy-related errors use `errorCategory: "Privacy"`. The error message
+describes the retained changes.
 An update can save the replacement M code before its refresh fails: the
 stored definition then differs from the data still displayed.
 
@@ -104,8 +242,9 @@ error message and category) and keeps refreshing the rest. The result then has
 same category, the result's top-level `errorCategory` repeats it. This is not a
 transaction:
 queries listed in `refreshedQueries` keep their new data. Engine errors are
-reported, not hidden or converted into success. A timeout, cancellation (by the
-caller or by Excel), or lost Excel connection stops the whole run instead.
+reported, not hidden or converted into success. An Excel execution cancellation
+or lost connection stops the run. A caller deadline or cancellation ends only
+the caller's wait: the outstanding run can continue, and its session is retained.
 
 The separate `workbook refresh-all` action matches Excel's workbook-wide
 refresh behavior: it refreshes Power Query loads, other workbook data
@@ -145,6 +284,12 @@ M references; see [M identifiers and query chaining](m-code-syntax.md).
 Remote formatting sends M code to an external service and needs consent.
 It is not a workaround for query-engine errors.
 
-Session and refresh waits serve different purposes. Use current CLI/MCP help
-for the operation's limits, then inspect surviving objects after timeout.
+Create, load, refresh, and update-with-refresh use a 30-minute data-operation
+wait by default. Definition-only updates retain the ordinary session wait.
+An expired wait does not stop Excel or undo partially applied changes. The
+session and its workbook remain owned, Excel is revealed when possible, and
+session listings report pending work and late completion or failure. Further
+work is refused until the original callback and cleanup return and Excel is
+ready. Use current CLI/MCP help for overrides and inspect surviving objects
+after timeout.
 Extending a wait is not a fix for a query with no refreshable destination.

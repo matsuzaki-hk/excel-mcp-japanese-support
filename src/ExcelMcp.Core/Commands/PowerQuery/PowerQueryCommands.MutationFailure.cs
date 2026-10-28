@@ -15,6 +15,8 @@ public partial class PowerQueryCommands
 
         for (Exception? current = exception; current != null; current = current.InnerException)
         {
+            if (current is AggregateException aggregate)
+                return aggregate.InnerExceptions.All(CanReportMutationFailure);
             if (current is TimeoutException or OperationCanceledException or InvalidComObjectException
                 or OperationFailureException { ErrorCategory: OperationFailureCategory.Cancelled })
                 return false;
@@ -23,17 +25,20 @@ public partial class PowerQueryCommands
         return true;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Failure reporting boundary: the returned exception retains the mutation error and records any secondary state-inspection error verbatim.")]
     internal static PowerQueryCommandException CreateMutationFailure(
         Exception cause,
         string queryName,
         bool queryCreated,
-        Action<PowerQueryPartialState> inspectState)
+        Action<PowerQueryPartialState> inspectState,
+        bool loadDestinationChanged = false)
     {
         var state = new PowerQueryPartialState
         {
             QueryName = queryName,
             QueryCreated = queryCreated ? true : null,
-            MCodeUpdated = queryCreated ? null : true
+            MCodeUpdated = queryCreated || loadDestinationChanged ? null : true
         };
         try
         {
@@ -44,7 +49,9 @@ public partial class PowerQueryCommands
             state.StateInspectionError = $"{inspectionError.GetType().Name}: {inspectionError.Message}";
         }
 
-        var mutation = queryCreated
+        var mutation = loadDestinationChanged
+            ? $"Load destinations for query '{queryName}' were being changed, but loading failed"
+            : queryCreated
             ? $"Query '{queryName}' was created, but loading failed"
             : $"M code for query '{queryName}' was updated, but refreshing failed";
         var remaining = state.QueryExists switch
@@ -69,6 +76,7 @@ public partial class PowerQueryCommands
         {
             category = classified!.ErrorCategory;
         }
+        message = AddPowerQueryRemediation(message, category);
         return new PowerQueryCommandException(message, category, cause, state);
     }
 

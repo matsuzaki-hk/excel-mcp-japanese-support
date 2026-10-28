@@ -1,13 +1,10 @@
 using System.IO.Pipelines;
 using System.Runtime.InteropServices;
-using Microsoft.ApplicationInsights;
-using Microsoft.ApplicationInsights.WorkerService;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
-using OpenTelemetry.Metrics;
 using Sbroenne.ExcelMcp.McpServer.Telemetry;
 
 namespace Sbroenne.ExcelMcp.McpServer;
@@ -21,6 +18,8 @@ public class Program
     private static int _globalExceptionHandlersRegistered;
     public static Task<int> Main(string[] args) => RunAsync(args);
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Top-level MCP host failure boundary records the unhandled transport/SDK exception and returns process exit code 1, without writing non-JSON-RPC output to stdout.")]
     internal static async Task<int> RunAsync(
         string[] args,
         Pipe? testInputPipe = null,
@@ -63,10 +62,10 @@ public class Program
             .AddEnvironmentVariables()
             .AddCommandLine(args);
 
-        // Configure Application Insights
+        // Reporting setup runs independently of host startup.
         try
         {
-            ConfigureTelemetry(builder);
+            ExcelMcpTelemetry.Start(TelemetrySettings.Read(ExcelMcpTelemetry.GetConnectionString()));
         }
         catch (InvalidOperationException ex)
         {
@@ -74,9 +73,6 @@ public class Program
             return 1;
         }
 
-        // Application Insights registers an ILogger provider that can forward framework
-        // messages containing host paths or client names. Configure console logging last
-        // so ClearProviders removes it while leaving explicit usage telemetry enabled.
         ConfigureStdioLogging(builder.Logging);
 
         builder.Services.AddSingleton(services => new ServiceBridge.ServiceBridge(
@@ -95,19 +91,24 @@ public class Program
 
                 options.ServerInstructions = """
                     Automates desktop Microsoft Excel on Windows.
-                    Use file_read list to find the intended workbook; do not guess paths or choose an unrelated session.
-                    Open/create and file_read list entries return workbook_session_id. Pass it as workbook_session_id to session-based tools, and only supply parameters for the chosen action.
+                    Use file_read discover to find an already-open workbook, then file attach with its open_workbook_id; attach connects without reopening the workbook or changing unsaved state. Discovery includes workbooks already connected to this host and returns their sessionId. Discovery can be incomplete; check its errors before concluding a workbook is absent.
+                    Open/create/attach and file_read list entries return workbook_session_id. Pass it as workbook_session_id to session-based tools, and only supply parameters for the chosen action.
                     Calls in one session execute serially, but concurrent requests and responses have no guaranteed order.
                     Await each dependent call before the next; different sessions can run independently.
-                    A workbook must not be open in another Excel instance. Reuse known visibility preferences;
+                    Do not open a workbook that is already open in Excel when it can be attached. A workbook must not be open in another Excel instance for a new open session. Reuse known visibility preferences;
                     preserve existing visibility unless a change is requested. New sessions default to hidden.
                     Leaving a workbook open means retaining its session, not showing a hidden window.
                     Do not set show:true just to leave a workbook open without a separate visibility request or known preference.
                     Use worksheet_read list to inspect sheets. Close only after active operations finish (canClose:true). Set save:true to keep changes;
                     close defaults to save:false and discards edits. Confirm before closing a visible window unless authorized.
-                    If file_read list reports excelState:dialogOpen, ask the user to check Excel for a prompt; the dialog type is not identified.
+                    Confirmed blocking dialogs automatically reveal Excel. If file_read list reports excelState:dialogOpen, ask the user to check Excel and respond there.
+                    Readable dialog text is included automatically in session blockingMessage and timeout errors; partial or unavailable reads are reported. Input values are not read, and dialogs are not classified, answered, or dismissed. A pending operation is not a completed or failed operation.
                     The server does not request confirmation through MCP elicitation; the client must obtain any needed consent.
-                    Normal shutdown attempts to save remaining sessions. Crashes, timeouts, and forced cleanup may lose edits.
+                    Normal file opens disable VBA macros, including .xlsm files. file_read notices reports known restrictions, not every notification bar.
+                    Enable editing or data connections only after workbook-specific approval and approval that Excel may remember trust (file enable-editing or enable-connections, approved:true, allow_remembered_trust:true).
+                    Enabling macros requires separate approval to reopen the saved workbook (file enable-macros, approved:true, allow_reopen:true); opening event code can run. Unsaved changes and attached workbooks are not reopened. These flags are caller-supplied approval, not a confirmation dialog, and do not bypass company restrictions.
+                    Normal shutdown closes saved workbooks opened by this service and leaves unsaved ones open and visible without saving or discarding. Attached workbooks stay untouched. Open and attach preserve AutoSave; when enabled, Excel may save edits automatically. Use workbook set-auto-save to change it explicitly; enabling may save pending edits.
+                    Crashes, timeouts, and forced cleanup may lose edits.
                     Cancellation is not undo: inspect file_read list before continuing, and do not blindly retry a change.
                     Range content writes/copies reject occupied destinations by default. Use overwrite_policy:'allow'
                     when the request authorizes replacement; never automatically retry a rejected write with allow.
@@ -144,10 +145,6 @@ public class Program
 
         using var host = builder.Build();
 
-        // Initialize telemetry client for static access
-        InitializeTelemetryClient(host.Services);
-        var localTelemetry = host.Services.GetService<LocalTelemetry>();
-
         // Note: Update checks are handled by ExcelMCP Service (shown via Windows notification)
         // to avoid duplicate notifications when running in unified package mode
 
@@ -172,7 +169,6 @@ public class Program
         {
             // Track MCP SDK/transport errors (protocol errors, serialization errors, etc.)
             ExcelMcpTelemetry.TrackUnhandledException(ex, "McpServer.RunAsync");
-            ExcelMcpTelemetry.Flush(); // Ensure telemetry is sent before exit
 
             // Return exit code 1 for fatal errors (FR-024, SC-015a)
             // Do NOT re-throw - deterministic exit code is more important for callers
@@ -182,8 +178,7 @@ public class Program
         finally
         {
             stdinMonitor?.Dispose();
-            localTelemetry?.Flush();
-            ExcelMcpTelemetry.SetLocalTelemetry(null);
+            ExcelMcpTelemetry.SignalExit();
         }
     }
 
@@ -199,122 +194,8 @@ public class Program
         });
         logging.AddConsoleFormatter<StdioConsoleFormatter, ConsoleFormatterOptions>();
         logging.SetMinimumLevel(LogLevel.Warning);
-        logging.AddFilter<ConsoleLoggerProvider>("Microsoft.ApplicationInsights", LogLevel.Warning);
     }
 
-    /// <summary>
-    /// Initializes the static TelemetryClient from DI container.
-    /// </summary>
-    private static void InitializeTelemetryClient(IServiceProvider services)
-    {
-        ExcelMcpTelemetry.InitializeUserIdentity();
-        ExcelMcpTelemetry.SetLocalTelemetry(services.GetService<LocalTelemetry>());
-        // Resolve TelemetryClient from DI and store for static access
-        // Worker Service SDK manages the TelemetryClient lifecycle including flush on shutdown
-        var telemetryClient = services.GetService<TelemetryClient>();
-        if (telemetryClient != null)
-        {
-            ExcelMcpTelemetry.SetTelemetryClient(telemetryClient);
-        }
-    }
-
-    /// <summary>
-    /// Configures Application Insights Worker Service SDK for telemetry.
-    /// Uses AddApplicationInsightsTelemetryWorkerService() for proper host integration.
-    /// Enables Users/Sessions/Funnels/User Flows analytics in Azure Portal.
-    /// </summary>
-    internal static void ConfigureTelemetry(HostApplicationBuilder builder, TelemetrySettings? settings = null)
-    {
-        settings ??= TelemetrySettings.Read(ExcelMcpTelemetry.GetConnectionString());
-        if (settings.Mode == TelemetryMode.Off)
-        {
-            return; // No connection string available (local dev build)
-        }
-        if (settings.Mode == TelemetryMode.Local)
-        {
-            builder.Services.AddSingleton(_ => new LocalTelemetry(settings, "ExcelMcp.McpServer"));
-            return;
-        }
-
-        // Configure Application Insights Worker Service SDK
-        // This provides:
-        // - Proper DI integration with IHostApplicationLifetime
-        // - Automatic dependency tracking
-        // - Automatic performance counter collection (where available)
-        // - Proper telemetry channel with ServerTelemetryChannel (retries, local storage)
-        // - Automatic flush on host shutdown
-        var aiOptions = new ApplicationInsightsServiceOptions
-        {
-            // Set connection string if available
-            ConnectionString = settings.ConnectionString,
-
-            // Disable features not needed for MCP server (reduces overhead and AppMetrics ingestion)
-            EnableQuickPulseMetricStream = false,  // Live Metrics not needed for CLI tool
-            EnablePerformanceCounterCollectionModule = false,  // Perf counters not useful for short-lived CLI
-
-            // Disable dependency tracking for HTTP calls
-            EnableDependencyTrackingTelemetryModule = false,
-        };
-
-        builder.Services.AddApplicationInsightsTelemetryWorkerService(aiOptions);
-        // Duration metrics read resource identity rather than per-record cloud context.
-        builder.Services.AddOpenTelemetry()
-            .ConfigureResource(ExcelMcpTelemetry.ConfigureResource);
-
-        // NOTE: Microsoft.ApplicationInsights.WorkerService 3.x is a full OpenTelemetry-based rewrite
-        // of the SDK - it no longer has a PerformanceCollectorModule type, an ITelemetryModule DI
-        // registration to remove, or a heartbeat feature (EnableHeartbeat/EnableHeartbeatTelemetryModule
-        // do not exist on ApplicationInsightsServiceOptions in this version, confirmed by inspecting the
-        // 3.1.2 package - no such members or types are present). Despite that, HeartbeatState rows and
-        // AppPerformanceCounters ("Requests/Sec", "Private Bytes", "% Processor Time", etc.) are still
-        // observed in AppMetrics/AppPerformanceCounters (likely from an internal OTel-to-classic-schema
-        // metric mapping with no public opt-out). There is currently no known in-process way to disable
-        // this in 3.1.2, so the dropNoisyMetricsDcr workspace transform in
-        // infrastructure/azure/appinsights-resources.bicep is the sole, reliable mechanism suppressing
-        // these two sources server-side before ingestion is billed.
-
-        // AddApplicationInsightsTelemetryWorkerService() unconditionally subscribes to the .NET 8+
-        // built-in "System.Net.Http" meter (via UseApplicationInsightsTelemetry -> AddHttpClientMetrics),
-        // with no opt-out exposed on ApplicationInsightsServiceOptions. ExcelMcp.McpServer makes at most
-        // one lightweight HttpClient call per process (NuGetVersionChecker), so these connection-pool
-        // gauges/histograms are pure noise - they were driving ~96% of billed AppMetrics ingestion.
-        // ConfigureOpenTelemetryMeterProvider appends to the same MeterProviderBuilder already
-        // registered above, so this reliably drops the instruments regardless of registration order.
-        builder.Services.ConfigureOpenTelemetryMeterProvider(ConfigureDroppedHttpClientMetrics);
-
-        // Application Insights 3.x no longer exposes the classic telemetry initializer abstraction.
-        // ExcelMcpTelemetry enriches each telemetry item with user/session/version context before sending.
-    }
-
-    /// <summary>
-    /// Names of the noisy .NET built-in HttpClient meter instruments that ExcelMcp.McpServer never
-    /// consumes. See <see cref="ConfigureTelemetry"/> for why these must be dropped explicitly.
-    /// </summary>
-    private static readonly string[] DroppedHttpClientMetricNames =
-    [
-        "http.client.open_connections",
-        "http.client.active_requests",
-        "http.client.connection.duration",
-        "http.client.request.time_in_queue",
-        "http.client.request.duration",
-    ];
-
-    /// <summary>
-    /// Adds metric Views that drop the noisy HttpClient instruments before export/aggregation.
-    /// Exposed internally (rather than inlined) so it can be exercised directly in unit tests
-    /// without needing a full Application Insights host pipeline.
-    /// </summary>
-    internal static void ConfigureDroppedHttpClientMetrics(MeterProviderBuilder metrics)
-    {
-        foreach (var name in DroppedHttpClientMetricNames)
-        {
-            metrics.AddView(name, MetricStreamConfiguration.Drop);
-        }
-    }
-
-    /// <summary>
-    /// Registers global exception handlers to capture unhandled exceptions.
-    /// </summary>
     private static void RegisterGlobalExceptionHandlers()
     {
         if (Interlocked.Exchange(ref _globalExceptionHandlersRegistered, 1) != 0)
@@ -342,6 +223,8 @@ public class Program
     /// <summary>
     /// Shows help information.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("MicrosoftCodeAnalysisCorrectness", "RS0030",
+        Justification = "Explicit --help mode writes its requested command output and exits before the stdio transport starts; this method is never called by server startup.")]
     private static void ShowHelp() => Console.WriteLine(BuildHelpText());
 
     /// <summary>
@@ -388,6 +271,8 @@ public class Program
     /// <summary>
     /// Shows version information and checks for updates.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("MicrosoftCodeAnalysisCorrectness", "RS0030",
+        Justification = "Explicit --version mode writes its requested command output and exits before the stdio transport starts; this method is never called by server startup.")]
     private static async Task ShowVersionAsync()
     {
         var currentVersion = Infrastructure.McpServerVersionChecker.GetCurrentVersion();

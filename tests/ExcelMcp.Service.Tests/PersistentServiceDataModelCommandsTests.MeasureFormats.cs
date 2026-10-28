@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.ComInterop;
+using Sbroenne.ExcelMcp.Core.Commands;
 using Xunit;
 using Excel = Microsoft.Office.Interop.Excel;
 
@@ -6,6 +8,59 @@ namespace Sbroenne.ExcelMcp.Service.Tests;
 
 public partial class PersistentServiceDataModelCommandsTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void WriteMeasure_ReleasesAcquiredFormatOnSuccessAndFailure(bool update, bool invalidFormula)
+    {
+        var name = $"FormatOwnership_{Guid.NewGuid():N}";
+        if (update)
+            RequireSuccess(CreateMeasure("SalesTable", name, "1234.5", "General"));
+
+        object? acquiredFormat = null;
+        DataModelCommands.MeasureFormatAcquiredForTests = format => acquiredFormat = format;
+        try
+        {
+            var formula = invalidFormula ? "THIS IS INVALID DAX" : "1234.5";
+            var failure = Record.Exception(() =>
+            {
+                if (update)
+                    RequireSuccess(_dataModelCommands.UpdateMeasure(
+                        _fixture.BatchToken, name, daxFormula: formula, formatType: "Decimal"));
+                else
+                    RequireSuccess(CreateMeasure("SalesTable", name, formula, "Decimal"));
+            });
+            if (invalidFormula)
+                Assert.NotNull(failure);
+            else if (failure is not null)
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+
+            Assert.NotNull(acquiredFormat);
+            _fixture.ExecuteRawVerification((_, _) =>
+                Assert.Throws<InvalidComObjectException>(() =>
+                    ((Excel.ModelFormatDecimalNumber)acquiredFormat).DecimalPlaces));
+
+            if (update || !invalidFormula)
+            {
+                var read = RequireSuccess(_dataModelCommands.Read(_fixture.BatchToken, name));
+                Assert.Equal("1234.5", read.DaxFormula);
+                Assert.Equal(invalidFormula ? "General" : "Decimal", read.FormatInfo!.Type);
+            }
+            else
+            {
+                var measures = RequireSuccess(_dataModelCommands.ListMeasures(_fixture.BatchToken));
+                Assert.DoesNotContain(measures.Measures, measure => measure.Name == name);
+            }
+        }
+        finally
+        {
+            DataModelCommands.MeasureFormatAcquiredForTests = null;
+            _fixture.ExecuteRawVerification((_, _) => ComUtilities.Release(ref acquiredFormat));
+        }
+    }
+
     [Theory]
     [InlineData("General", false)]
     [InlineData("Currency", false)]
@@ -99,21 +154,6 @@ public partial class PersistentServiceDataModelCommandsTests
             _fixture.BatchToken, $"EVALUATE ROW(\"Result\", [{name}])"));
         Assert.Equal(1234.5, Convert.ToDouble(Assert.Single(Assert.Single(evaluated.Rows)),
             System.Globalization.CultureInfo.InvariantCulture));
-    }
-
-    [Theory]
-    [InlineData("General")]
-    [InlineData("Currency")]
-    [InlineData("Decimal")]
-    [InlineData("Percentage")]
-    [InlineData("WholeNumber")]
-    public void CreateMeasure_ExplicitSupportedFormat_ReadsBackRequestedType(string format)
-    {
-        var name = $"RequestedFormat_{Guid.NewGuid():N}";
-        RequireSuccess(CreateMeasure("SalesTable", name, "SUM(SalesTable[Amount])", format));
-        var read = RequireSuccess(_dataModelCommands.Read(_fixture.BatchToken, name));
-        Assert.NotNull(read.FormatInfo);
-        Assert.Equal(format, read.FormatInfo.Type);
     }
 
     [Fact]

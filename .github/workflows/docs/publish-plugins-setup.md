@@ -12,9 +12,8 @@ complete skills, not bundled runtimes. They use the public npm packages through
 
 Keep the existing `PLUGINS_REPO_TOKEN` repository secret. It needs contents-write
 access to `sbroenne/mcp-server-excel-plugins`; a suitably scoped PAT or GitHub App
-token is sufficient for publication. Awesome Copilot listing updates are a
-separate manual workflow with their own credentials; publication never calls it
-or forwards those credentials.
+token is sufficient for publication. Awesome Copilot listings are edited manually;
+publication does not update them.
 Create the credential outside the workflow and store it with:
 
 ```powershell
@@ -120,16 +119,28 @@ downgrades are failures, not a no-change outcome.
 
 Neither `release.yml` nor `publish-plugins.yml` updates Awesome Copilot
 listings. A listing problem can therefore never change the release or plugin
-publication result. When `handoff` is true, the step summary names the
-`published_tag` to use; a maintainer then runs `update-awesome-copilot.lock.yml`
-manually (preview first). See [Awesome Copilot setup](awesome-copilot-update-setup.md).
+publication result. When `handoff` is true, the step summary names the actual
+`published_tag` and `published_commit` in `sbroenne/mcp-server-excel-plugins`.
+
+1. Inspect that immutable output commit and the changed plugin directories.
+2. Edit the corresponding plugin listings in `github/awesome-copilot` manually.
+   Keep their source paths and pin them to the actual output commit, not a
+   source-repository commit or an unpublished product tag.
+3. Review the listing diff and open a normal upstream pull request. Check for an
+   existing listing PR before creating another.
+
+The automatic listing updater has been removed. Maintainers may separately
+retire its unused credential and configuration; this source change does not
+modify repository secrets, variables or permissions.
 
 ## Manual repair
 
-Current skill and plugin build commands forward to the internal SDK-native
-preparation tool. `EXCELMCP_BUILD_ROOT` can locate current tooling while an
-explicit source checkout remains the package input; it must not replace the
-requested tagged content. Preparation and publication remain separate.
+Current skill and plugin build commands run directly in PowerShell, with no
+C# packaging bootstrap. They use the source checkout containing the invoked
+script. Exact-release repair still consumes the verified prepared release
+payload or the explicitly requested tagged source, not current untagged content.
+Preparation and publication remain separate. PR/release jobs validate generated
+skills early; publication also validates downloaded or recovered skills.
 
 With publication authorization, rerun an existing release:
 
@@ -157,7 +168,7 @@ An existing immutable tag is never rewritten. A repair can update publication
 `main`, but `published_commit` still describes the old immutable tag. Repairs of
 existing tags do not automatically hand off a different `main` commit as that
 tag. Repairing publication and catching up a listing are distinct tasks:
-the updater accepts an **existing published tag**, not every product tag.
+manual listing updates must use an **existing published tag**, not every product tag.
 The next automatic release also compares its candidate with that retained tag,
 not only repaired `main`. If a content-changing repair is already present on
 `main`, a later otherwise-version-only release creates a new immutable plugin
@@ -166,6 +177,58 @@ computed against the old immutable tag; destination staging still uses `HEAD`.
 Restoring `main` to content already distributed by the retained tag does not
 trigger a plugin listing update. Invalid immutable baseline content fails
 visibly rather than allowing a false no-change result.
+
+### v2.5.0 checkout failure
+
+Release run `39304106786`, plugin job `118243153092`, checked out source commit
+`655d82dc2f43b492de9e32bb6ffca3af28a97860` for `v2.5.0`. The logged
+`d4fa6e9fce2acbb66c67b411ce21370f73ccb8b5` was the output repository's existing
+commit, not the source release commit. Publication stopped at the source
+checkout guard, before changing the output repository.
+
+The old error combined an unexpected source commit and uncommitted source
+changes without reporting either value. The job log therefore does not establish
+what caused the rejection. Fresh local checkouts of this exact release passed
+the guard, including with the job's Git `2.56.0.windows.2`. Do not assume a
+credentials or line-ending problem, reset the source, or disable the guard.
+The guard now reports an unexpected checkout commit separately from Git's
+changed-path list, without printing file contents or credentials.
+
+An authorized manual repair on unchanged `main`, run `39310269423`, repeated
+the original rejection. A subsequent authorized exact-release repair using the
+diagnostic branch, run `39310607520`, succeeded with the split checks unchanged
+in strictness. It published output commit
+`974bd11c9c3d87263cc5887078bbcbf94ab05f09` and immutable tag `v2.5.0`, with
+both marketplace plugin versions set to `2.5.0`. The reason the original
+combined expression rejected the hosted checkout remains unproven; no
+source-changing cause was established.
+
+The v2.5.0 plugin repair is complete. Do not repeat it or the other release
+jobs just to test these diagnostics. If a future repair is necessary, obtain
+separate publication authorization and use the plugin-only workflow with an
+existing release tag. For example, the exact-v2.5.0 command is:
+
+```powershell
+gh workflow run publish-plugins.yml --ref main -f release_tag=v2.5.0
+```
+
+This starts a new manual run, not a rerun of the original release jobs. After
+the diagnostic change is merged, it uses the updated publication guard from
+`main`, resolves the existing `v2.5.0` source tag, and
+downloads only that release's `excel-plugins-v2.5.0.zip` and `SHA256SUMS`.
+The recorded payload checksum is
+`7efd2a67892e5467adfa20e2f33f6a06674be3136e183eaf557d7c32b7a09bb6`;
+the workflow must still verify the downloaded checksum entry itself.
+It does not republish GitHub release assets, npm, NuGet, VS Code or the MCP
+registry, and does not rewrite existing tags. No new product release is needed
+for this plugin repair.
+
+Inspect the new job's source commit and result. If it rejects the checkout,
+retain the reported commit/changed paths and stop: fix the identified cause in
+the source repository before another authorized attempt. If it succeeds, verify
+the reported output tag/commit and plugin contents in the output repository.
+An Awesome Copilot listing update remains a separate, explicitly authorized
+operation.
 
 ## Maintenance and updates
 

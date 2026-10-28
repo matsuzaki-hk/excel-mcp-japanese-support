@@ -1,11 +1,17 @@
 using System.Text.Json.Serialization;
-using Sbroenne.ExcelMcp.Core.Models;
+using Sbroenne.ExcelMcp.ComInterop.Session;
 
 namespace Sbroenne.ExcelMcp.McpServer.Tools;
 
 internal sealed class FileToolOutputSchema
 {
     public bool Success { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorkbookNoticeStatus? Notices { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorkbookSecurityResult? Security { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ErrorMessage { get; set; }
@@ -37,69 +43,47 @@ internal sealed class FileToolOutputSchema
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? RequiresVisibleSession { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Complete { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<OpenWorkbookInfo>? Workbooks { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<WorkbookDiscoveryError>? Errors { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AutoSaveOn { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Warning { get; set; }
 }
 
 internal sealed class FileSessionOutputSchema
 {
     [JsonPropertyName("workbook_session_id")]
     public string SessionId { get; set; } = string.Empty;
-    public string FilePath { get; set; } = string.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FilePath { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WorkbookName { get; set; }
+    public bool IsAttached { get; set; }
     public bool IsExcelVisible { get; set; }
     public int ActiveOperations { get; set; }
+    public bool OperationPending { get; set; }
     public bool CanClose { get; set; }
     public string ExcelState { get; set; } = string.Empty;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Sbroenne.ExcelMcp.ComInterop.Session.ExcelOperationStatus? Operation { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? BlockingReason { get; set; }
-}
-
-internal sealed class WorksheetToolOutputSchema
-{
-    [JsonPropertyName("workbook_session_id")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? SessionId { get; set; }
-
-    public bool Success { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ErrorMessage { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? FilePath { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Action { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Message { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<WorksheetInfo>? Worksheets { get; set; }
-}
-
-internal sealed class ScreenshotToolOutputSchema
-{
-    [JsonPropertyName("workbook_session_id")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? SessionId { get; set; }
-
-    public bool Success { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ErrorMessage { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Message { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? SheetName { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? RangeAddress { get; set; }
-
-    public int Width { get; set; }
-
-    public int Height { get; set; }
-
-    public string MimeType { get; set; } = string.Empty;
+    public string? BlockingMessage { get; set; }
 }

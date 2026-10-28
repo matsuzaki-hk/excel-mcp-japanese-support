@@ -6,7 +6,7 @@ This document outlines how the Excel MCP Server and Excel CLI are distributed as
 
 ExcelMcp is published as **two complementary plugins** in the GitHub Copilot plugin marketplace:
 
-- **`excel-mcp`** — MCP Server with 60 tools across 31 feature areas (412 operations) for conversational AI (Claude Desktop, Copilot chat)
+- **`excel-mcp`** — MCP Server with 63 tools across 33 feature areas (429 operations) for conversational AI (Claude Desktop, Copilot chat)
 - **`excel-cli`** — CLI-only skill for coding agents (token-efficient, `--help` discoverable)
 
 Both plugins are maintained in a separate published repository and published
@@ -86,7 +86,7 @@ do not need to move; avoid duplicate installations of the same plugin.
 
 ### Excel MCP Plugin
 
-Provides the full MCP Server with 60 tools across 31 feature areas (412 operations) for conversational AI:
+Provides the full MCP Server with 63 tools across 33 feature areas (429 operations) for conversational AI:
 
 ```powershell
 copilot plugin install excel-mcp@awesome-copilot
@@ -129,14 +129,13 @@ maintenance is manual:
 2. **Plugin templates** → Update the canonical `.github/plugins/excel-{mcp,cli}/` sources
 3. **Sync to marketplace** → Next release compares complete prepared output,
    including generated references and source-owned root overlays
-4. **Awesome Copilot listing** → A manual, separately run updater maintains
-   one upstream PR for actually changed plugin content, using published output
-   commits. Releases never run it. Root-overlay-only updates do not need a
-   listing PR. Catch-up accepts an existing published tag without republishing.
+4. **Awesome Copilot listing** → Edit listings manually for changed plugin
+   content, using actual immutable published output commits. Root-overlay-only
+   updates do not need a listing PR. Use an existing published tag for catch-up;
+   do not republish plugins just to update a listing.
 
 The published marketplace and the pinned Awesome Copilot listings are separate.
-See [Awesome Copilot update setup](../.github/workflows/docs/awesome-copilot-update-setup.md)
-for permissions, no-write preview and catch-up.
+See [manual listing updates](../.github/workflows/docs/publish-plugins-setup.md#awesome-copilot-listings-are-manual).
 
 ## Related Documentation
 

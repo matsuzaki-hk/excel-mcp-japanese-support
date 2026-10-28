@@ -14,13 +14,21 @@ namespace Sbroenne.ExcelMcp.Core.Tests.Unit;
 [Trait("Speed", "Fast")]
 public sealed class PivotTableOlapDetectionTests
 {
+    [Theory]
+    [InlineData(-2146826246, true)]
+    [InlineData(-2146827284, false)]
+    [InlineData(-2147417848, false)]
+    [InlineData(123, false)]
+    [InlineData("Values", false)]
+    [InlineData("Sales", false)]
+    [InlineData(null, false)]
+    public void ValuesPlaceholder_RequiresExactNativeSourceNameSentinel(object? sourceName, bool expected) =>
+        Assert.Equal(expected, PivotTableHelpers.IsValuesPlaceholderSourceName(sourceName));
+
     [Fact]
     public void DisconnectProxy_ReachesCubeFieldsThroughTypedExcelLookup()
     {
-        var owner = new ReportFilterCancellationTests.DisconnectedBatch
-        {
-            Failure = new FailingPivot(ResiliencePipelines.RPC_E_DISCONNECTED).Failure
-        };
+        var (_, owner) = CreatePivot(ResiliencePipelines.RPC_E_DISCONNECTED);
         var sheets = ReportFilterCancellationTests.DisconnectedPivotObjects.Create<Excel.Sheets>(owner);
         var sheet = (Excel.Worksheet)sheets["Sheet"];
         var pivots = (Excel.PivotTables)sheet.PivotTables();
@@ -37,37 +45,78 @@ public sealed class PivotTableOlapDetectionTests
     [InlineData(ResiliencePipelines.RPC_E_DISCONNECTED)]
     public void IsOlapPivotTable_DisconnectedCubeFields_PropagatesOriginalFailure(int hresult)
     {
-        var pivot = new FailingPivot(hresult);
+        var (pivot, owner) = CreatePivot(hresult);
 
         var error = Assert.Throws<COMException>(() => PivotTableHelpers.IsOlapPivotTable(pivot));
 
-        Assert.Same(pivot.Failure, error);
-        Assert.True(pivot.CubeFieldsReadAttempted);
+        Assert.Same(owner.Failure, error);
+        Assert.True(owner.CubeFieldsReadAttempted);
     }
 
     [Fact]
-    public void IsOlapPivotTable_UnavailableCubeFields_RemainsNonOlap()
+    public void IsOlapPivotTable_AmbiguousNativeFailure_PropagatesOriginalError()
     {
-        var pivot = new FailingPivot(unchecked((int)0x800A03EC));
+        var (pivot, owner) = CreatePivot(unchecked((int)0x800A03EC));
 
-        Assert.False(PivotTableHelpers.IsOlapPivotTable(pivot));
-        Assert.True(pivot.CubeFieldsReadAttempted);
+        Assert.Same(owner.Failure, Assert.Throws<COMException>(() => PivotTableHelpers.IsOlapPivotTable(pivot)));
+        Assert.True(owner.CubeFieldsReadAttempted);
     }
 
-    public sealed class FailingPivot(int hresult)
+    [Fact]
+    public void RegularPivot_DoesNotProbeOlapOnlyCubeFields()
     {
-#pragma warning disable CA2201 // Simulate Excel's CubeFields failure without starting Excel.
-        public COMException Failure { get; } = new("Injected CubeFields failure.", hresult);
-#pragma warning restore CA2201
-        public bool CubeFieldsReadAttempted { get; private set; }
+        var (pivot, owner) = CreatePivot(unchecked((int)0x800A03EC), olap: false);
 
-        public object CubeFields
+        Assert.False(PivotTableHelpers.IsOlapPivotTable(pivot));
+        Assert.Equal(1, owner.CacheReadCount);
+        Assert.False(owner.CubeFieldsReadAttempted);
+    }
+
+    [Fact]
+    public void TryGetCubeFields_RegularCache_DoesNotProbeOlapOnlyMembers()
+    {
+        var (pivot, owner) = CreatePivot(unchecked((int)0x800A03EC), olap: false);
+
+        Assert.False(PivotTableHelpers.TryGetCubeFields(pivot, out Excel.CubeFields? fields));
+
+        Assert.Null(fields);
+        Assert.Equal(1, owner.CacheReadCount);
+        Assert.False(owner.CubeFieldsReadAttempted);
+    }
+
+    [Fact]
+    public void TryGetCubeFields_AmbiguousNativeFailure_PropagatesOriginalError()
+    {
+        var (pivot, owner) = CreatePivot(unchecked((int)0x800A03EC));
+
+        var error = Assert.Throws<COMException>(() => PivotTableHelpers.TryGetCubeFields(pivot, out _));
+
+        Assert.Same(owner.Failure, error);
+        Assert.Equal(1, owner.CacheReadCount);
+        Assert.True(owner.CubeFieldsReadAttempted);
+    }
+
+    [Fact]
+    public void IsOlapPivotTable_CacheMethodFailure_PropagatesOriginalError()
+    {
+        var (pivot, owner) = CreatePivot(unchecked((int)0x800A03EC), failCacheRead: true);
+
+        Assert.Same(owner.Failure, Assert.Throws<COMException>(() => PivotTableHelpers.IsOlapPivotTable(pivot)));
+        Assert.Equal(1, owner.CacheReadCount);
+        Assert.False(owner.CubeFieldsReadAttempted);
+    }
+
+    private static (Excel.PivotTable Pivot, ReportFilterCancellationTests.DisconnectedBatch Owner) CreatePivot(
+        int hresult, bool olap = true, bool failCacheRead = false)
+    {
+        var owner = new ReportFilterCancellationTests.DisconnectedBatch
         {
-            get
-            {
-                CubeFieldsReadAttempted = true;
-                throw Failure;
-            }
-        }
+#pragma warning disable CA2201 // Inject a native PivotTable failure without starting Excel.
+            Failure = new COMException("Injected PivotTable failure.", hresult),
+#pragma warning restore CA2201
+            Olap = olap,
+            FailCacheRead = failCacheRead
+        };
+        return (ReportFilterCancellationTests.DisconnectedPivotObjects.Create<Excel.PivotTable>(owner), owner);
     }
 }

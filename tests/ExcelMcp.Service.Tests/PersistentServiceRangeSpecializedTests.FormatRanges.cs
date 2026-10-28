@@ -314,13 +314,14 @@ public sealed partial class PersistentServiceRangeSpecializedTests
             try
             {
                 sheet = ComUtilities.FindSheet(context.Book, sheetName);
+                Assert.NotNull(sheet);
                 range = sheet.Range[cellAddress];
                 font = range.Font;
                 interior = range.Interior;
                 return new CellFormattingState(
-                    Convert.ToBoolean(font.Bold),
-                    Convert.ToInt32(interior.Color),
-                    Convert.ToInt32(range.HorizontalAlignment));
+                    Convert.ToBoolean((object)font.Bold, System.Globalization.CultureInfo.InvariantCulture),
+                    Convert.ToInt32((object)interior.Color, System.Globalization.CultureInfo.InvariantCulture),
+                    Convert.ToInt32((object)range.HorizontalAlignment, System.Globalization.CultureInfo.InvariantCulture));
             }
             finally
             {
@@ -339,6 +340,7 @@ public sealed partial class PersistentServiceRangeSpecializedTests
             try
             {
                 sheet = ComUtilities.FindSheet(context.Book, sheetName);
+                Assert.NotNull(sheet);
                 range = sheet.Range[cellAddress];
                 return (string)(((Microsoft.Office.Interop.Excel.Range)range).NumberFormat ?? "General");
             }
@@ -357,8 +359,9 @@ public sealed partial class PersistentServiceRangeSpecializedTests
             try
             {
                 sheet = ComUtilities.FindSheet(context.Book, sheetName);
+                Assert.NotNull(sheet);
                 range = sheet.Range[cellAddress];
-                return Convert.ToString(range.Text, System.Globalization.CultureInfo.InvariantCulture)
+                return Convert.ToString(((object)range.Text), System.Globalization.CultureInfo.InvariantCulture)
                     ?? string.Empty;
             }
             finally
@@ -384,13 +387,14 @@ public sealed partial class PersistentServiceRangeSpecializedTests
             try
             {
                 sheet = ComUtilities.FindSheet(context.Book, sheetName);
+                Assert.NotNull(sheet);
                 range = sheet.Range[cellAddress];
                 font = range.Font;
                 interior = range.Interior;
                 return new Issue585FormattingState(
-                    Convert.ToBoolean(font.Bold),
-                    Convert.ToInt32(interior.Color),
-                    Convert.ToInt32(font.Color));
+                    Convert.ToBoolean((object)font.Bold, System.Globalization.CultureInfo.InvariantCulture),
+                    Convert.ToInt32((object)interior.Color, System.Globalization.CultureInfo.InvariantCulture),
+                    Convert.ToInt32((object)font.Color, System.Globalization.CultureInfo.InvariantCulture));
             }
             finally
             {

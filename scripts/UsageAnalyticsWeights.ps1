@@ -1,3 +1,4 @@
+#Requires -Version 7.4
 <#
 .SYNOPSIS
     Loads the hand-picked usage analytics work weights and builds matching query lookups.
@@ -222,18 +223,25 @@ $splitRows
 let excludedNames = dynamic([$excluded]);
 let heavyNames = dynamic([$heavy]);
 let userIdMigrations = AppEvents
+| extend UserId=coalesce(tostring(Properties['UserId']), UserId)
 | where Name == 'UserIdMigration'
 | extend LegacyUserId=tostring(Properties['LegacyUserId'])
 | where isnotempty(UserId) and isnotempty(LegacyUserId)
 | summarize arg_max(TimeGenerated, LegacyUserId) by UserId
 | project UserId, LegacyUserId;
 let normalizedRequests = AppRequests
+| extend UserId=coalesce(tostring(Properties['UserId']), UserId),
+         SessionId=coalesce(tostring(Properties['SessionId']), SessionId),
+         AppVersion=coalesce(tostring(Properties['AppVersion']), AppVersion)
 | lookup kind=leftouter userIdMigrations on UserId
 | extend UserId=coalesce(LegacyUserId, UserId)
 | project-away LegacyUserId
 $normalize;
 let normalizedEvents = AppEvents
-| where Name !in ('SessionStart', 'UserIdMigration')
+| extend UserId=coalesce(tostring(Properties['UserId']), UserId),
+         SessionId=coalesce(tostring(Properties['SessionId']), SessionId),
+         AppVersion=coalesce(tostring(Properties['AppVersion']), AppVersion)
+| where Name !in ('SessionStart', 'UserIdMigration', 'UnhandledException')
 | lookup kind=leftouter userIdMigrations on UserId
 | extend UserId=coalesce(LegacyUserId, UserId)
 | project-away LegacyUserId

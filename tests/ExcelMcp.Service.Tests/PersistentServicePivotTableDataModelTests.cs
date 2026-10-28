@@ -30,6 +30,35 @@ public class PersistentServicePivotTableDataModelTests(
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void ShareExistingCache_DataModelOnEitherSide_IsRejectedBeforeWrites(bool modelIsMoved)
+    {
+        var batch = _fixture.BatchToken;
+        var sheet = _fixture.CreateTestSheet(batch);
+        RequireSuccess(_commands.SetValues(batch, sheet, "A1:B3",
+            [["Region", "Sales"], ["North", 100], ["South", 200]]));
+        RequireSuccess(_pivotCommands.CreateFromRange(batch, sheet, "A1:B3", sheet, "D1", "WorksheetPivot"));
+        RequireSuccess(_pivotCommands.AddValueField(batch, "WorksheetPivot", "Sales"));
+        RequireSuccess(_pivotCommands.CreateFromDataModel(batch, "SalesTable", sheet, "H1", "ModelPivot"));
+        RequireSuccess(_pivotCommands.AddValueField(batch, "ModelPivot", "[Measures].[Total Sales]"));
+        RequireSuccess(_pivotCommands.Refresh(batch, "ModelPivot"));
+        var before = RequireSuccess(_pivotCommands.List(batch)).PivotTables
+            .Select(pivot => (pivot.SheetName, pivot.Name, pivot.CacheIndex)).ToArray();
+
+        var error = Assert.Throws<NotSupportedException>(() => _pivotCommands.ShareCache(batch,
+            sheet, modelIsMoved ? "ModelPivot" : "WorksheetPivot",
+            modelIsMoved ? "WorksheetPivot" : "ModelPivot", sheet));
+
+        Assert.Contains("worksheet-backed", error.Message, StringComparison.Ordinal);
+        Assert.Equal(before, RequireSuccess(_pivotCommands.List(batch)).PivotTables
+            .Select(pivot => (pivot.SheetName, pivot.Name, pivot.CacheIndex)).ToArray());
+        AssertNativeData(sheet, "ModelPivot", 2455);
+        var values = RequireSuccess(_pivotCommands.GetData(batch, "WorksheetPivot")).Values;
+        Assert.Equal(300d, Convert.ToDouble(values[^1][0], System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void SharedCache_DataModelTarget_IsRejectedBeforeCreatingReportOrCache(bool table)
     {
         var batch = _fixture.BatchToken;
@@ -124,6 +153,59 @@ public class PersistentServicePivotTableDataModelTests(
             "[Measures].[Total Sales]", AggregationFunction.Sum, "Sales"));
         RequireSuccess(_pivotCommands.Refresh(_fixture.BatchToken, result.PivotTableName, null));
         AssertNativeData(sheet, result.PivotTableName, 2455);
+    }
+
+    [Fact]
+    public void CreateFromDataModel_DuplicateNameReportsExistingPivotAndPreservesIt()
+    {
+        var batch = _fixture.BatchToken;
+        var sheet = _fixture.CreateTestSheet(batch);
+        var pivotName = $"DuplicatePivot{Guid.NewGuid():N}";
+        RequireSuccess(_pivotCommands.CreateFromDataModel(batch, "SalesTable", sheet, "H1", pivotName));
+        var before = RequireSuccess(_pivotCommands.List(batch)).PivotTables
+            .Select(pivot => (pivot.SheetName, pivot.Name, pivot.CacheIndex))
+            .ToArray();
+        var original = Assert.Single(before, pivot => pivot.Name == pivotName);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            _pivotCommands.CreateFromDataModel(batch, "SalesTable", sheet, "P1", pivotName));
+
+        Assert.Contains($"PivotTable '{pivotName}' already exists", exception.Message, StringComparison.Ordinal);
+        Assert.Contains($"sheet '{sheet}'", exception.Message, StringComparison.Ordinal);
+        var after = RequireSuccess(_pivotCommands.List(batch)).PivotTables
+            .Select(pivot => (pivot.SheetName, pivot.Name, pivot.CacheIndex))
+            .ToArray();
+        Assert.Equal(before, after);
+        var retained = Assert.Single(after, pivot => pivot.Name == pivotName);
+        Assert.Equal(sheet, retained.SheetName);
+        Assert.Equal(original.CacheIndex, retained.CacheIndex);
+        var retainedRead = RequireSuccess(_pivotCommands.Read(batch, pivotName, sheet));
+        Assert.Equal(original.CacheIndex, retainedRead.PivotTable.CacheIndex);
+    }
+
+    [Fact]
+    public void CreateFromDataModel_AllowsSameNameOnDifferentWorksheets()
+    {
+        var batch = _fixture.BatchToken;
+        var firstSheet = _fixture.CreateTestSheet(batch);
+        var secondSheet = _fixture.CreateTestSheet(batch);
+        var pivotName = $"RepeatedPivot{Guid.NewGuid():N}";
+
+        RequireSuccess(_pivotCommands.CreateFromDataModel(
+            batch, "SalesTable", firstSheet, "H1", pivotName));
+        var secondResult = _pivotCommands.CreateFromDataModel(
+            batch, "SalesTable", secondSheet, "H1", pivotName);
+
+        RequireSuccess(secondResult);
+        Assert.Equal(pivotName, secondResult.PivotTableName);
+        var matchingPivots = RequireSuccess(_pivotCommands.List(batch)).PivotTables
+            .Where(pivot => pivot.Name == pivotName)
+            .ToArray();
+        Assert.Equal(2, matchingPivots.Length);
+        Assert.Contains(matchingPivots, pivot => pivot.SheetName == firstSheet);
+        Assert.Contains(matchingPivots, pivot => pivot.SheetName == secondSheet);
+        Assert.True(RequireSuccess(_pivotCommands.Read(batch, pivotName, firstSheet)).Success);
+        Assert.True(RequireSuccess(_pivotCommands.Read(batch, pivotName, secondSheet)).Success);
     }
 
     /// <summary>
@@ -245,7 +327,7 @@ public class PersistentServicePivotTableDataModelTests(
                 cache = pivot.PivotCache();
                 Assert.True(cache.OLAP);
                 data = pivot.DataBodyRange;
-                Assert.Equal(expected, Convert.ToDouble(data.Value2,
+                Assert.Equal(expected, Convert.ToDouble(((object)data.Value2),
                     System.Globalization.CultureInfo.InvariantCulture), 8);
             }
             finally

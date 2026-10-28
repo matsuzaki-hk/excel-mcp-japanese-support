@@ -40,6 +40,7 @@
     "pivottablecalc": ["pivottable_calc"],
     "pivottablefield": ["pivottable_field"],
     "powerquery": ["powerquery"],
+    "powerquerytrace": ["powerquery_trace"],
     "pythoninexcel": ["pythoninexcel"],
     "querytable": ["querytable"],
     "range": ["range"],
@@ -49,6 +50,7 @@
     "screenshot": ["screenshot"],
     "service": ["service"],
     "session": ["file"],
+    "settings": ["settings"],
     "sheet": ["worksheet", "worksheet_style"],
     "slicer": ["slicer"],
     "table": ["table"],
@@ -241,8 +243,15 @@
       "actions": {
         "close": "light",
         "create": "medium",
+        "discover": "light",
+        "attach": "light",
+        "notices": "light",
+        "enable-editing": "medium",
+        "enable-connections": "medium",
+        "enable-macros": "medium",
         "list": "light",
         "open": "light",
+        "save": "light",
         "test": "light"
       }
     },
@@ -280,7 +289,8 @@
         "refresh": "heavy",
         "set-cache-options": "medium",
         "set-connection": "medium",
-        "set-source": "heavy"
+        "set-source": "heavy",
+        "share-cache": "heavy"
       }
     },
     "pivottable_calc": {
@@ -342,14 +352,23 @@
         "delete": "medium",
         "evaluate": "heavy",
         "get-load-config": "light",
+        "get-privacy-settings": "light",
         "list": "light",
         "load-to": "heavy",
         "refresh": "heavy",
         "refresh-all": "heavy",
         "rename": "medium",
+        "set-privacy-settings": "medium",
         "unload": "medium",
         "update": "heavy",
         "view": "light"
+      }
+    },
+    "powerquery_trace": {
+      "feature": "power-query",
+      "actions": {
+        "list": "light",
+        "summarize": "light"
       }
     },
     "pythoninexcel": {
@@ -462,6 +481,15 @@
       "actions": {
         "capture": "medium",
         "capture-sheet": "medium"
+      }
+    },
+    "settings": {
+      "feature": "power-query",
+      "actions": {
+        "get-pq-tracing": "light",
+        "set-pq-tracing": "medium",
+        "get-native-query-approval": "light",
+        "set-native-query-approval": "medium"
       }
     },
     "service": {
@@ -600,6 +628,7 @@
         "set-document-property": "medium",
         "set-protection": "medium",
         "set-view-options": "medium",
+        "set-auto-save": "light",
         "update-cell-style": "medium",
         "update-external-link": "medium",
         "update-table-style": "medium"

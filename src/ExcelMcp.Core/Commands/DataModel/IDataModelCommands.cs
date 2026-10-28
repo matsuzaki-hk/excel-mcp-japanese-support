@@ -49,7 +49,8 @@ public interface IDataModelCommands
     DataModelTableListResult ListTables(IExcelBatch batch);
 
     /// <summary>
-    /// Lists all columns in a Data Model table
+    /// Lists all columns in a Data Model table.
+    /// The isCalculated field is null (unknown): Excel does not expose a supported column-calculation flag.
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="tableName">Name of the table to list columns from</param>
@@ -58,7 +59,8 @@ public interface IDataModelCommands
     DataModelTableColumnsResult ListColumns(IExcelBatch batch, [RequiredParameter] string tableName);
 
     /// <summary>
-    /// Gets complete table details including columns and measures
+    /// Gets complete table details including columns and measures.
+    /// Each column's isCalculated field is null (unknown), not false.
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="tableName">Name of the table to get</param>
@@ -85,7 +87,8 @@ public interface IDataModelCommands
     DataModelConnectionResult ReadConnection(IExcelBatch batch);
 
     /// <summary>
-    /// Lists all DAX measures in the model.
+    /// Lists DAX measures in the model. When a valid table filter has no measures,
+    /// returns an empty list with a message naming tables where measures are stored.
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="tableName">Optional: Filter measures by table name</param>
@@ -126,11 +129,10 @@ public interface IDataModelCommands
     OperationResult DeleteTable(IExcelBatch batch, [RequiredParameter] string tableName);
 
     /// <summary>
-    /// Renames a table in the Data Model.
-    /// Names are trimmed before comparison; a no-op success is returned when
-    /// trimmed old and new names match (including case-only change no-op).
-    /// Case-only renames are allowed if new name differs only in casing.
-    /// Conflict detection is case-insensitive, excluding the target table.
+    /// Validates a Data Model table rename request. Excel model table names are immutable;
+    /// a non-no-op request fails before changing queries, connections, or model tables.
+    /// Names are trimmed before comparison; identical names including casing return no-op success.
+    /// Conflict detection is case-insensitive, excluding the target table. Case-only renames also fail.
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="oldName">Current name of the table</param>
@@ -144,7 +146,7 @@ public interface IDataModelCommands
     /// </summary>
     /// <param name="batch">Excel batch context for accessing workbook</param>
     /// <param name="tableName">Optional: Specific table to refresh (if null, refreshes entire model)</param>
-    /// <param name="timeout">Optional public timeout in whole seconds from 1 through 2147483; converted to TimeSpan at shared dispatch</param>
+    /// <param name="timeout">Maximum caller wait in whole seconds from 1 through 2147483; defaults to 1800 seconds. Expiry preserves the session and does not stop Excel.</param>
     /// <exception cref="InvalidOperationException">Thrown when refresh operation fails</exception>
     [ServiceAction("refresh")]
     OperationResult Refresh(IExcelBatch batch, string? tableName = null, TimeSpan? timeout = null);

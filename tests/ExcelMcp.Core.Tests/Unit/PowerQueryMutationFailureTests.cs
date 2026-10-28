@@ -14,6 +14,41 @@ namespace Sbroenne.ExcelMcp.Core.Tests.Unit;
 [Trait("Speed", "Fast")]
 public sealed class PowerQueryMutationFailureTests
 {
+    [Theory]
+    [InlineData("[DataSource.Error] This server does not support Windows credentials. Please try Microsoft account authentication.", "Authentication", "Organizational account")]
+    [InlineData("Analysis Services does not support the 'en-DE' culture", "Culture", "Culture = \"en-US\"")]
+    public void RecognizedEngineFailure_AddsActionableHintWithoutChangingCause(
+        string message, string category, string hint)
+    {
+#pragma warning disable CA2201 // Synthetic engine error for pure diagnostic mapping.
+        var cause = new COMException(message, unchecked((int)0x800A03EC));
+#pragma warning restore CA2201
+        var error = PowerQueryCommands.CreateMutationFailure(
+            cause, "Query", true, state => state.QueryExists = true);
+        Assert.Same(cause, error.InnerException);
+        Assert.Equal(category, error.ErrorCategory);
+        Assert.Contains(message, error.Message, StringComparison.Ordinal);
+        Assert.Contains(hint, error.Message, StringComparison.Ordinal);
+        var refresh = PowerQueryCommands.CreateRefreshFailure("Query", cause);
+        Assert.Equal(category, refresh.ErrorCategory);
+        Assert.Contains(hint, refresh.ErrorMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CultureUpdateFailure_DoesNotClaimMCodeWasUnchanged()
+    {
+#pragma warning disable CA2201 // Synthetic engine error for pure diagnostic mapping.
+        var cause = new COMException("Analysis Services does not support the 'en-DE' culture", unchecked((int)0x800A03EC));
+#pragma warning restore CA2201
+        var error = PowerQueryCommands.CreateMutationFailure(
+            cause, "Query", false, state => state.QueryExists = true);
+
+        Assert.True(error.PartialState!.MCodeUpdated);
+        Assert.Contains("was updated", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Culture = \"en-US\"", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("M code was not changed", error.Message, StringComparison.Ordinal);
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -21,7 +56,7 @@ public sealed class PowerQueryMutationFailureTests
     };
 
     [Theory]
-    [InlineData("Formula.Firewall", "Privacy")]
+    [InlineData("Formula.Firewall", "PrivacyFirewall")]
     [InlineData("Please specify a privacy level for each data source.", "Privacy")]
     [InlineData("DataSource.Error: unable to connect", "Connectivity")]
     [InlineData("Unclassified Excel failure", "ComInterop")]
@@ -45,6 +80,10 @@ public sealed class PowerQueryMutationFailureTests
         Assert.Contains(message, error.Message, StringComparison.Ordinal);
         Assert.Contains("Query 'Query' was created", error.Message, StringComparison.Ordinal);
         Assert.Contains("ActualSheet", error.Message, StringComparison.Ordinal);
+        if (category == "PrivacyFirewall")
+        {
+            Assert.Contains("powerquery set-privacy-settings", error.Message, StringComparison.Ordinal);
+        }
         var state = Assert.IsType<PowerQueryPartialState>(error.PartialState);
         Assert.Equal("Query", state.QueryName);
         Assert.True(state.QueryCreated);
@@ -145,6 +184,11 @@ public sealed class PowerQueryMutationFailureTests
         Assert.False(PowerQueryCommands.CanReportMutationFailure(cause));
         Assert.False(PowerQueryCommands.CanReportMutationFailure(
             new InvalidOperationException("Outer context", cause)));
+        Assert.False(PowerQueryCommands.CanReportMutationFailure(
+            new AggregateException(new InvalidOperationException("Mutation failed"), cause)));
+        Assert.False(PowerQueryCommands.CanReportMutationFailure(
+            new InvalidOperationException("Outer context",
+                new AggregateException(new InvalidOperationException("Mutation failed"), cause))));
     }
 
     [Theory]

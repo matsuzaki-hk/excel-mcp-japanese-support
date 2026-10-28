@@ -1,5 +1,5 @@
-using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.ComInterop;
+using Sbroenne.ExcelMcp.Core.Commands.PowerQueryTrace;
 using Sbroenne.ExcelMcp.Core.Models;
 using Excel = Microsoft.Office.Interop.Excel;
 
@@ -10,15 +10,21 @@ namespace Sbroenne.ExcelMcp.Core.Commands;
 /// </summary>
 public partial class PowerQueryCommands : IPowerQueryCommands
 {
-    private readonly IDataModelCommands _dataModelCommands;
+    private const string PrivacyFirewallRemediation =
+        "To allow this combination, use powerquery set-privacy-settings --ignore-privacy-levels true " +
+        "(MCP action set-privacy-settings with ignore_privacy_levels=true). This can allow data to be shared between sources.";
+
+    private readonly PowerQueryTraceReader _traceReader;
 
     /// <summary>
     /// Constructor with dependency injection for atomic Data Model operations
     /// </summary>
     /// <param name="dataModelCommands">Data Model commands for atomic refresh operations in SetLoadToDataModelAsync</param>
-    public PowerQueryCommands(IDataModelCommands dataModelCommands)
+    public PowerQueryCommands(IDataModelCommands dataModelCommands, IPowerQueryTraceSettings? traceSettings = null)
     {
-        _dataModelCommands = dataModelCommands ?? throw new ArgumentNullException(nameof(dataModelCommands));
+        ArgumentNullException.ThrowIfNull(dataModelCommands);
+        var settings = traceSettings ?? new RegistryPowerQueryTraceSettings();
+        _traceReader = new PowerQueryTraceReader(settings.TraceFolder);
     }
 
     /// <summary>
@@ -48,14 +54,21 @@ public partial class PowerQueryCommands : IPowerQueryCommands
 
     private static string? ClassifyPowerQueryError(string message)
     {
-        if (message.Contains("Formula.Firewall", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("privacy level", StringComparison.OrdinalIgnoreCase) ||
+        if (message.Contains("Formula.Firewall", StringComparison.OrdinalIgnoreCase))
+            return "PrivacyFirewall";
+
+        if (message.Contains("privacy level", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("combine data", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("may not directly access a data source", StringComparison.OrdinalIgnoreCase))
             return "Privacy";
 
-        if (message.Contains("authentication", StringComparison.OrdinalIgnoreCase))
+        if (message.Contains("authentication", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("does not support Windows credentials", StringComparison.OrdinalIgnoreCase))
             return "Authentication";
+
+        if (message.Contains("Analysis Services does not support", StringComparison.OrdinalIgnoreCase) &&
+            message.Contains("culture", StringComparison.OrdinalIgnoreCase))
+            return "Culture";
 
         if (message.Contains("could not reach", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("unable to connect", StringComparison.OrdinalIgnoreCase) ||
@@ -80,12 +93,37 @@ public partial class PowerQueryCommands : IPowerQueryCommands
         return null;
     }
 
+    private static string AddPowerQueryRemediation(string message, string? category)
+    {
+        if (category == "Authentication" &&
+            message.Contains("does not support Windows credentials", StringComparison.OrdinalIgnoreCase))
+        {
+            return message + " Check the source's authentication choice in Excel Data Source Settings. " +
+                "For Power BI/XMLA sources, sign in with Organizational account rather than Windows credentials.";
+        }
+        if (category == "Culture")
+        {
+            return message + " Set Culture = \"en-US\" in the options record passed to " +
+                "AnalysisServices.Database, or use another culture supported by the server.";
+        }
+        if (category != "PrivacyFirewall" ||
+            message.Contains("powerquery set-privacy-settings", StringComparison.OrdinalIgnoreCase))
+        {
+            return message;
+        }
+
+        return $"{message} {PrivacyFirewallRemediation}";
+    }
+
     private static bool TryWrapPowerQueryException(Exception exception, out PowerQueryCommandException? powerQueryException)
     {
         var category = ClassifyPowerQueryError(exception.Message);
         if (category != null)
         {
-            powerQueryException = new PowerQueryCommandException(exception.Message, category, exception);
+            powerQueryException = new PowerQueryCommandException(
+                AddPowerQueryRemediation(exception.Message, category),
+                category,
+                exception);
             return true;
         }
 
@@ -93,7 +131,7 @@ public partial class PowerQueryCommands : IPowerQueryCommands
         return false;
     }
 
-    private static bool IsLikelyPrivacyFirewallRisk(string? mCode)
+    internal static bool IsLikelyPrivacyFirewallRisk(string? mCode)
     {
         if (string.IsNullOrWhiteSpace(mCode))
         {
@@ -106,24 +144,10 @@ public partial class PowerQueryCommands : IPowerQueryCommands
             mCode.Contains("Web.Contents", StringComparison.OrdinalIgnoreCase) ||
             mCode.Contains("SharePoint.Contents", StringComparison.OrdinalIgnoreCase) ||
             mCode.Contains("Sql.Database", StringComparison.OrdinalIgnoreCase) ||
-            mCode.Contains("OData.Feed", StringComparison.OrdinalIgnoreCase);
+            mCode.Contains("OData.Feed", StringComparison.OrdinalIgnoreCase) ||
+            mCode.Contains("AnalysisServices.Database", StringComparison.OrdinalIgnoreCase);
 
         return usesWorkbookParameter && usesExternalSource;
-    }
-
-    /// <summary>
-    /// Extracts file path from File.Contents() in M code
-    /// </summary>
-    private static string? ExtractFileContentsPath(string mCode)
-    {
-        // Parse: File.Contents("D:\path\to\file.xlsx")
-        // Also handles: File.Contents( "path" ) with optional whitespace
-        var match = System.Text.RegularExpressions.Regex.Match(
-            mCode,
-            @"File\.Contents\s*\(\s*""([^""]+)""\s*\)",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-        return match.Success ? match.Groups[1].Value : null;
     }
 
     private static PowerQueryLoadState DetectLoadState(
@@ -199,16 +223,9 @@ public partial class PowerQueryCommands : IPowerQueryCommands
                         {
                             listObject = listObjects.Item[lo];
 
-                            try
-                            {
-                                queryTable = listObject.QueryTable;
-                            }
-                            catch (COMException ex)
-                                when (ex.HResult == unchecked((int)0x800A03EC))
-                            {
-                                // A regular Excel table has no external QueryTable.
+                            if (listObject.SourceType is not (Excel.XlListObjectSourceType.xlSrcExternal or Excel.XlListObjectSourceType.xlSrcQuery))
                                 continue;
-                            }
+                            queryTable = listObject.QueryTable;
 
                             if (queryTable == null)
                             {

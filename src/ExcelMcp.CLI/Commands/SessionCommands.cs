@@ -14,6 +14,52 @@ namespace Sbroenne.ExcelMcp.CLI.Commands;
 // SESSION COMMANDS
 // ============================================================================
 
+internal sealed class SessionDiscoverCommand : AsyncCommand
+{
+    public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        using var client = await CliCommandRuntime.Current.ClientFactory.ConnectAsync(cancellationToken);
+        var request = new ServiceRequest { Command = "session.discover" };
+        var response = await CliTelemetry.TrackCommandAsync(
+            request, () => client.SendAsync(request, cancellationToken));
+        if (!response.Success)
+            return CliErrorOutput.WriteServiceError(response);
+        CliCommandRuntime.Current.Output.WriteLine(response.Result);
+        return 0;
+    }
+}
+
+internal sealed class SessionAttachCommand : AsyncCommand<SessionAttachCommand.Settings>
+{
+    public override async Task<int> ExecuteAsync(
+        CommandContext context, Settings settings, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(settings.WorkbookId))
+            return CliErrorOutput.WriteError("Open-workbook identifier is required.");
+
+        using var client = await CliCommandRuntime.Current.ClientFactory.ConnectAsync(cancellationToken);
+        var request = new ServiceRequest
+        {
+            Command = "session.attach",
+            Args = JsonSerializer.Serialize(
+                new { workbookId = settings.WorkbookId }, ServiceProtocol.JsonOptions)
+        };
+        var response = await CliTelemetry.TrackCommandAsync(
+            request, () => client.SendAsync(request, cancellationToken));
+        if (!response.Success)
+            return CliErrorOutput.WriteServiceError(response);
+        CliCommandRuntime.Current.Output.WriteLine(response.Result);
+        return 0;
+    }
+
+    internal sealed class Settings : CommandSettings
+    {
+        [CommandOption("--workbook-id <ID>")]
+        [Description("Open-workbook identifier returned by session discover")]
+        public string WorkbookId { get; init; } = string.Empty;
+    }
+}
+
 internal sealed class SessionCreateCommand : AsyncCommand<SessionCreateCommand.Settings>
 {
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -75,6 +121,7 @@ internal sealed class SessionCreateCommand : AsyncCommand<SessionCreateCommand.S
         [CommandOption("--show")]
         [Description("Show the Excel window for IRM/auth prompts instead of running hidden")]
         public bool Show { get; init; }
+
     }
 }
 
@@ -139,6 +186,33 @@ internal sealed class SessionOpenCommand : AsyncCommand<SessionOpenCommand.Setti
         [CommandOption("--show")]
         [Description("Show the Excel window for IRM/auth prompts instead of running hidden")]
         public bool Show { get; init; }
+
+    }
+}
+
+internal sealed class SessionSaveCommand : AsyncCommand<SessionSaveCommand.Settings>
+{
+    public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(settings.SessionId))
+            return CliErrorOutput.WriteError("Session ID is required.");
+
+        using var client = await CliCommandRuntime.Current.ClientFactory.ConnectAsync(cancellationToken);
+        var request = new ServiceRequest { Command = "session.save", SessionId = settings.SessionId };
+        var response = await CliTelemetry.TrackCommandAsync(
+            request, () => client.SendAsync(request, cancellationToken));
+        if (!response.Success)
+            return CliErrorOutput.WriteServiceError(response);
+
+        CliCommandRuntime.Current.Output.WriteLine(response.Result);
+        return 0;
+    }
+
+    internal sealed class Settings : CommandSettings
+    {
+        [CommandOption("-s|--session <SESSION>")]
+        [Description("Session ID to save without closing")]
+        public string SessionId { get; init; } = string.Empty;
     }
 }
 
@@ -193,7 +267,6 @@ internal sealed class SessionListCommand : AsyncCommand
     {
         var pipeName = DaemonAutoStart.GetPipeName();
         var daemonConnection = CliCommandRuntime.Current.DaemonConnection;
-        var observation = daemonConnection.Observe(pipeName);
         var request = new ServiceRequest { Command = "session.list" };
         var response = await CliTelemetry.TrackCommandAsync(
             request,
@@ -201,9 +274,7 @@ internal sealed class SessionListCommand : AsyncCommand
                 pipeName,
                 request,
                 cancellationToken,
-                observation.IsStopped
-                    ? DaemonConnectionPolicy.InitialProbeTimeout
-                    : DaemonConnectionPolicy.ControlTimeout));
+                DaemonConnectionPolicy.ControlTimeout));
         if (response.Success && response.Result != null)
         {
             JsonObject result;

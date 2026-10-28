@@ -18,7 +18,7 @@ mcpb/
 
 ## Prerequisites
 
-- PowerShell 7
+- PowerShell 7.4 or later (`pwsh`)
 - Node.js/npm when verifying the server launch (not needed to build the archive)
 
 Packaging copies metadata only. It does not publish .NET executables, install
@@ -85,7 +85,7 @@ The build stamps the package version into a staged copy of the manifest. Do not
 add a release download URL or an `install.win32` block. npx obtains the server
 from npm at launch, subject to normal npm configuration and caching.
 
-The MCP Server generates its 60 tool schemas from the Core contracts and manual
+The MCP Server generates its 63 tool schemas from the Core contracts and manual
 MCP tool definitions. Destructive metadata is set per tool: most tools can
 modify workbooks, while tools such as `screenshot` and `window` do not modify
 workbook content.

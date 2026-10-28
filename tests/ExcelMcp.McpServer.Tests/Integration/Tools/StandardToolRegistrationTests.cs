@@ -44,8 +44,8 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
         Assert.All(readTools, tool => Assert.True(
             tool.ProtocolTool.Annotations?.ReadOnlyHint == true,
             $"{tool.Name} must advertise readOnlyHint=true."));
-        Assert.Equal("close,create,open", ActionNames("file"));
-        Assert.Equal("list,test", ActionNames("file_read"));
+        Assert.Equal("attach,close,create,enable-connections,enable-editing,enable-macros,open,save", ActionNames("file"));
+        Assert.Equal("discover,list,notices,test", ActionNames("file_read"));
         Assert.Equal("list", ActionNames("worksheet_read"));
         Assert.Equal("get-settings", ActionNames("calculation_mode_read"));
         Assert.DoesNotContain(
@@ -65,6 +65,65 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
         Assert.Contains("execute-dmv", ActionNames("datamodel_read"));
         Assert.Contains("find", ActionNames("range_edit_read"));
         Assert.Contains("preflight", ActionNames("table_read"));
+    }
+
+    [Fact]
+    public async Task Discovery_WorkbookSecurityKeepsApprovalDefaultsFalseAndExplainsLimits()
+    {
+        var tools = (await Client!.ListToolsAsync(cancellationToken: TestCancellationToken))
+            .ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+        var properties = tools["file"].JsonSchema.GetProperty("properties");
+        foreach (var approval in new[] { "approved", "allow_remembered_trust", "allow_reopen" })
+        {
+            var schema = properties.GetProperty(approval);
+            Assert.Equal("boolean", schema.GetProperty("type").GetString());
+            Assert.False(schema.GetProperty("default").GetBoolean());
+        }
+        Assert.True(tools["file_read"].JsonSchema.GetProperty("properties").TryGetProperty("workbook_session_id", out _));
+        Assert.Contains("not every notification bar", tools["file_read"].Description, StringComparison.Ordinal);
+        Assert.Contains("not a built-in user confirmation dialog", tools["file"].Description, StringComparison.Ordinal);
+        Assert.Contains("Normal file opens disable VBA macros", Client.ServerInstructions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Discovery_PowerQueryTracingUsesSharedSettingsAndSessionlessTraceTools()
+    {
+        var tools = (await Client!.ListToolsAsync(cancellationToken: TestCancellationToken))
+            .ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+        string[] Actions(string toolName) => tools[toolName].JsonSchema.GetProperty("properties")
+            .GetProperty("action").GetProperty("enum").EnumerateArray()
+            .Select(value => value.GetString()!).ToArray();
+
+        Assert.Equal(["set-pq-tracing", "set-native-query-approval"], Actions("settings"));
+        Assert.Equal(["get-pq-tracing", "get-native-query-approval"], Actions("settings_read"));
+        Assert.Equal(["list", "summarize"], Actions("powerquery_trace_read"));
+        Assert.DoesNotContain("get-pq-tracing", Actions("powerquery"));
+        Assert.DoesNotContain("set-pq-tracing", Actions("powerquery"));
+
+        var settingsProperties = tools["settings"].JsonSchema.GetProperty("properties");
+        Assert.False(settingsProperties.TryGetProperty("workbook_session_id", out _));
+        Assert.True(settingsProperties.TryGetProperty("enabled", out _));
+        Assert.True(settingsProperties.TryGetProperty("required", out _));
+        Assert.True(settingsProperties.TryGetProperty("confirm", out _));
+        string[] requiredSettingsInputs = tools["settings"].JsonSchema.GetProperty("required").EnumerateArray()
+            .Select(value => value.GetString()!).ToArray();
+        Assert.Equal(["action"], requiredSettingsInputs);
+        Assert.Contains("null", settingsProperties.GetProperty("required").GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("global requirement", tools["settings"].Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("explicit confirmation", tools["settings"].Description, StringComparison.OrdinalIgnoreCase);
+
+        var settingsReadProperties = tools["settings_read"].JsonSchema.GetProperty("properties");
+        Assert.False(settingsReadProperties.TryGetProperty("workbook_session_id", out _));
+
+        var traceProperties = tools["powerquery_trace_read"].JsonSchema.GetProperty("properties");
+        Assert.True(traceProperties.TryGetProperty("workbook_session_id", out _));
+        Assert.Contains(
+            "\"requiresSession\":false",
+            JsonSerializer.Serialize(tools["powerquery_trace_read"].ProtocolTool),
+            StringComparison.Ordinal);
+        Assert.Contains("string", traceProperties.GetProperty("since").GetProperty("type").ToString(), StringComparison.Ordinal);
+        Assert.True(tools["powerquery"].JsonSchema.GetProperty("properties").TryGetProperty("trace", out _));
+        Assert.False(tools["file"].JsonSchema.GetProperty("properties").TryGetProperty("pq_tracing", out _));
     }
 
     [Fact]
@@ -90,6 +149,23 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
                     writeTool.Description!);
             }
         }
+    }
+
+    [Fact]
+    public async Task Discovery_PowerQueryPrivacyDescriptionDistinguishesConfiguredAndEffectiveSettings()
+    {
+        var tools = await Client!.ListToolsAsync(cancellationToken: TestCancellationToken);
+        var powerQuery = tools.Single(tool => tool.Name == "powerquery");
+        var powerQueryRead = tools.Single(tool => tool.Name == "powerquery_read");
+
+        Assert.Contains("configured FastCombine setting", powerQueryRead.Description, StringComparison.Ordinal);
+        Assert.Contains("global privacy option may override", powerQueryRead.Description, StringComparison.Ordinal);
+        Assert.DoesNotContain("get-privacy-settings", powerQuery.Description, StringComparison.Ordinal);
+        Assert.Contains(
+            "global privacy option may override",
+            powerQuery.JsonSchema.GetProperty("properties")
+                .GetProperty("ignore_privacy_levels").GetProperty("description").GetString(),
+            StringComparison.Ordinal);
     }
 
     [Theory]
@@ -139,9 +215,11 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
     [Fact]
     public void Discovery_ServerVersionMatchesPackageInformationalVersion()
     {
+        var serverInfo = Client!.ServerInfo;
+        Assert.NotNull(serverInfo);
         Assert.Equal(
             Infrastructure.McpServerVersionChecker.GetCurrentVersion(),
-            Client!.ServerInfo.Version);
+            serverInfo.Version);
     }
 
     [Theory]
@@ -363,8 +441,12 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
     [InlineData("range_read", "values")]
     [InlineData("range_read", "rowCount")]
     [InlineData("table_read", "tables")]
-    [InlineData("worksheet", "worksheets")]
+    [InlineData("worksheet_read", "worksheets")]
     [InlineData("file_read", "workbook_session_id")]
+    [InlineData("file_read", "complete")]
+    [InlineData("file_read", "workbooks")]
+    [InlineData("file", "autoSaveOn")]
+    [InlineData("file", "warning")]
     [InlineData("screenshot", "mimeType")]
     public async Task OutputSchemas_DescribeActionSpecificFields(string toolName, string propertyName)
     {
@@ -377,6 +459,24 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task FileDiscoveryOutputSchema_DescribesWorkbookIdentityAndGaps()
+    {
+        var tools = await Client!.ListToolsAsync(cancellationToken: TestCancellationToken);
+        var schema = Assert.IsType<JsonElement>(tools.Single(t => t.Name == "file_read").ReturnJsonSchema);
+        var properties = schema.GetProperty("properties");
+        var workbooks = properties.GetProperty("workbooks").GetProperty("items").GetProperty("properties");
+        var errors = properties.GetProperty("errors").GetProperty("items").GetProperty("properties");
+
+        foreach (var name in new[] { "workbookId", "name", "location", "processId", "saved", "autoSaveOn" })
+        {
+            Assert.True(workbooks.TryGetProperty(name, out _),
+                $"Open-workbook output schema does not describe {name}.");
+        }
+        Assert.True(errors.TryGetProperty("processId", out _));
+        Assert.True(errors.TryGetProperty("message", out _));
+    }
+
+    [Fact]
     public async Task FileListOutputSchema_DescribesSessionEntries()
     {
         var tools = await Client!.ListToolsAsync(cancellationToken: TestCancellationToken);
@@ -384,7 +484,7 @@ public sealed class StandardToolRegistrationTests(ITestOutputHelper output)
         var sessions = schema.GetProperty("properties").GetProperty("sessions");
 
         var properties = sessions.GetProperty("items").GetProperty("properties");
-        foreach (var name in new[] { "workbook_session_id", "filePath", "isExcelVisible", "activeOperations", "canClose", "excelState", "blockingReason" })
+        foreach (var name in new[] { "workbook_session_id", "filePath", "workbookName", "isAttached", "isExcelVisible", "activeOperations", "operationPending", "canClose", "excelState", "blockingReason", "blockingMessage" })
         {
             Assert.True(properties.TryGetProperty(name, out _),
                 $"File session output schema does not describe {name}.");

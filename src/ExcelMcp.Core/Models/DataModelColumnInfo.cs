@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 
 namespace Sbroenne.ExcelMcp.Core.Models;
 
@@ -17,18 +18,18 @@ public class DataModelColumnInfo
     public string DataType { get; init; } = "";
 
     /// <summary>
-    /// Excel XlParameterDataType numeric value.
+    /// Raw OLE DB type code returned by Excel's ModelTableColumn.DataType.
     /// </summary>
     public int DataTypeValue { get; init; }
 
     /// <summary>
-    /// Human-readable XlParameterDataType name.
+    /// Human-readable name for an observed model column OLE DB type, or Unknown with its raw code.
     /// </summary>
     public string DataTypeName { get; init; } = "";
 
     /// <summary>
-    /// Whether this is a calculated column (has DAX formula)
+    /// Whether this is a calculated column, or null when Excel cannot expose that information.
     /// </summary>
-    public bool IsCalculated { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public bool? IsCalculated { get; init; }
 }
-

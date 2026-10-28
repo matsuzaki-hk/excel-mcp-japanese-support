@@ -136,9 +136,10 @@ public sealed partial class ServiceWorkbookLifecycleTests
     [Theory]
     [InlineData(true, "User ID")]
     [InlineData(true, "UID")]
-    [InlineData(true, "uSeR iD")]
     [InlineData(false, "User ID")]
-    public async Task ConnectionAccountSettings_ClearOnlySelectedHint_AndPersist(bool hasHint, string hintKey)
+    [InlineData(false, "User ID", true)]
+    public async Task ConnectionAccountSettings_ClearOnlySelectedHint_AndPersist(
+        bool hasHint, string hintKey, bool slowReadiness = false)
     {
         await RunWithCleanupAsync(async (service, directory, sessions) =>
         {
@@ -151,8 +152,28 @@ public sealed partial class ServiceWorkbookLifecycleTests
             var before = ReadAccountSettingsFixture(batch, "Selected");
             var neighbor = ReadAccountSettingsFixture(batch, "Selected neighbor");
 
-            var inspected = await AccountSettingsRequestAsync(service, session, "get-account-settings", "Selected");
+            var excelBatch = Assert.IsType<ExcelBatch>(batch);
+            var delayedInspections = 0;
+            if (slowReadiness)
+            {
+                excelBatch.BeforeRefreshStateReadHookForTests = () =>
+                {
+                    excelBatch.BeforeRefreshStateReadHookForTests = null;
+                    Interlocked.Increment(ref delayedInspections);
+                    Thread.Sleep(400);
+                };
+            }
+            ServiceResponse inspected;
+            try
+            {
+                inspected = await AccountSettingsRequestAsync(service, session, "get-account-settings", "Selected");
+            }
+            finally
+            {
+                excelBatch.BeforeRefreshStateReadHookForTests = null;
+            }
             RequireSuccess(inspected);
+            Assert.Equal(slowReadiness ? 1 : 0, delayedInspections);
             using (var json = JsonDocument.Parse(inspected.Result!))
             {
                 var result = json.RootElement;
@@ -194,6 +215,10 @@ public sealed partial class ServiceWorkbookLifecycleTests
             Assert.Equal(neighbor, ReadAccountSettingsFixture(batch, "Selected neighbor"));
         });
     }
+
+    [Fact]
+    public Task ConnectionAccountSettings_ClearCaseInsensitiveHint_AndPersist() =>
+        ConnectionAccountSettings_ClearOnlySelectedHint_AndPersist(true, "uSeR iD");
 
     [Theory]
     [InlineData(null, null, null)]
@@ -280,24 +305,43 @@ public sealed partial class ServiceWorkbookLifecycleTests
         });
     }
 
-    private static Task<ServiceResponse> AccountSettingsRequestAsync(
-        ExcelMcpService service, string session, string action, string name) =>
-        service.ProcessAsync(new ServiceRequest
+    private static async Task<ServiceResponse> AccountSettingsRequestAsync(
+        ExcelMcpService service, string session, string action, string name)
+    {
+        await WaitForAccountSettingsReadinessAsync(service, session);
+        return await service.ProcessAsync(new ServiceRequest
         {
             Command = "connection." + action,
             SessionId = session,
             Args = JsonSerializer.Serialize(new { connectionName = name }, ServiceProtocol.JsonOptions)
         });
+    }
 
-    private static Task<ServiceResponse> SetAccountSettingsRequestAsync(
+    private static async Task<ServiceResponse> SetAccountSettingsRequestAsync(
         ExcelMcpService service, string session, string? accountHint, string? interactiveLogin,
-        string? identityMode, string name = "Selected") =>
-        service.ProcessAsync(new ServiceRequest
+        string? identityMode, string name = "Selected")
+    {
+        await WaitForAccountSettingsReadinessAsync(service, session);
+        return await service.ProcessAsync(new ServiceRequest
         {
             Command = "connection.set-account-settings",
             SessionId = session,
             Args = JsonSerializer.Serialize(new { connectionName = name, accountHint, interactiveLogin, identityMode }, ServiceProtocol.JsonOptions)
         });
+    }
+
+    private static async Task WaitForAccountSettingsReadinessAsync(ExcelMcpService service, string session)
+    {
+        var batch = Assert.IsAssignableFrom<IExcelBatchRefreshState>(service.SessionManager.GetSession(session));
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var state = batch.GetRefreshState();
+        while (state == WorkbookRefreshState.Unknown && timer.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            await Task.Delay(50);
+            state = batch.GetRefreshState();
+        }
+        Assert.Equal(WorkbookRefreshState.Ready, state);
+    }
 
     private static void AddAccountSettingsFixture(IExcelBatch batch, string name, bool hasHint, string hintKey = "User ID") =>
         batch.Execute((context, _) =>
@@ -333,8 +377,8 @@ public sealed partial class ServiceWorkbookLifecycleTests
                 connection = connections.Item(name);
                 oledb = connection.OLEDBConnection;
                 return new AccountSettingsSnapshot(
-                    Convert.ToString(oledb.Connection, System.Globalization.CultureInfo.InvariantCulture)!.Replace("OLEDB;", "", StringComparison.OrdinalIgnoreCase),
-                    connection.Description, Convert.ToString(oledb.CommandText, System.Globalization.CultureInfo.InvariantCulture),
+                    Convert.ToString(((object)oledb.Connection), System.Globalization.CultureInfo.InvariantCulture)!.Replace("OLEDB;", "", StringComparison.OrdinalIgnoreCase),
+                    connection.Description, Convert.ToString(((object)oledb.CommandText), System.Globalization.CultureInfo.InvariantCulture),
                     oledb.SavePassword, connection.RefreshWithRefreshAll, oledb.RefreshOnFileOpen);
             }
             finally

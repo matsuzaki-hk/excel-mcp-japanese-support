@@ -1,3 +1,4 @@
+using Excel = Microsoft.Office.Interop.Excel;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Models;
@@ -16,19 +17,16 @@ public partial class PivotTableCommands
     {
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? pivot = null;
-            dynamic? pivotFields = null;
-            dynamic? cubeFields = null;
-
-            pivot = FindPivotTable(ctx.Book, pivotTableName);
-
-            // Check if this is an OLAP/Data Model PivotTable
-            bool isOlap = PivotTableHelpers.TryGetCubeFields(pivot, out cubeFields);
+            Excel.PivotTable? pivot = null;
+            Excel.PivotFields? pivotFields = null;
+            Excel.CubeFields? cubeFields = null;
 
             try
             {
+                pivot = FindPivotTable(ctx.Book, pivotTableName);
+                bool isOlap = PivotTableHelpers.TryGetCubeFields(pivot, out cubeFields);
                 // For OLAP PivotTables, use CubeFields instead of PivotFields
-                if (isOlap)
+                if (isOlap && cubeFields is not null)
                 {
                     var result = ListCubeFieldsAsync(cubeFields, batch.WorkbookPath);
                     result.ValueFields = ReadAllValueFieldCalculations(
@@ -38,7 +36,7 @@ public partial class PivotTableCommands
                 else
                 {
                     // Regular PivotTable - use PivotFields
-                    pivotFields = pivot.PivotFields;
+                    pivotFields = (Excel.PivotFields)pivot.PivotFields();
                     var result = ListRegularFieldsAsync(pivotFields, batch.WorkbookPath);
                     result.ValueFields = ReadAllValueFieldCalculations(
                         (Microsoft.Office.Interop.Excel.PivotTable)pivot, batch.WorkbookPath, ct);
@@ -57,7 +55,7 @@ public partial class PivotTableCommands
     /// <summary>
     /// Lists fields from OLAP/Data Model PivotTable using CubeFields
     /// </summary>
-    private static PivotFieldListResult ListCubeFieldsAsync(dynamic cubeFields, string filePath)
+    private static PivotFieldListResult ListCubeFieldsAsync(Excel.CubeFields cubeFields, string filePath)
     {
         return new PivotFieldListResult
         {
@@ -70,7 +68,7 @@ public partial class PivotTableCommands
     /// <summary>
     /// Lists fields from regular PivotTable using PivotFields
     /// </summary>
-    private static PivotFieldListResult ListRegularFieldsAsync(dynamic pivotFields, string filePath)
+    private static PivotFieldListResult ListRegularFieldsAsync(Excel.PivotFields pivotFields, string filePath)
     {
         var fields = new List<PivotFieldInfo>();
 
@@ -78,7 +76,7 @@ public partial class PivotTableCommands
 
         for (int i = 1; i <= fieldCount; i++)
         {
-            dynamic? field = null;
+            Excel.PivotField? field = null;
             try
             {
                 field = pivotFields.Item(i);
@@ -87,9 +85,12 @@ public partial class PivotTableCommands
                 string fieldName;
                 try
                 {
-                    fieldName = field.SourceName?.ToString() ?? field.Name?.ToString() ?? $"Field{i}";
+                    object? sourceName = field.SourceName;
+                    if (PivotTableHelpers.IsValuesPlaceholderField(field, sourceName))
+                        continue; // The synthetic Values field exposes an error VARIANT, not a source name.
+                    fieldName = sourceName?.ToString() ?? field.Name?.ToString() ?? $"Field{i}";
                 }
-                catch (System.Runtime.InteropServices.COMException)
+                catch (System.Runtime.InteropServices.COMException ex) when (ComErrors.IsMemberUnavailable(ex))
                 {
                     fieldName = $"Field{i}";
                 }
@@ -98,9 +99,9 @@ public partial class PivotTableCommands
                 int orientation;
                 try
                 {
-                    orientation = Convert.ToInt32(field.Orientation);
+                    orientation = (int)field.Orientation;
                 }
-                catch (System.Runtime.InteropServices.COMException)
+                catch (System.Runtime.InteropServices.COMException ex) when (ComErrors.IsMemberUnavailable(ex))
                 {
                     orientation = XlPivotFieldOrientation.xlHidden;
                 }
@@ -123,7 +124,7 @@ public partial class PivotTableCommands
                 {
                     fieldInfo.CustomName = field.Caption?.ToString() ?? string.Empty;
                 }
-                catch (System.Runtime.InteropServices.COMException)
+                catch (System.Runtime.InteropServices.COMException ex) when (ComErrors.IsMemberUnavailable(ex))
                 {
                     fieldInfo.CustomName = string.Empty;
                 }
@@ -131,9 +132,9 @@ public partial class PivotTableCommands
                 // Position - defensive
                 try
                 {
-                    fieldInfo.Position = orientation != XlPivotFieldOrientation.xlHidden ? Convert.ToInt32(field.Position) : 0;
+                    fieldInfo.Position = orientation != XlPivotFieldOrientation.xlHidden ? Convert.ToInt32((object)field.Position, System.Globalization.CultureInfo.InvariantCulture) : 0;
                 }
-                catch (System.Runtime.InteropServices.COMException)
+                catch (System.Runtime.InteropServices.COMException ex) when (ComErrors.IsMemberUnavailable(ex))
                 {
                     fieldInfo.Position = 0;
                 }
@@ -143,7 +144,7 @@ public partial class PivotTableCommands
                 {
                     fieldInfo.DataType = PivotTableHelpers.DetectFieldDataType(field);
                 }
-                catch (System.Runtime.InteropServices.COMException)
+                catch (System.Runtime.InteropServices.COMException ex) when (ComErrors.IsMemberUnavailable(ex))
                 {
                     fieldInfo.DataType = "Unknown";
                 }
@@ -153,20 +154,16 @@ public partial class PivotTableCommands
                 {
                     try
                     {
-                        int comFunction = Convert.ToInt32(field.Function);
+                        int comFunction = (int)field.Function;
                         fieldInfo.Function = PivotTableHelpers.GetAggregationFunctionFromCom(comFunction);
                     }
-                    catch (System.Runtime.InteropServices.COMException)
+                    catch (System.Runtime.InteropServices.COMException ex) when (ComErrors.IsMemberUnavailable(ex))
                     {
                         fieldInfo.Function = AggregationFunction.Sum; // Default
                     }
                 }
 
                 fields.Add(fieldInfo);
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                // Skip field if COM access fails - continue with other fields
             }
             finally
             {
@@ -263,7 +260,7 @@ public partial class PivotTableCommands
         var invariantFormat = NumberFormatLiterals.PreserveCurrencyLiterals(numberFormat);
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? pivot = null;
+            Excel.PivotTable? pivot = null;
 
             pivot = FindPivotTable(ctx.Book, pivotTableName);
 

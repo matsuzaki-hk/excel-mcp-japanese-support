@@ -11,8 +11,30 @@ namespace Sbroenne.ExcelMcp.Service.Tests;
 [Trait("Speed", "Fast")]
 public sealed class ServiceSessionContractTests
 {
+    [Theory]
+    [InlineData("enable-editing", """{"approved":"true","allowRememberedTrust":true}""", "approved")]
+    [InlineData("enable-connections", """{"approved":true,"allowRememberedTrust":1}""", "allowRememberedTrust")]
+    [InlineData("enable-macros", """{"approved":true,"allowReopen":null}""", "allowReopen")]
+    [InlineData("notices", """{"approved":true}""", "approved")]
+    [InlineData("enable-macros", """{"approved":true,"allowRememberedTrust":true}""", "allowRememberedTrust")]
+    public async Task SecurityAction_InvalidApprovalIsRejectedBeforeSelectingAWorkbook(
+        string action, string args, string invalidParameter)
+    {
+        using var service = new ExcelMcpService();
+        var response = await service.ProcessAsync(new ServiceRequest
+        {
+            Command = "session." + action,
+            SessionId = "missing-session",
+            Args = args
+        });
+        Assert.False(response.Success);
+        Assert.Equal("InvalidInput", response.ErrorCategory);
+        Assert.Contains(invalidParameter, response.ErrorMessage, StringComparison.Ordinal);
+        Assert.Equal(0, service.SessionCount);
+    }
+
     [Fact]
-    public async Task Save_IsRejectedAsUnknownSessionAction()
+    public async Task Save_MissingSession_ReturnsSessionNotFound()
     {
         using var service = new ExcelMcpService();
 
@@ -23,10 +45,9 @@ public sealed class ServiceSessionContractTests
         });
 
         Assert.False(response.Success);
-        Assert.Equal("InvalidInput", response.ErrorCategory);
-        Assert.Equal(
-            "Unknown action 'save' for command group 'session'. Valid actions: create, open, close, list, test.",
-            response.ErrorMessage);
+        Assert.Equal("SessionNotFound", response.ErrorCategory);
+        Assert.Contains("missing-session", response.ErrorMessage, StringComparison.Ordinal);
+        Assert.Equal(0, service.SessionCount);
     }
 
     [Fact]
@@ -61,6 +82,28 @@ public sealed class ServiceSessionContractTests
             "absolute Windows path",
             response.ErrorMessage,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("session.open", true)]
+    [InlineData("session.open", false)]
+    [InlineData("session.create", true)]
+    [InlineData("session.create", false)]
+    public async Task OpenAndCreate_RejectRemovedTracingOption(string command, bool enabled)
+    {
+        using var service = new ExcelMcpService();
+
+        var response = await service.ProcessAsync(new ServiceRequest
+        {
+            Command = command,
+            Args = JsonSerializer.Serialize(new { filePath = @"C:\missing\book.xlsx", pqTracing = enabled })
+        });
+
+        Assert.False(response.Success);
+        Assert.Equal("InvalidInput", response.ErrorCategory);
+        Assert.Contains("Unknown parameter(s)", response.ErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("pqTracing", response.ErrorMessage, StringComparison.Ordinal);
+        Assert.Equal(0, service.SessionCount);
     }
 
     [Fact]

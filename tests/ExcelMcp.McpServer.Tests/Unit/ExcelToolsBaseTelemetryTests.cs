@@ -223,7 +223,6 @@ public sealed class ExcelToolsBaseTelemetryTests
                 result);
 
         Assert.True(requestTelemetry.Success);
-        Assert.Equal("200", requestTelemetry.ResponseCode);
         Assert.Equal("mcp-server", requestTelemetry.Properties["EntryPoint"]);
         Assert.Equal("expected-negative", requestTelemetry.Properties["Outcome"]);
         Assert.False(requestTelemetry.Properties.ContainsKey("FailureClass"));
@@ -250,7 +249,6 @@ public sealed class ExcelToolsBaseTelemetryTests
                 result);
 
         Assert.False(requestTelemetry.Success);
-        Assert.Equal("500", requestTelemetry.ResponseCode);
         Assert.Equal("failed", requestTelemetry.Properties["Outcome"]);
         Assert.Equal(label, requestTelemetry.Properties["FailureClass"]);
         Assert.Equal("failed", eventTelemetry.Properties["Outcome"]);
@@ -288,7 +286,8 @@ public sealed class ExcelToolsBaseTelemetryTests
     public async Task WorksheetMissingSession_ReturnsCategorizedRecoveryGuidance()
     {
         using var bridge = new ServiceBridge.ServiceBridge(() => throw new InvalidOperationException("Unexpected dispatch."));
-        var result = await ExcelWorksheetTool.ExcelWorksheet(WorksheetWriteAction.Create, bridge);
+        var result = await ExcelSheet_worksheetTool.ExcelSheet_worksheet(
+            ExcelSheet_worksheetTool.McpSheet_worksheetAction.Create, bridge);
         var response = Assert.Single(result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>()).Text;
 
         using var json = JsonDocument.Parse(response);

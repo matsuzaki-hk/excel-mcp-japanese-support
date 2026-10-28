@@ -25,77 +25,6 @@ public sealed partial class AutomationSafetyTests
     }
 
     [Theory]
-    [InlineData("check-com-leaks.ps1")]
-    [InlineData("check-success-flag.ps1")]
-    [InlineData("check-dynamic-casts.ps1")]
-    public async Task SourceGuards_RejectEmptyDiscoveryAndIgnoreGeneratedFiles(string script)
-    {
-        string[] suspiciousCases = script switch
-        {
-            "check-com-leaks.ps1" =>
-            [
-                "var count = worksheet.Rows.Count;",
-                "int row = table.Range.Row;",
-                "int column = table.Range.Column;",
-                "namesCollection.Add(\"Example\", \"=Sheet1!A1\");"
-            ],
-            "check-success-flag.ps1" => ["result.Success = true;\nresult.ErrorMessage = \"failure\";"],
-            "check-dynamic-casts.ps1" => ["var item = ((dynamic)source).Item;"],
-            _ => throw new ArgumentOutOfRangeException(nameof(script))
-        };
-        var suspicious = string.Join(Environment.NewLine, suspiciousCases);
-        var root = NewSandbox();
-        try
-        {
-            var scripts = Directory.CreateDirectory(Path.Combine(root, "scripts")).FullName;
-            File.Copy(Path.Combine(RepoRoot, "scripts", script), Path.Combine(scripts, script));
-            Directory.CreateDirectory(Path.Combine(root, "src", "ExcelMcp.Core", "Commands"));
-            Directory.CreateDirectory(Path.Combine(root, "src", "ExcelMcp.ComInterop"));
-            var commands = Path.Combine(root, "src", "ExcelMcp.Core", "Commands");
-            var arguments = script == "check-com-leaks.ps1" ? $" -InputPath '{Quote(commands)}'" : "";
-            var command = $"& '{Quote(Path.Combine(scripts, script))}'{arguments}";
-            var empty = await RunAsync(root, command);
-            Assert.NotEqual(0, empty.ExitCode);
-
-            var source = Path.Combine(commands, "Example.cs");
-            File.WriteAllText(source, suspicious);
-            File.WriteAllText(Path.Combine(root, "src", "ExcelMcp.ComInterop", "Example.cs"), "class Example {}");
-            var invalid = await RunAsync(root, command);
-            Assert.NotEqual(0, invalid.ExitCode);
-            if (script == "check-com-leaks.ps1")
-            {
-                Assert.Contains("4 com-leaks violation(s).", invalid.Output, StringComparison.Ordinal);
-                for (var index = 0; index < suspiciousCases.Length; index++)
-                {
-                    Assert.Contains($"Example.cs:{index + 1} - ", invalid.Output, StringComparison.Ordinal);
-                    Assert.Contains(suspiciousCases[index], invalid.Output, StringComparison.Ordinal);
-                }
-            }
-
-            File.WriteAllText(source, script == "check-com-leaks.ps1" ? """
-                dynamic? rows = null;
-                dynamic? name = null;
-                try
-                {
-                    rows = range.Rows;
-                    int count = rows.Count;
-                    name = namesCollection.Add("Example", "=Sheet1!A1");
-                }
-                finally
-                {
-                    ComUtilities.Release(ref name);
-                    ComUtilities.Release(ref rows);
-                }
-                """ : "class Example {}");
-            var generated = Directory.CreateDirectory(Path.Combine(commands, "obj")).FullName;
-            File.WriteAllText(Path.Combine(generated, "Generated.cs"), suspicious);
-            var valid = await RunAsync(root, command);
-            Assert.True(valid.ExitCode == 0, valid.Output);
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    [Theory]
     [Trait("RunType", "OnDemand")]
     [InlineData("configure-analytics-oidc.ps1", "-SubscriptionId requested")]
     [InlineData("deploy-appinsights.ps1", "")]
@@ -188,49 +117,6 @@ public sealed partial class AutomationSafetyTests
         finally { Directory.Delete(root, true); }
     }
 
-    [Theory]
-    [InlineData("Cli", "src/ExcelMcp.CLI/Program.cs")]
-    [InlineData("Mcp", "src/ExcelMcp.McpServer/Program.cs")]
-    [InlineData("Plugins", ".github/workflows/publish-plugins.yml")]
-    [InlineData("Extension", "vscode-extension/package.json")]
-    [InlineData("Mcpb", "mcpb/manifest.json")]
-    public async Task PackageSelection_ChoosesOwningComponent(string component, string path)
-    {
-        var root = NewSandbox();
-        try
-        {
-            var result = await RunAsync(root, $$"""
-                . '{{Quote(Path.Combine(RepoRoot, "scripts", "Get-ValidationPlan.ps1"))}}'
-                $plan = Get-ValidationPlan -Paths '{{path}}'
-                if (-not $plan.{{component}}) { throw 'Owning package was not selected.' }
-                """);
-            Assert.True(result.ExitCode == 0, result.Output);
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    [Theory]
-    [InlineData("src/ExcelMcp.CLI/Program.cs", "Cli")]
-    [InlineData("src/ExcelMcp.McpServer/Program.cs", "Mcp,Extension")]
-    [InlineData("npm-packages/shared/launcher.js", "Cli,Mcp")]
-    [InlineData(".npmrc", "Cli,Mcp,Extension,Mcpb,Plugins")]
-    [InlineData("README.md", "Cli,Mcp")]
-    public async Task PackageSelection_ExcludesUnrelatedDistributions(string path, string expected)
-    {
-        var root = NewSandbox();
-        try
-        {
-            var result = await RunAsync(root, $$"""
-                . '{{Quote(Path.Combine(RepoRoot, "scripts", "Get-ValidationPlan.ps1"))}}'
-                $plan = Get-ValidationPlan -Paths '{{path}}'
-                $selected = @('Cli','Mcp','Extension','Mcpb','Plugins') | Where-Object { $plan.$_ }
-                if (($selected -join ',') -ne '{{expected}}') { throw "Wrong package selection: $selected" }
-                """);
-            Assert.True(result.ExitCode == 0, result.Output);
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
     [Fact]
     public async Task CaptureEvidence_NeverSavesAndStillQuitsAfterCloseFails()
     {
@@ -297,8 +183,8 @@ public sealed partial class AutomationSafetyTests
             var cubePidFile = Path.Combine(root, "cube.pid");
             var childPidFile = Path.Combine(root, "cube-child.pid");
             File.WriteAllText(Path.Combine(scripts, "Start-OlapTestCube.ps1"), $$"""
-                $child = "Start-Process pwsh -ArgumentList '-NoProfile','-Command','Start-Sleep 120' -PassThru | ForEach-Object { @{ pid = `$_.Id; started = `$_.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json } | Set-Content '{{Quote(childPidFile)}}'; Start-Sleep 120"
-                $process = Start-Process pwsh -ArgumentList '-NoProfile', '-Command', $child -PassThru
+                $child = "Start-Process pwsh -NoNewWindow -ArgumentList '-NoProfile','-Command','Start-Sleep 120' -PassThru | ForEach-Object { @{ pid = `$_.Id; started = `$_.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json } | Set-Content '{{Quote(childPidFile)}}'; Start-Sleep 120"
+                $process = Start-Process pwsh -NoNewWindow -ArgumentList '-NoProfile', '-Command', $child -PassThru
                 @{ pid = $process.Id; started = $process.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json | Set-Content '{{Quote(cubePidFile)}}'
                 while (-not (Test-Path '{{Quote(childPidFile)}}')) { Start-Sleep -Milliseconds 100 }
                 [pscustomobject]@{
@@ -404,13 +290,10 @@ public sealed partial class AutomationSafetyTests
         {
             var parentPid = Path.Combine(root, "parent.pid");
             var childPid = Path.Combine(root, "child.pid");
-            var source = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "Start-OlapTestCube.ps1"));
-            var start = source.IndexOf("$null = $process.Handle", StringComparison.Ordinal);
-            var end = source.IndexOf("[pscustomobject]@{", start, StringComparison.Ordinal);
-            Assert.True(start >= 0 && end > start);
             var result = await RunAsync(root, $$"""
-                $child = "Start-Process pwsh -ArgumentList '-NoProfile','-Command','Start-Sleep 120' -PassThru | ForEach-Object { @{ pid = `$_.Id; started = `$_.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json } | Set-Content '{{Quote(childPid)}}'; Start-Sleep 120"
-                $process = Start-Process pwsh -ArgumentList '-NoProfile','-Command',$child -PassThru
+                . '{{Quote(Path.Combine(RepoRoot, "scripts", "Start-OlapTestCube.ps1"))}}'
+                $child = "Start-Process pwsh -NoNewWindow -ArgumentList '-NoProfile','-Command','Start-Sleep 120' -PassThru | ForEach-Object { @{ pid = `$_.Id; started = `$_.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json } | Set-Content '{{Quote(childPid)}}'; Start-Sleep 120"
+                $process = Start-Process pwsh -NoNewWindow -ArgumentList '-NoProfile','-Command',$child -PassThru
                 @{ pid = $process.Id; started = $process.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json | Set-Content '{{Quote(parentPid)}}'
                 $deadline = [DateTime]::UtcNow.AddSeconds(15)
                 while (-not (Test-Path '{{Quote(childPid)}}')) {
@@ -422,7 +305,7 @@ public sealed partial class AutomationSafetyTests
                 $logPath = '{{Quote(Path.Combine(root, "cube.log"))}}'
                 'startup diagnostic' | Set-Content "$logPath.err"
                 try {
-                    {{source[start..end]}}
+                    Wait-OlapCubeStartup -Process $process -LogPath $logPath -Port $port -StartupTimeoutSeconds $StartupTimeoutSeconds
                 }
                 catch { $_.Exception.ToString() | Write-Output; exit 1 }
                 """);
@@ -492,12 +375,9 @@ public sealed partial class AutomationSafetyTests
             var script = Path.Combine(RepoRoot, "scripts", "Start-OlapTestCube.ps1");
             var childFile = Path.Combine(root, "setup-child.pid");
             var result = await RunAsync(root, $$"""
-                $ast = [Management.Automation.Language.Parser]::ParseFile('{{Quote(script)}}', [ref]$null, [ref]$null)
-                $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-OlapSetupProcess' }, $true)
-                if (-not $function) { throw 'Missing bounded OLAP setup function.' }
-                . ([scriptblock]::Create($function.Extent.Text))
+                . '{{Quote(script)}}'
                 $body = @'
-                $child = Start-Process pwsh -ArgumentList '-NoProfile','-Command','Start-Sleep 120' -PassThru
+                $child = Start-Process pwsh -NoNewWindow -ArgumentList '-NoProfile','-Command','Start-Sleep 120' -PassThru
                 @{ pid = $child.Id; started = $child.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json | Set-Content '{{Quote(childFile)}}'
                 Start-Sleep 120
                 '@
@@ -551,6 +431,7 @@ public sealed partial class AutomationSafetyTests
             catch (ArgumentException) { continue; }
             using (process)
             {
+                _ = process.Handle;
                 if (process.HasExited || process.StartTime.ToUniversalTime().Ticks !=
                     identity.RootElement.GetProperty("started").GetInt64()) { continue; }
                 process.Kill(entireProcessTree: true);
@@ -563,28 +444,9 @@ public sealed partial class AutomationSafetyTests
     {
         var script = Path.Combine(root, $"test-{Guid.NewGuid():N}.ps1");
         File.WriteAllText(script, "$ErrorActionPreference='Stop'\n$global:LASTEXITCODE=0\n" + body + "\nexit $LASTEXITCODE");
-        var info = new ProcessStartInfo("pwsh")
-        {
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            WorkingDirectory = root
-        };
-        info.Environment["EXCELMCP_BUILD_ROOT"] = RepoRoot;
-        info.Environment["EXCELMCP_BUILD_DLL"] = typeof(Sbroenne.ExcelMcp.Build.ValidationPolicy).Assembly.Location;
-        foreach (var argument in new[] { "-NoProfile", "-File", script }) { info.ArgumentList.Add(argument); }
-        using var process = Process.Start(info)!;
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        try { await process.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException)
-        {
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync();
-            throw new TimeoutException("Automation script exceeded its 60-second deadline.");
-        }
-        return (process.ExitCode, await stdout + await stderr);
+        var result = await new ScriptTestProcess(root).RunAsync(
+            "pwsh", ["-NoProfile", "-File", script], TimeSpan.FromSeconds(60));
+        return (result.ExitCode, result.Output + result.Error);
     }
 
     private static string FindRepoRoot()

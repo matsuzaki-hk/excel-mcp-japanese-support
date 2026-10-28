@@ -23,21 +23,22 @@ public partial class TableCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? table = null;
-            dynamic? sheet = null;
-            dynamic? dataBodyRange = null;
-            dynamic? dataRows = null;
-            dynamic? listColumns = null;
-            dynamic? tableRange = null;
-            dynamic? cells = null;
+            Excel.ListObject? table = null;
+            Excel.Worksheet? sheet = null;
+            Excel.Range? dataBodyRange = null;
+            Excel.Range? dataRows = null;
+            Excel.ListColumns? listColumns = null;
+            Excel.Range? tableRange = null;
+            Excel.Range? cells = null;
             int originalCalculation = -1;
             bool calculationChanged = false;
+            Exception? operationFailure = null;
 
             try
             {
                 table = FindTable(ctx.Book, tableName);
 
-                sheet = table.Parent;
+                sheet = (Excel.Worksheet)(object)table.Parent;
 
                 // Validate data
                 if (resolvedRows.Count == 0)
@@ -56,7 +57,7 @@ public partial class TableCommands
                 else
                 {
                     // Table has only headers
-                    dynamic? headerRange = null;
+                    Excel.Range? headerRange = null;
                     try
                     {
                         headerRange = table.HeaderRowRange;
@@ -100,10 +101,10 @@ public partial class TableCommands
                     var rowValues = resolvedRows[i];
                     for (int j = 0; j < columnCount; j++)
                     {
-                        dynamic? cell = null;
+                        Excel.Range? cell = null;
                         try
                         {
-                            cell = cells[currentRow + i, tableColumn + j];
+                            cell = (Excel.Range)cells[currentRow + i, tableColumn + j];
                             cell.Value2 = RangeHelpers.ConvertToCellValue(rowValues[j]);
                         }
                         finally
@@ -116,27 +117,20 @@ public partial class TableCommands
                 // Restore calculation before Resize (table operations may need recalculation)
                 if (calculationChanged && originalCalculation != -1)
                 {
-                    try
-                    {
-                        ctx.App.Calculation = (Excel.XlCalculation)originalCalculation;
-                        calculationChanged = false;
-                    }
-                    catch (System.Runtime.InteropServices.COMException)
-                    {
-                        // Ignore errors restoring calculation mode
-                    }
+                    ctx.App.Calculation = (Excel.XlCalculation)originalCalculation;
+                    calculationChanged = false;
                 }
 
                 // Resize table to include new rows
                 int newLastRow = currentRow + rowsToAdd - 1;
                 int newLastCol = tableColumn + columnCount - 1;
-                dynamic? firstCell = null;
-                dynamic? lastCell = null;
+                Excel.Range? firstCell = null;
+                Excel.Range? lastCell = null;
                 string newRangeAddress;
                 try
                 {
-                    firstCell = cells[tableRow, tableColumn];
-                    lastCell = cells[newLastRow, newLastCol];
+                    firstCell = (Excel.Range)cells[tableRow, tableColumn];
+                    lastCell = (Excel.Range)cells[newLastRow, newLastCol];
                     newRangeAddress = $"{firstCell.Address}:{lastCell.Address}";
                 }
                 finally
@@ -145,7 +139,7 @@ public partial class TableCommands
                     ComUtilities.Release(ref firstCell);
                 }
 
-                dynamic? resizeRange = null;
+                Excel.Range? resizeRange = null;
                 try
                 {
                     resizeRange = sheet.Range[newRangeAddress];
@@ -158,26 +152,31 @@ public partial class TableCommands
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath };
             }
+            catch (Exception ex)
+            {
+                operationFailure = ex;
+                throw;
+            }
             finally
             {
-                if (calculationChanged && originalCalculation != -1)
+                try
                 {
-                    try
+                    if (calculationChanged && originalCalculation != -1)
                     {
-                        ctx.App.Calculation = (Excel.XlCalculation)originalCalculation;
-                    }
-                    catch (System.Runtime.InteropServices.COMException)
-                    {
-                        // Ignore errors restoring calculation mode
+                        OperationCleanup.Run(() => ctx.App.Calculation = (Excel.XlCalculation)originalCalculation,
+                            operationFailure);
                     }
                 }
-                ComUtilities.Release(ref cells);
-                ComUtilities.Release(ref tableRange);
-                ComUtilities.Release(ref listColumns);
-                ComUtilities.Release(ref dataRows);
-                ComUtilities.Release(ref dataBodyRange);
-                ComUtilities.Release(ref sheet);
-                ComUtilities.Release(ref table);
+                finally
+                {
+                    ComUtilities.Release(ref cells);
+                    ComUtilities.Release(ref tableRange);
+                    ComUtilities.Release(ref listColumns);
+                    ComUtilities.Release(ref dataRows);
+                    ComUtilities.Release(ref dataBodyRange);
+                    ComUtilities.Release(ref sheet);
+                    ComUtilities.Release(ref table);
+                }
             }
         });
     }
@@ -195,10 +194,10 @@ public partial class TableCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? table = null;
-            dynamic? listColumns = null;
-            dynamic? listRows = null;
-            dynamic? dataBodyRange = null;
+            Excel.ListObject? table = null;
+            Excel.ListColumns? listColumns = null;
+            Excel.ListRows? listRows = null;
+            Excel.Range? dataBodyRange = null;
             try
             {
                 table = FindTable(ctx.Book, tableName);
@@ -209,10 +208,10 @@ public partial class TableCommands
 
                 for (int i = 1; i <= columnCount; i++)
                 {
-                    dynamic? column = null;
+                    Excel.ListColumn? column = null;
                     try
                     {
-                        column = listColumns.Item(i);
+                        column = listColumns[i];
                         string? columnName = column.Name;
                         if (!string.IsNullOrEmpty(columnName))
                         {
@@ -293,19 +292,19 @@ public partial class TableCommands
         });
     }
 
-    private static bool IsListRowVisible(dynamic? listRows, int listRowCount, int index)
+    private static bool IsListRowVisible(Excel.ListRows? listRows, int listRowCount, int index)
     {
-        if (listRows == null || index > listRowCount)
+        if (listRows is null || index > listRowCount)
         {
             return true;
         }
 
-        dynamic? listRow = null;
-        dynamic? rowRange = null;
-        dynamic? entireRow = null;
+        Excel.ListRow? listRow = null;
+        Excel.Range? rowRange = null;
+        Excel.Range? entireRow = null;
         try
         {
-            listRow = listRows.Item(index);
+            listRow = listRows[index];
             rowRange = listRow.Range;
             entireRow = rowRange.EntireRow;
 

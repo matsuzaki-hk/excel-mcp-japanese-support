@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
-using Microsoft.CSharp.RuntimeBinder;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.Core.DataModel;
 using Sbroenne.ExcelMcp.Core.Models;
@@ -19,6 +18,8 @@ public partial class DataModelCommands
     private const string PercentageMeasureFormat = "Percentage";
     private const string WholeNumberMeasureFormat = "WholeNumber";
 
+    internal static Action<object>? RelationshipReferenceAcquiredForTests { get; set; }
+
     private static readonly Dictionary<string, Func<Excel.Model, object>> MeasureFormatFactories =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -32,16 +33,6 @@ public partial class DataModelCommands
     private static DataModelColumnInfo CreateColumnInfo(object column)
     {
         var typedColumn = (Excel.ModelTableColumn)column;
-        bool isCalculated;
-        try
-        {
-            // PIA gap: ModelTableColumn.IsCalculatedColumn does not compile against Excel PIA 16.0.18925.20022.
-            isCalculated = ((dynamic)typedColumn).IsCalculatedColumn ?? false;
-        }
-        catch (Exception ex) when (ex is RuntimeBinderException or COMException)
-        {
-            isCalculated = false;
-        }
 
         int dataTypeValue = typedColumn.DataType;
         return new DataModelColumnInfo
@@ -49,26 +40,24 @@ public partial class DataModelCommands
             Name = typedColumn.Name ?? string.Empty,
             DataType = dataTypeValue.ToString(CultureInfo.InvariantCulture),
             DataTypeValue = dataTypeValue,
-            DataTypeName = GetParameterDataTypeName(dataTypeValue),
-            IsCalculated = isCalculated
+            DataTypeName = GetModelColumnDataTypeName(dataTypeValue),
+            IsCalculated = null
         };
     }
 
-    private static string GetParameterDataTypeName(int dataTypeValue)
-    {
-        if (dataTypeValue == 20)
+    internal static string GetModelColumnDataTypeName(int dataTypeValue)
+        // ModelTableColumn returns OLE DB type codes at runtime, not XlParameterDataType values.
+        => dataTypeValue switch
         {
-            return "BIGINT";
-        }
+            5 => "DOUBLE",
+            7 => "DATE",
+            11 => "BOOLEAN",
+            20 => "BIGINT",
+            130 => "WCHAR",
+            _ => $"Unknown ({dataTypeValue.ToString(CultureInfo.InvariantCulture)})"
+        };
 
-        const string prefix = "xlParamType";
-        string enumName = ((Excel.XlParameterDataType)dataTypeValue).ToString();
-        return enumName.StartsWith(prefix, StringComparison.Ordinal)
-            ? enumName[prefix.Length..].ToUpperInvariant()
-            : $"Unknown ({dataTypeValue.ToString(CultureInfo.InvariantCulture)})";
-    }
-
-    private static DataModelAdoDiagnostics CollectAdoDiagnostics(dynamic? adoConnection)
+    private static DataModelAdoDiagnostics CollectAdoDiagnostics(ADODB._Connection? adoConnection)
     {
         if (adoConnection == null)
         {
@@ -83,13 +72,13 @@ public partial class DataModelCommands
         };
     }
 
-    private static string? TryGetAdoConnectionString(dynamic adoConnection)
+    private static string? TryGetAdoConnectionString(ADODB._Connection adoConnection)
     {
         try
         {
-            return adoConnection.ConnectionString?.ToString();
+            return adoConnection.ConnectionString;
         }
-        catch (Exception ex) when (ex is COMException or RuntimeBinderException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             return null;
         }
@@ -108,30 +97,31 @@ public partial class DataModelCommands
     {
         Excel.WorkbookConnection? dataModelConn = null;
         Excel.ModelConnection? modelConn = null;
-        dynamic? adoConnection = null;
-        dynamic? recordset = null;
-        dynamic? fields = null;
-        dynamic? nameField = null;
-        dynamic? expressionField = null;
+        ADODB._Connection? adoConnection = null;
+        ADODB._Recordset? recordset = null;
+        ADODB.Fields? fields = null;
+        ADODB.Field? nameField = null;
+        ADODB.Field? expressionField = null;
+        Exception? operationFailure = null;
         try
         {
             dataModelConn = model.DataModelConnection;
             modelConn = dataModelConn?.ModelConnection;
-            // ADO has no referenced PIA; the existing evaluate path also uses late binding.
-            adoConnection = modelConn?.ADOConnection;
+            adoConnection = modelConn is null ? null : ComUtilities.ReadAdoConnection(modelConn);
             if (adoConnection == null)
             {
                 return null;
             }
 
             recordset = adoConnection.Execute(
-                "SELECT [MEASURE_NAME], [EXPRESSION] FROM $SYSTEM.MDSCHEMA_MEASURES");
+                "SELECT [MEASURE_NAME], [EXPRESSION] FROM $SYSTEM.MDSCHEMA_MEASURES",
+                out _, (int)ADODB.ExecuteOptionEnum.adOptionUnspecified);
             fields = recordset.Fields;
-            nameField = fields.Item(0);
-            expressionField = fields.Item(1);
+            nameField = fields[0];
+            expressionField = fields[1];
 
             var formulas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            while (!Convert.ToBoolean(recordset.EOF, CultureInfo.InvariantCulture))
+            while (!recordset.EOF)
             {
                 object? nameValue = nameField.Value;
                 object? expressionValue = expressionField.Value;
@@ -147,72 +137,52 @@ public partial class DataModelCommands
 
             return formulas;
         }
-        catch (Exception ex) when (ex is COMException or RuntimeBinderException or InvalidCastException or FormatException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             return null;
         }
+        catch (Exception exception)
+        {
+            operationFailure = exception;
+            throw;
+        }
         finally
         {
-            if (recordset != null)
+            try
             {
-                try
-                {
-                    // 1 = adStateOpen
-                    if (Convert.ToInt32(recordset.State, CultureInfo.InvariantCulture) == 1)
-                    {
-                        recordset.Close();
-                    }
-                }
-                catch (Exception ex) when (ex is COMException or RuntimeBinderException)
-                {
-                    // Closing a finished recordset is best effort.
-                }
+                CloseRecordset(recordset, operationFailure);
             }
-
-            ComUtilities.Release(ref expressionField);
-            ComUtilities.Release(ref nameField);
-            ComUtilities.Release(ref fields);
-            ComUtilities.Release(ref recordset);
-            ComUtilities.Release(ref adoConnection);
-            ComUtilities.Release(ref modelConn);
-            ComUtilities.Release(ref dataModelConn);
+            finally
+            {
+                ComUtilities.Release(ref expressionField);
+                ComUtilities.Release(ref nameField);
+                ComUtilities.Release(ref fields);
+                ComUtilities.Release(ref recordset);
+                ComUtilities.Release(ref adoConnection);
+                ComUtilities.Release(ref modelConn);
+                ComUtilities.Release(ref dataModelConn);
+            }
         }
     }
 
-    /// <summary>
-    /// Gets all measure names from the Data Model
-    /// </summary>
-    /// <param name="model">Model COM object</param>
-    /// <returns>List of measure names</returns>
-    private static List<string> GetModelMeasureNames(Excel.Model model)
+    private static void CloseRecordset(ADODB._Recordset? recordset, Exception? operationFailure)
     {
-        var names = new List<string>();
-        Excel.ModelMeasures? measures = null;
         try
         {
-            // Get measures collection from MODEL (not from tables!)
-            // Reference: https://learn.microsoft.com/en-us/office/vba/api/excel.model.modelmeasures
-            measures = model.ModelMeasures;
-
-            for (int m = 1; m <= measures.Count; m++)
+            if (recordset is not null &&
+                (recordset.State & (int)ADODB.ObjectStateEnum.adStateOpen) != 0)
             {
-                Excel.ModelMeasure? measure = null;
-                try
-                {
-                    measure = measures.Item(m);
-                    names.Add(measure.Name?.ToString() ?? "");
-                }
-                finally
-                {
-                    ComUtilities.Release(ref measure);
-                }
+                recordset.Close();
             }
         }
-        finally
+        catch (Exception cleanupFailure) when (operationFailure is not null)
         {
-            ComUtilities.Release(ref measures);
+            var failures = new AggregateException("Data Model operation and closing its recordset both failed.",
+                operationFailure, cleanupFailure);
+            if (operationFailure is OperationCanceledException canceled)
+                throw new OperationCanceledException(canceled.Message, failures, canceled.CancellationToken);
+            throw failures;
         }
-        return names;
     }
 
     /// <summary>
@@ -430,17 +400,13 @@ public partial class DataModelCommands
                 {
                     relationship = relationships.Item(i);
 
-                    // Get relationship details
-                    string currentFromTable = (relationship.ForeignKeyColumn?.Parent as Excel.ModelTable)?.Name?.ToString() ?? "";
-                    string currentFromColumn = relationship.ForeignKeyColumn?.Name?.ToString() ?? "";
-                    string currentToTable = (relationship.PrimaryKeyColumn?.Parent as Excel.ModelTable)?.Name?.ToString() ?? "";
-                    string currentToColumn = relationship.PrimaryKeyColumn?.Name?.ToString() ?? "";
+                    var details = ReadRelationshipInfo(relationship);
 
                     // Match all four components (case-insensitive)
-                    if (currentFromTable.Equals(fromTable, StringComparison.OrdinalIgnoreCase) &&
-                        currentFromColumn.Equals(fromColumn, StringComparison.OrdinalIgnoreCase) &&
-                        currentToTable.Equals(toTable, StringComparison.OrdinalIgnoreCase) &&
-                        currentToColumn.Equals(toColumn, StringComparison.OrdinalIgnoreCase))
+                    if (details.FromTable.Equals(fromTable, StringComparison.OrdinalIgnoreCase) &&
+                        details.FromColumn.Equals(fromColumn, StringComparison.OrdinalIgnoreCase) &&
+                        details.ToTable.Equals(toTable, StringComparison.OrdinalIgnoreCase) &&
+                        details.ToColumn.Equals(toColumn, StringComparison.OrdinalIgnoreCase))
                     {
                         // Found match - don't release, caller will use it
                         var foundRelationship = relationship;

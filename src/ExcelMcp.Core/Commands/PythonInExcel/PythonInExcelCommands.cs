@@ -3,6 +3,7 @@ using Sbroenne.ExcelMcp.ComInterop.Session;
 using Sbroenne.ExcelMcp.Core.Commands.Range;
 using Sbroenne.ExcelMcp.Core.Models;
 using Sbroenne.ExcelMcp.Core.Utilities;
+using Excel = Microsoft.Office.Interop.Excel;
 
 namespace Sbroenne.ExcelMcp.Core.Commands.PythonInExcel;
 
@@ -35,9 +36,9 @@ public sealed class PythonInExcelCommands : IPythonInExcelCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? range = null;
-            dynamic? cells = null;
-            dynamic? firstCell = null;
+            Excel.Range? range = null;
+            Excel.Range? cells = null;
+            Excel.Range? firstCell = null;
             try
             {
                 range = RangeHelpers.ResolveRange(ctx.Book, sheetName, rangeAddress, out string? specificError);
@@ -54,21 +55,13 @@ public sealed class PythonInExcelCommands : IPythonInExcelCommands
 
                 range.Formula2 = formula;
 
-                try
-                {
-                    range.Calculate();
-                }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    // Excel may already be calculating asynchronously; the read below still reports
-                    // #BUSY! for an enabled backend or #NAME? when PY() is unavailable.
-                }
+                range.Calculate();
 
                 cells = range.Cells;
-                firstCell = cells.Item[1, 1];
+                firstCell = (Excel.Range)cells[1, 1];
                 object? value = firstCell.Value2;
-                string displayedText = firstCell.Text?.ToString() ?? string.Empty;
-                string storedFormula = firstCell.Formula2?.ToString() ?? formula;
+                string displayedText = ((object?)firstCell.Text)?.ToString() ?? string.Empty;
+                string storedFormula = ((object?)firstCell.Formula2)?.ToString() ?? formula;
                 if (IsPythonInExcelUnavailable(storedFormula, value, displayedText))
                 {
                     result.Success = false;
@@ -117,7 +110,7 @@ public sealed class PythonInExcelCommands : IPythonInExcelCommands
 
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? range = null;
+            Excel.Range? range = null;
             try
             {
                 range = RangeHelpers.ResolveRange(ctx.Book, sheetName, rangeAddress, out string? specificError);
@@ -128,7 +121,7 @@ public sealed class PythonInExcelCommands : IPythonInExcelCommands
 
                 result.RangeAddress = range.Address;
 
-                string formula = range.Formula2?.ToString() ?? string.Empty;
+                string formula = ((object?)range.Formula2)?.ToString() ?? string.Empty;
                 result.Formula = formula;
 
                 if (!formula.Contains("PY(", StringComparison.Ordinal))
@@ -172,14 +165,7 @@ public sealed class PythonInExcelCommands : IPythonInExcelCommands
                 // a reliable discriminator on its own) - see the returnType-based classification below.
                 // Nudge calculation once so a manual-calc workbook actually dispatches the async PY call.
                 // Harmless if calculation is automatic or already running.
-                try
-                {
-                    ctx.App.Calculate();
-                }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    // Application is busy calculating - the nudge is best-effort, so ignore and poll.
-                }
+                ctx.App.Calculate();
 
                 object? value = null;
                 string text = string.Empty;
@@ -195,7 +181,7 @@ public sealed class PythonInExcelCommands : IPythonInExcelCommands
                 do
                 {
                     value = range.Value2;
-                    text = range.Text?.ToString() ?? string.Empty;
+                    text = ((object?)range.Text)?.ToString() ?? string.Empty;
                     calcState = (int)ctx.App.CalculationState;
 
                     if (IsPythonInExcelUnavailable(formula, value, text))

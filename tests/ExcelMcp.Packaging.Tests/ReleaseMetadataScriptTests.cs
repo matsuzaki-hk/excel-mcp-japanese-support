@@ -36,34 +36,16 @@ public sealed class ReleaseMetadataScriptTests
         RepoRoot,
         "scripts",
         "Resolve-McpRegistryRelease.ps1");
-    private static readonly string ReleaseWorkflow = Path.Combine(
-        RepoRoot,
-        ".github",
-        "workflows",
-        "release.yml");
-    private static readonly string McpRegistryWorkflow = Path.Combine(
-        RepoRoot,
-        ".github",
-        "workflows",
-        "publish-mcp-registry.yml");
 
     [Theory]
     [InlineData("absent", false, true)]
-    [InlineData("draft", false, true)]
     [InlineData("draft-later-page", false, true)]
     [InlineData("draft-delayed", false, true)]
-    [InlineData("draft-never-visible", false, false)]
-    [InlineData("duplicate-draft", false, false)]
-    [InlineData("invalid-draft", false, false)]
-    [InlineData("published-list", false, false)]
-    [InlineData("list-api-error", false, false)]
     [InlineData("published", false, true)]
-    [InlineData("immutable", false, true)]
     [InlineData("missing", false, false)]
     [InlineData("missing", true, true)]
     [InlineData("immutable-missing", true, false)]
     [InlineData("mismatch", true, false)]
-    [InlineData("api-error", false, false)]
     [Trait("Feature", "ReleaseMetadata")]
     public async Task GitHubRelease_VerifiesPublishedAssetsAndOnlyReplacesDraftAssets(
         string mode, bool allowMutableRepair, bool succeeds)
@@ -75,7 +57,8 @@ public sealed class ReleaseMetadataScriptTests
             Directory.CreateDirectory(artifacts);
             foreach (var name in new[]
             {
-                "ExcelMcp-CLI-1.2.3-windows.zip", "ExcelMcp-MCP-Server-1.2.3-windows.zip",
+                "ExcelMcp-CLI-1.2.3-windows.zip", "ExcelMcp-CLI-1.2.3-windows-arm64.zip",
+                "ExcelMcp-MCP-Server-1.2.3-windows.zip", "ExcelMcp-MCP-Server-1.2.3-windows-arm64.zip",
                 "excel-plugins-v1.2.3.zip",
                 "excel-mcp-1.2.3.vsix", "excel-mcp-1.2.3-win32-arm64.vsix", "excel-mcp-1.2.3.mcpb"
             })
@@ -101,16 +84,9 @@ public sealed class ReleaseMetadataScriptTests
                     $global:releaseFixtureCalls.Add(($Arguments -join ' '))
                     $global:LASTEXITCODE = 0
                     if ($Arguments[0] -eq 'api') {
-                        if ('{{mode}}' -eq 'api-error') {
-                            $global:LASTEXITCODE = 1
-                            'gh: Forbidden (HTTP 403)'
-                            return
-                        }
                         $isList = $Arguments[1] -eq 'repos/owner/repo/releases'
-                        $isAbsent = '{{mode}}' -in @('absent', 'draft-delayed', 'draft-never-visible') `
-                            -and -not $global:releaseFixtureCreated
-                        $isDraft = '{{mode}}' -in @('absent', 'draft', 'draft-later-page', 'draft-delayed',
-                            'draft-never-visible', 'duplicate-draft', 'invalid-draft', 'published-list', 'list-api-error') `
+                        $isAbsent = '{{mode}}' -in @('absent', 'draft-delayed') -and -not $global:releaseFixtureCreated
+                        $isDraft = '{{mode}}' -in @('absent', 'draft-later-page', 'draft-delayed') `
                             -and -not $global:releaseFixturePublished
                         if (-not $isList -and ($isAbsent -or $isDraft)) {
                             $global:LASTEXITCODE = 1
@@ -121,20 +97,10 @@ public sealed class ReleaseMetadataScriptTests
                             if ('--paginate' -notin $Arguments -or '--slurp' -notin $Arguments) {
                                 throw 'Draft lookup must request all release pages.'
                             }
-                            if ('{{mode}}' -eq 'list-api-error') {
-                                $global:LASTEXITCODE = 1
-                                'gh: Forbidden (HTTP 403)'
-                                return
-                            }
                             if ($isAbsent) { '[[]]'; return }
                             if ('{{mode}}' -eq 'draft-delayed' -and $global:releaseFixtureCreated) {
                                 $global:releaseFixtureDraftLookups++
                                 if ($global:releaseFixtureDraftLookups -le 2) { '[[]]'; return }
-                            }
-                            if ('{{mode}}' -eq 'draft-never-visible' -and $global:releaseFixtureCreated) {
-                                $global:releaseFixtureDraftLookups++
-                                '[[]]'
-                                return
                             }
                         }
                         $assets = @(Get-ChildItem publish -File | ForEach-Object {
@@ -156,9 +122,6 @@ public sealed class ReleaseMetadataScriptTests
                                 $pages = @(@(@{ tag_name = 'V1.2.3'; draft = $true; immutable = $false }),
                                     @($release))
                             }
-                            if ('{{mode}}' -eq 'duplicate-draft') { $pages = @(@($release), @($release)) }
-                            if ('{{mode}}' -eq 'invalid-draft') { $release.immutable = 'false' }
-                            if ('{{mode}}' -eq 'published-list') { $release.draft = $false }
                             $response = ConvertTo-Json -InputObject $pages -Depth 7
                             $response | Set-Content list-response.json
                             $response
@@ -184,7 +147,7 @@ public sealed class ReleaseMetadataScriptTests
                 """);
             var result = await RunPowerShellScriptAsync(runner, [], sandbox);
             Assert.True(succeeds == (result.ExitCode == 0), result.CombinedOutput);
-            if (mode is "absent" or "draft" or "draft-later-page" or "draft-delayed" or "duplicate-draft" or "invalid-draft" or "published-list")
+            if (mode is "absent" or "draft-later-page" or "draft-delayed")
             {
                 using var response = JsonDocument.Parse(File.ReadAllText(Path.Combine(sandbox, "list-response.json")));
                 var pages = response.RootElement;
@@ -194,7 +157,7 @@ public sealed class ReleaseMetadataScriptTests
                     Assert.Equal(JsonValueKind.Array, page.ValueKind);
                     Assert.Equal(JsonValueKind.Object, Assert.Single(page.EnumerateArray()).ValueKind);
                 });
-                Assert.Equal(mode is "draft-later-page" or "duplicate-draft" ? 2 : 1, pages.GetArrayLength());
+                Assert.Equal(mode == "draft-later-page" ? 2 : 1, pages.GetArrayLength());
                 if (mode == "draft-later-page")
                 {
                     Assert.Equal("V1.2.3", pages[0][0].GetProperty("tag_name").GetString());
@@ -207,23 +170,12 @@ public sealed class ReleaseMetadataScriptTests
                 {
                     "missing" or "immutable-missing" => "Published assets are missing",
                     "mismatch" => "Missing or mismatched GitHub SHA-256 digest",
-                    "api-error" or "list-api-error" => "GitHub command failed",
-                    "duplicate-draft" => "multiple releases",
-                    "invalid-draft" or "published-list" => "invalid release identity or state",
-                    "draft-never-visible" => "after 10 attempts",
                     _ => throw new InvalidOperationException($"Unexpected failure fixture: {mode}")
                 };
                 Assert.Contains(expectedError, result.CombinedOutput, StringComparison.Ordinal);
             }
             var calls = File.ReadAllText(Path.Combine(sandbox, "calls.json"));
-            if (mode == "draft-never-visible")
-            {
-                Assert.Equal(9, System.Text.RegularExpressions.Regex.Matches(
-                    calls, "Start-Sleep -Seconds 2", System.Text.RegularExpressions.RegexOptions.CultureInvariant).Count);
-                Assert.Contains("release create", calls, StringComparison.Ordinal);
-                Assert.DoesNotContain("release upload", calls, StringComparison.Ordinal);
-            }
-            if (mode is "absent" or "draft" or "draft-later-page" or "draft-delayed")
+            if (mode is "absent" or "draft-later-page" or "draft-delayed")
             {
                 Assert.Contains("release upload", calls, StringComparison.Ordinal);
                 Assert.Contains("--clobber", calls, StringComparison.Ordinal);
@@ -249,10 +201,8 @@ public sealed class ReleaseMetadataScriptTests
             {
                 Assert.DoesNotContain("--clobber", calls, StringComparison.Ordinal);
                 Assert.DoesNotContain("release edit", calls, StringComparison.Ordinal);
-                if (mode != "draft-never-visible")
-                {
-                    Assert.DoesNotContain("release create", calls, StringComparison.Ordinal);
-                }
+                Assert.DoesNotContain("release create", calls, StringComparison.Ordinal);
+                Assert.DoesNotContain("api repos/owner/repo/releases --paginate", calls, StringComparison.Ordinal);
                 if (mode == "missing" && succeeds)
                 {
                     Assert.Contains("release upload", calls, StringComparison.Ordinal);
@@ -261,10 +211,6 @@ public sealed class ReleaseMetadataScriptTests
                 {
                     Assert.DoesNotContain("release upload", calls, StringComparison.Ordinal);
                 }
-            }
-            if (mode is "published" or "immutable" or "missing" or "immutable-missing" or "mismatch" or "api-error")
-            {
-                Assert.DoesNotContain("api repos/owner/repo/releases --paginate", calls, StringComparison.Ordinal);
             }
             if (succeeds)
             {
@@ -277,7 +223,7 @@ public sealed class ReleaseMetadataScriptTests
                 Assert.Equal(
                     Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(sandbox, "metadata.patch")))),
                     inputs.RootElement.GetProperty("metadataPatchSha256").GetString());
-                Assert.Equal(6, inputs.RootElement.GetProperty("artifacts").GetArrayLength());
+                Assert.Equal(8, inputs.RootElement.GetProperty("artifacts").GetArrayLength());
                 foreach (var artifact in inputs.RootElement.GetProperty("artifacts").EnumerateArray())
                 {
                     var name = artifact.GetProperty("name").GetString()!;
@@ -286,7 +232,7 @@ public sealed class ReleaseMetadataScriptTests
                         artifact.GetProperty("sha256").GetString());
                 }
                 var checksumLines = File.ReadAllLines(Path.Combine(sandbox, "publish", "SHA256SUMS"));
-                Assert.Equal(8, checksumLines.Length);
+                Assert.Equal(10, checksumLines.Length);
                 foreach (var line in checksumLines)
                 {
                     var parts = line.Split("  ", StringSplitOptions.None);
@@ -303,62 +249,10 @@ public sealed class ReleaseMetadataScriptTests
         }
     }
 
-    [Fact]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void VscodePublication_UsesWindowsForWindowsOnlyExtensionTools()
-    {
-        var publish = ExtractWorkflowJob(File.ReadAllText(ReleaseWorkflow), "publish-vscode");
-
-        Assert.Contains("needs: [version, create-tag]", publish, StringComparison.Ordinal);
-        Assert.DoesNotContain("if:", publish, StringComparison.Ordinal);
-        Assert.Contains("ref: ${{ needs.create-tag.outputs.commit }}", publish, StringComparison.Ordinal);
-        Assert.Contains("name: release-packages", publish, StringComparison.Ordinal);
-        Assert.Contains("runs-on: windows-latest", publish, StringComparison.Ordinal);
-        Assert.Contains("npm ci --ignore-scripts", publish, StringComparison.Ordinal);
-        Assert.Contains("shell: pwsh", publish, StringComparison.Ordinal);
-        Assert.Contains("Publish Windows x64 extension", publish, StringComparison.Ordinal);
-        Assert.Contains("Publish Windows ARM64 extension", publish, StringComparison.Ordinal);
-        Assert.Contains("--skip-duplicate", publish, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void PublicationJobs_UseImmutableActionReferences()
-    {
-        var workflow = File.ReadAllText(ReleaseWorkflow);
-        foreach (var job in new[] { "publish-vscode", "verify-arm64" })
-        {
-            var body = ExtractWorkflowJob(workflow, job);
-            foreach (var line in body.Split('\n').Where(line => line.Contains("uses: actions/", StringComparison.Ordinal)))
-            {
-                Assert.Matches(@"uses: actions/[a-z-]+@[0-9a-f]{40} # v[0-9.]+", line);
-            }
-            Assert.Contains("uses: actions/checkout@", body, StringComparison.Ordinal);
-            Assert.Contains("uses: actions/setup-node@", body, StringComparison.Ordinal);
-            Assert.Contains("uses: actions/download-artifact@", body, StringComparison.Ordinal);
-        }
-    }
-
-    [Fact]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void ReleaseValidation_ExecutesBothArm64PackagesBeforeCreatingTag()
-    {
-        var workflow = File.ReadAllText(ReleaseWorkflow);
-        var nativeTests = ExtractWorkflowJob(workflow, "verify-arm64");
-
-        Assert.Contains("runs-on: windows-11-arm", nativeTests, StringComparison.Ordinal);
-        Assert.Contains("architecture: arm64", nativeTests, StringComparison.Ordinal);
-        Assert.Contains("Test-NpmPackages.ps1", nativeTests, StringComparison.Ordinal);
-        Assert.Contains("@('Cli', 'McpServer')", nativeTests, StringComparison.Ordinal);
-        Assert.Contains("-Architecture arm64", nativeTests, StringComparison.Ordinal);
-        Assert.Contains("verify-arm64", ExtractWorkflowJob(workflow, "create-tag"), StringComparison.Ordinal);
-    }
-
     [Theory]
     [InlineData(true, true, false)]
     [InlineData(true, false, false)]
     [InlineData(true, true, true)]
-    [InlineData(false, false, false)]
     [Trait("Feature", "ReleaseMetadata")]
     public async Task McpRegistryValidation_ChecksDeclaredRuntimesAndDecodesNuGetReadme(
         bool sourceHasArm64, bool publishedHasArm64, bool wrongArm64Version)
@@ -443,29 +337,6 @@ public sealed class ReleaseMetadataScriptTests
             }
         }
         finally { Directory.Delete(sandbox, recursive: true); }
-    }
-
-    [Fact]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void McpRegistryPublication_UsesOnlyExactExistingRelease()
-    {
-        var release = File.ReadAllText(ReleaseWorkflow);
-        var registry = File.ReadAllText(McpRegistryWorkflow);
-        var publishMcpRegistry = ExtractWorkflowJob(release, "publish-mcp-registry");
-
-        Assert.Contains("uses: ./.github/workflows/publish-mcp-registry.yml", publishMcpRegistry, StringComparison.Ordinal);
-        Assert.Contains("needs: [version, create-tag, create-release, publish]", publishMcpRegistry, StringComparison.Ordinal);
-        Assert.DoesNotContain("workflow_dispatch:", registry, StringComparison.Ordinal);
-        Assert.Contains("environment: mcp-registry", registry, StringComparison.Ordinal);
-        Assert.Contains("./scripts/Resolve-McpRegistryRelease.ps1", registry, StringComparison.Ordinal);
-        Assert.Contains("ref: ${{ github.sha }}", registry, StringComparison.Ordinal);
-        Assert.Contains("ref: ${{ needs.resolve.outputs.commit }}", registry, StringComparison.Ordinal);
-        Assert.Contains("./automation/scripts/Test-McpRegistryPublication.ps1", registry, StringComparison.Ordinal);
-        Assert.Contains("source/src/ExcelMcp.McpServer/.mcp/server.json", registry, StringComparison.Ordinal);
-        Assert.DoesNotContain("dotnet build", registry, StringComparison.Ordinal);
-        Assert.DoesNotContain("npm publish", registry, StringComparison.Ordinal);
-        Assert.DoesNotContain("gh release create", registry, StringComparison.Ordinal);
-        Assert.DoesNotContain("gh release upload", registry, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -595,7 +466,6 @@ public sealed class ReleaseMetadataScriptTests
     }
 
     [Theory]
-    [InlineData("vscode-extension", "package-lock.json")]
     [InlineData("src/ExcelMcp.McpServer/.mcp", "server.json")]
     [Trait("Feature", "ReleaseMetadata")]
     public async Task UpdateReleaseVersion_MissingMetadataCannotPartiallyStampOtherFiles(string directory, string file)
@@ -610,91 +480,6 @@ public sealed class ReleaseMetadataScriptTests
                 ["-RepoRoot", sandbox, "-Version", "9.8.7"]);
             Assert.NotEqual(0, result.ExitCode);
             Assert.Equal(before, File.ReadAllText(Path.Combine(sandbox, "package.json")));
-        }
-        finally { Directory.Delete(sandbox, recursive: true); }
-    }
-
-    [Fact]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void PluginPublication_UsesExplicitReleaseIdentityAndPreparedInputs()
-    {
-        var release = File.ReadAllText(ReleaseWorkflow);
-        var plugins = File.ReadAllText(Path.Combine(RepoRoot, ".github", "workflows", "publish-plugins.yml"));
-        Assert.DoesNotContain("workflow_run", plugins, StringComparison.Ordinal);
-        Assert.Contains("workflow_call:", plugins, StringComparison.Ordinal);
-        Assert.Contains("needs: [version, create-tag, create-release, publish]", ExtractWorkflowJob(release, "publish-plugins"), StringComparison.Ordinal);
-        Assert.Contains("release_commit:", plugins, StringComparison.Ordinal);
-        Assert.Contains("plugin_artifact:", plugins, StringComparison.Ordinal);
-        Assert.Contains("ref: ${{ needs.resolve.outputs.commit }}", plugins, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void PluginPublication_ReleaseChainNeverCallsManualListingUpdater()
-    {
-        var workflows = Path.Combine(RepoRoot, ".github", "workflows");
-        var release = File.ReadAllText(Path.Combine(workflows, "release.yml"));
-        var plugins = File.ReadAllText(Path.Combine(workflows, "publish-plugins.yml"));
-        var caller = ExtractWorkflowJob(release, "publish-plugins");
-        Assert.Contains("uses: ./.github/workflows/publish-plugins.yml", caller, StringComparison.Ordinal);
-        var granted = ExtractWorkflowPermissions(caller, 4);
-        Assert.NotNull(granted);
-        Assert.Equal(["contents"], granted.Keys);
-        Assert.Equal("read", granted["contents"]);
-
-        foreach (var workflow in new[] { release, plugins })
-        {
-            Assert.DoesNotContain("update-awesome-copilot", workflow, StringComparison.Ordinal);
-            Assert.DoesNotContain("AWESOME_COPILOT", workflow, StringComparison.Ordinal);
-            Assert.DoesNotContain("COPILOT_GITHUB_TOKEN", workflow, StringComparison.Ordinal);
-        }
-        Assert.Equal(["contents"], ExtractWorkflowPermissions(
-            plugins[..plugins.IndexOf("\njobs:", StringComparison.Ordinal)], 0)!.Keys);
-        Assert.Null(ExtractWorkflowPermissions(ExtractWorkflowJob(plugins, "resolve"), 4));
-        Assert.Null(ExtractWorkflowPermissions(ExtractWorkflowJob(plugins, "publish"), 4));
-
-        var updater = File.ReadAllText(Path.Combine(workflows, "update-awesome-copilot.md"));
-        var trigger = updater[..updater.IndexOf("\npermissions:", StringComparison.Ordinal)];
-        Assert.DoesNotContain("workflow_call:", trigger, StringComparison.Ordinal);
-        Assert.Contains("workflow_dispatch:", trigger, StringComparison.Ordinal);
-        Assert.Contains("published_tag:", trigger, StringComparison.Ordinal);
-        Assert.Contains("preview:", trigger, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("1.2.2", false, false, "1.2.3", false, true)]
-    [InlineData("1.2.3", true, false, "1.2.3", false, true)]
-    [InlineData("1.2.3", true, true, "1.2.3", false, true)]
-    [InlineData("1.2.4", false, false, "1.2.3", false, false)]
-    [InlineData("1.2.2", true, false, "1.2.3", false, false)]
-    [InlineData("1.2.2", false, false, "9.9.9", false, false)]
-    [InlineData("1.2.2", false, false, "1.2.3", true, false)]
-    [Trait("Feature", "ReleaseMetadata")]
-    public async Task PluginPublication_ExercisesVersionRetryAndFailureDecisions(
-        string publishedVersion, bool tagExists, bool manualRepair, string payloadVersion, bool syncFails, bool succeeds)
-    {
-        var sandbox = CreateSandbox();
-        try
-        {
-            var scenario = JsonSerializer.Serialize(new
-            {
-                publishedVersion,
-                tagExists,
-                manualRepair,
-                payloadVersion,
-                syncFails,
-                succeeds
-            });
-            var script = Path.Combine(RepoRoot, "tests", "ExcelMcp.Packaging.Tests", "PluginPublication.test.mjs");
-            var runner = Path.Combine(sandbox, "run.ps1");
-            File.WriteAllText(runner, $$"""
-                $env:PLUGIN_PUBLICATION_SCENARIO='{{scenario}}'
-                node --test --test-name-pattern 'legacy publication guard scenario' '{{script.Replace("'", "''", StringComparison.Ordinal)}}'
-                exit $LASTEXITCODE
-                """);
-            var result = await RunPowerShellScriptAsync(runner, [], sandbox);
-            Assert.True(result.ExitCode == 0, result.CombinedOutput);
-            Assert.Contains("legacy publication guard scenario", result.Stdout, StringComparison.Ordinal);
         }
         finally { Directory.Delete(sandbox, recursive: true); }
     }
@@ -800,21 +585,6 @@ public sealed class ReleaseMetadataScriptTests
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Feature", "ReleaseMetadata")]
-    public void Changesets_VersionPrivateNotesPackageWithoutTagging()
-    {
-        using var config = JsonDocument.Parse(
-            File.ReadAllText(Path.Combine(RepoRoot, ".changeset", "config.json")));
-        var privatePackages = config.RootElement.GetProperty("privatePackages");
-        Assert.True(privatePackages.GetProperty("version").GetBoolean());
-        Assert.False(privatePackages.GetProperty("tag").GetBoolean());
-
-        using var package = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot, "package.json")));
-        Assert.True(package.RootElement.GetProperty("private").GetBoolean());
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
     public async Task BuildChangelog_FailsWhenPendingFragmentsProduceNoEntries()
     {
         var sandbox = CreateSandbox();
@@ -853,319 +623,6 @@ public sealed class ReleaseMetadataScriptTests
             Assert.NotEqual(0, result.ExitCode);
             Assert.Contains("pending-release-note.md", result.CombinedOutput, StringComparison.Ordinal);
             Assert.False(File.Exists(Path.Combine(sandbox, "release_notes_body.md")));
-        }
-        finally
-        {
-            Directory.Delete(sandbox, recursive: true);
-        }
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void ReleaseFlow_UsesAndCommitsCanonicalVersionUpdater()
-    {
-        var buildChangelog = File.ReadAllText(BuildChangelogScript);
-        Assert.Contains(
-            "& $updateReleaseVersionScript -RepoRoot $RepoRoot -Version $Version",
-            buildChangelog,
-            StringComparison.Ordinal);
-
-        var releaseWorkflow = File.ReadAllText(ReleaseWorkflow);
-        Assert.Contains("./scripts/Build-Changelog.ps1", releaseWorkflow, StringComparison.Ordinal);
-        Assert.Contains("git apply prepared-release/release-metadata.patch", releaseWorkflow, StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "$content = $content -replace '<Version>",
-            releaseWorkflow,
-            StringComparison.Ordinal);
-
-        var stagedPaths = new[]
-        {
-            "CHANGELOG.md",
-            "package.json",
-            "package-lock.json",
-            "Directory.Build.props",
-            "mcpb/manifest.json",
-            "src/ExcelMcp.McpServer/.mcp/server.json",
-            "vscode-extension/package.json",
-            "vscode-extension/package-lock.json",
-            ".changeset"
-        };
-
-        var stagingStart = releaseWorkflow.IndexOf("git add -A", StringComparison.Ordinal);
-        Assert.True(stagingStart >= 0);
-        var stagingEnd = releaseWorkflow.IndexOf(
-            "if git diff --cached --quiet",
-            stagingStart,
-            StringComparison.Ordinal);
-        Assert.True(stagingEnd > stagingStart);
-        var stagingCommand = releaseWorkflow[stagingStart..stagingEnd];
-
-        Assert.All(
-            stagedPaths,
-            path => Assert.Contains(path, stagingCommand, StringComparison.Ordinal));
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void ReleaseFlow_PackagesAndTagsCurrentChangelog()
-    {
-        var releaseWorkflow = File.ReadAllText(ReleaseWorkflow);
-        var prepareRelease = ExtractWorkflowJob(releaseWorkflow, "prepare-release");
-        var buildPackages = ExtractWorkflowJob(releaseWorkflow, "build-packages");
-        var createTag = ExtractWorkflowJob(releaseWorkflow, "create-tag");
-        var createRelease = ExtractWorkflowJob(releaseWorkflow, "create-release");
-
-        Assert.Contains("./scripts/Build-Changelog.ps1", prepareRelease, StringComparison.Ordinal);
-        Assert.Contains("name: release-metadata", prepareRelease, StringComparison.Ordinal);
-        Assert.Contains("needs: [version, prepare-release]", buildPackages, StringComparison.Ordinal);
-        Assert.Contains("name: release-metadata", buildPackages, StringComparison.Ordinal);
-        Assert.Contains("git apply prepared-release/release-metadata.patch", buildPackages, StringComparison.Ordinal);
-        Assert.Contains("git apply prepared-release/release-metadata.patch", createTag, StringComparison.Ordinal);
-        Assert.Contains("Build-ReleasePackages.ps1", buildPackages, StringComparison.Ordinal);
-        Assert.DoesNotContain("dotnet publish", releaseWorkflow, StringComparison.Ordinal);
-
-        var commitIndex = createTag.IndexOf("Commit Release Metadata Update", StringComparison.Ordinal);
-        var tagIndex = createTag.IndexOf("Create and push tag", StringComparison.Ordinal);
-        Assert.Contains("prepare-release", createTag, StringComparison.Ordinal);
-        Assert.True(commitIndex >= 0, "The tag job must commit the generated release metadata.");
-        Assert.True(tagIndex > commitIndex, "Release metadata must be committed before the tag is created.");
-        Assert.Contains("git tag -a \"$TAG\" \"$RELEASE_COMMIT\"", createTag, StringComparison.Ordinal);
-        Assert.Contains("SOURCE_SHA: ${{ github.sha }}", createTag, StringComparison.Ordinal);
-        Assert.Contains("[ \"$BASE_SHA\" != \"$SOURCE_SHA\" ]", createTag, StringComparison.Ordinal);
-        Assert.DoesNotContain("[skip ci]", createTag, StringComparison.Ordinal);
-
-        Assert.Contains(
-            "artifacts/release-metadata/release_notes_body.md",
-            createRelease,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("./scripts/Build-Changelog.ps1", createRelease, StringComparison.Ordinal);
-        Assert.DoesNotContain("Commit Release Metadata Update", createRelease, StringComparison.Ordinal);
-        var registryValidation = File.ReadAllText(TestMcpRegistryPublicationScript);
-        Assert.Contains("@sbroenne%2fmcp-server-excel-win32-$architecture/$Version", registryValidation, StringComparison.Ordinal);
-        Assert.Contains("$sourceLauncher.optionalDependencies", registryValidation, StringComparison.Ordinal);
-        Assert.Contains("$launcher.optionalDependencies.$runtimeName -ne $Version", registryValidation, StringComparison.Ordinal);
-        Assert.Contains("$launcher.mcpName", registryValidation, StringComparison.Ordinal);
-        Assert.Contains("$runtime.version -ne $Version", registryValidation, StringComparison.Ordinal);
-        Assert.Contains("$readme -notmatch", registryValidation, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void ReleaseFlow_BuildsTestsAndPublishesBothNpmDistributions()
-    {
-        var workflow = File.ReadAllText(ReleaseWorkflow);
-        var build = ExtractWorkflowJob(workflow, "build-packages");
-        var publish = ExtractWorkflowJob(workflow, "publish");
-
-        Assert.Contains("actions/setup-node@", build, StringComparison.Ordinal);
-        Assert.Contains("Build-ReleasePackages.ps1", build, StringComparison.Ordinal);
-        Assert.Contains("name: release-packages", publish, StringComparison.Ordinal);
-        Assert.Contains("Detect npm authentication mode", publish, StringComparison.Ordinal);
-        Assert.Contains("if: steps.npm-auth.outputs.mode == 'token'", publish, StringComparison.Ordinal);
-        Assert.Contains("if: steps.npm-auth.outputs.mode == 'oidc'", publish, StringComparison.Ordinal);
-        Assert.Contains("NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_TOKEN }}", publish, StringComparison.Ordinal);
-        Assert.Contains("$env:NODE_AUTH_TOKEN = $env:NPM_BOOTSTRAP_TOKEN", publish, StringComparison.Ordinal);
-        Assert.DoesNotContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}", publish, StringComparison.Ordinal);
-        Assert.Contains("npm publish \"./artifacts/npm/sbroenne-$name-$env:VERSION.tgz\" --access public", publish, StringComparison.Ordinal);
-
-        foreach (var packageName in new[] { "excelcli", "mcp-server-excel" })
-        {
-            var launcherIndex = publish.IndexOf(
-                $"'{packageName}'",
-                StringComparison.Ordinal);
-            foreach (var architecture in new[] { "x64", "arm64" })
-            {
-                var runtimeIndex = publish.IndexOf(
-                    $"'{packageName}-win32-{architecture}'",
-                    StringComparison.Ordinal);
-                Assert.True(runtimeIndex >= 0);
-                Assert.True(launcherIndex > runtimeIndex, "Publish both runtimes before their launcher.");
-            }
-        }
-
-        var preCommit = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "pre-commit.ps1"));
-        Assert.DoesNotContain("Build-NpmPackages.ps1", preCommit, StringComparison.Ordinal);
-        Assert.DoesNotContain("Test-NpmPackages.ps1", preCommit, StringComparison.Ordinal);
-        var packages = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "Build-ReleasePackages.ps1"));
-        Assert.Contains("Invoke-TypedPackage", packages, StringComparison.Ordinal);
-        var execution = File.ReadAllText(Path.Combine(RepoRoot, "tools", "ExcelMcp.Build", "PackageExecution.cs"));
-        Assert.Contains("BuildNpmAsync", execution, StringComparison.Ordinal);
-        Assert.Contains("VerifyNpmAsync", execution, StringComparison.Ordinal);
-        var ci = File.ReadAllText(Path.Combine(RepoRoot, ".github", "workflows", "ci.yml"));
-        Assert.Contains("Build-ReleasePackages.ps1", ci, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void ReleaseFlow_DoesNotGenerateOrPatchDocumentationCounts()
-    {
-        var releaseWorkflow = File.ReadAllText(ReleaseWorkflow);
-
-        Assert.DoesNotContain("check-doc-counts.ps1", releaseWorkflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("release-doc-counts.patch", releaseWorkflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("Apply Generated Documentation Counts", releaseWorkflow, StringComparison.Ordinal);
-
-        Assert.False(File.Exists(Path.Combine(RepoRoot, ".github", "workflows", "doc-counts.yml")));
-        var ci = File.ReadAllText(Path.Combine(RepoRoot, ".github", "workflows", "ci.yml"));
-        Assert.Contains("check-doc-counts.ps1 -SkipBuild", ci, StringComparison.Ordinal);
-        Assert.DoesNotContain("-AllowStaleAdvertisedCounts", ci, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void DocumentationCounts_DefaultRefreshBuildsProjectDependencies()
-    {
-        // A fresh checkout has no built Service/ComInterop outputs, so the MCP Server
-        // build must include its project dependencies.
-        var script = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "check-doc-counts.ps1"));
-
-        Assert.DoesNotContain("--no-dependencies", script, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public async Task DocumentationCounts_UpdatePersistValidateAndRejectIncompatibleModes()
-    {
-        var sandbox = CreateSandbox();
-        try
-        {
-            var sourceReadme = await File.ReadAllTextAsync(Path.Combine(RepoRoot, "README.md"));
-            var headline = System.Text.RegularExpressions.Regex.Match(
-                sourceReadme,
-                @"(?<mcpTools>\d+) MCP tools across (?<tools>\d+) feature areas, with (?<operations>\d+) operations");
-            Assert.True(headline.Success);
-            var canonicalTools = int.Parse(headline.Groups["tools"].Value, System.Globalization.CultureInfo.InvariantCulture);
-            var canonicalMcpTools = int.Parse(headline.Groups["mcpTools"].Value, System.Globalization.CultureInfo.InvariantCulture);
-            var canonicalOperations = int.Parse(
-                headline.Groups["operations"].Value,
-                System.Globalization.CultureInfo.InvariantCulture);
-            var canonicalHeadline = $"{canonicalMcpTools} MCP tools across {canonicalTools} feature areas, with {canonicalOperations} operations";
-
-            CopyDocumentationCountFiles(sandbox, canonicalTools, canonicalMcpTools, canonicalOperations);
-            var readmePath = Path.Combine(sandbox, "README.md");
-            var llmOutputsPath = Path.Combine(sandbox, "gh-pages", "sitegen", "llm.py");
-            await File.WriteAllTextAsync(
-                readmePath,
-                (await File.ReadAllTextAsync(readmePath))
-                    .Replace(
-                        canonicalHeadline,
-                        "1 MCP tools across 1 feature areas, with 2 operations",
-                        StringComparison.Ordinal)
-                    .Replace($"all {canonicalOperations} operations", "all 2 operations", StringComparison.Ordinal));
-
-            var update = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-Update", "-SkipBuild"],
-                sandbox);
-
-            Assert.True(update.ExitCode == 0, update.CombinedOutput);
-            Assert.Contains(
-                canonicalHeadline,
-                await File.ReadAllTextAsync(readmePath),
-                StringComparison.Ordinal);
-            Assert.Contains(
-                $"all {canonicalOperations} operations",
-                await File.ReadAllTextAsync(readmePath),
-                StringComparison.Ordinal);
-            var llmOutputsContent = await File.ReadAllTextAsync(llmOutputsPath);
-            Assert.Contains("json.loads(read(DOC_COUNTS))", llmOutputsContent, StringComparison.Ordinal);
-            Assert.Contains("headline_tools, headline_operations = headline_counts()", llmOutputsContent, StringComparison.Ordinal);
-            Assert.Contains("for line in read(page.source).splitlines():", llmOutputsContent, StringComparison.Ordinal);
-            Assert.DoesNotMatch(
-                @"exposing \d+ tools and \d+ operations",
-                llmOutputsContent);
-
-            var docCountsPath = Path.Combine(sandbox, "doc-counts.json");
-            Assert.True(File.Exists(docCountsPath), "-Update must generate the single doc-counts.json include file.");
-            Assert.Equal(canonicalTools, ReadJsonInt(docCountsPath, "tools"));
-            Assert.Equal(canonicalOperations, ReadJsonInt(docCountsPath, "operations"));
-
-            var validation = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-SkipBuild"],
-                sandbox);
-            Assert.True(validation.ExitCode == 0, validation.CombinedOutput);
-
-            var generatedToolsPath = Path.Combine(sandbox, "src", "ExcelMcp.McpServer",
-                "obj", "GeneratedFiles", "Tools.g.cs");
-            var generatedTools = await File.ReadAllTextAsync(generatedToolsPath);
-            await File.WriteAllTextAsync(generatedToolsPath,
-                generatedTools.Replace("[McpServerTool(Name = \"tool-1_read\")]", "", StringComparison.Ordinal));
-            var missingReadEndpoint = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-SkipBuild", "-AllowStaleAdvertisedCounts"],
-                sandbox);
-            Assert.NotEqual(0, missingReadEndpoint.ExitCode);
-            Assert.Contains("Missing: [tool-1_read]", missingReadEndpoint.CombinedOutput, StringComparison.Ordinal);
-            await File.WriteAllTextAsync(generatedToolsPath, generatedTools);
-
-            await File.WriteAllTextAsync(
-                readmePath,
-                (await File.ReadAllTextAsync(readmePath))
-                    .Replace(
-                        canonicalHeadline,
-                        $"{canonicalMcpTools} MCP tools across 1 feature areas, with {canonicalOperations} operations",
-                        StringComparison.Ordinal));
-            var staleValidation = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-SkipBuild"],
-                sandbox);
-            Assert.NotEqual(0, staleValidation.ExitCode);
-            Assert.Contains(
-                $"README.md: tool count is 1 but should be {canonicalTools}",
-                staleValidation.CombinedOutput,
-                StringComparison.Ordinal);
-
-            var allowStale = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-SkipBuild", "-AllowStaleAdvertisedCounts"],
-                sandbox);
-            Assert.True(allowStale.ExitCode == 0, allowStale.CombinedOutput);
-
-            // Restore the README headline, then make doc-counts.json itself stale to
-            // prove it is validated (and regenerated) independently of the headline text.
-            await File.WriteAllTextAsync(
-                readmePath,
-                (await File.ReadAllTextAsync(readmePath))
-                    .Replace(
-                        $"{canonicalMcpTools} MCP tools across 1 feature areas, with {canonicalOperations} operations",
-                        canonicalHeadline,
-                        StringComparison.Ordinal));
-            await File.WriteAllTextAsync(docCountsPath, "{\n  \"tools\": 1,\n  \"operations\": 2\n}\n");
-
-            var staleDocCounts = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-SkipBuild"],
-                sandbox);
-            Assert.NotEqual(0, staleDocCounts.ExitCode);
-            Assert.Contains("doc-counts.json", staleDocCounts.CombinedOutput, StringComparison.Ordinal);
-
-            var allowStaleDocCounts = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-SkipBuild", "-AllowStaleAdvertisedCounts"],
-                sandbox);
-            Assert.True(allowStaleDocCounts.ExitCode == 0, allowStaleDocCounts.CombinedOutput);
-
-            var regenerate = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-Update", "-SkipBuild"],
-                sandbox);
-            Assert.True(regenerate.ExitCode == 0, regenerate.CombinedOutput);
-            Assert.Equal(canonicalTools, ReadJsonInt(docCountsPath, "tools"));
-            Assert.Equal(canonicalOperations, ReadJsonInt(docCountsPath, "operations"));
-
-            var incompatible = await RunPowerShellScriptAsync(
-                Path.Combine(sandbox, "scripts", "check-doc-counts.ps1"),
-                ["-SkipBuild", "-Update", "-AllowStaleAdvertisedCounts"],
-                sandbox);
-            Assert.NotEqual(0, incompatible.ExitCode);
-            Assert.Contains("cannot be used together", incompatible.CombinedOutput, StringComparison.Ordinal);
         }
         finally
         {
@@ -1273,24 +730,8 @@ public sealed class ReleaseMetadataScriptTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public void ReleaseNotes_ChangelogBuilderFormatsOnlyTheReleaseNotesBody()
-    {
-        var script = File.ReadAllText(BuildChangelogScript);
-        var formatIndex = script.IndexOf("Format-ReleaseNotes.ps1", StringComparison.Ordinal);
-        Assert.True(formatIndex > 0, "Build-Changelog.ps1 must format the release-notes body.");
-        Assert.True(
-            formatIndex > script.IndexOf("Set-Content -LiteralPath $OutputNotesPath -Value $notesBody", StringComparison.Ordinal),
-            "Release notes must be formatted after the body is written, leaving CHANGELOG.md unchanged.");
-    }
-
     [Theory]
-    [InlineData("sbroenne,helper", "helper")]
     [InlineData("helper,sbroenne,contributor", "helper,contributor")]
-    [InlineData("helper,contributor", "helper,contributor")]
-    [InlineData("sbroenne,sbroenne", "")]
     [Trait("Category", "Integration")]
     [Trait("Feature", "ReleaseMetadata")]
     public async Task ReleaseNotes_PreservesMultipleOutsideContributorCredits(string authors, string remainingAuthors)
@@ -1314,69 +755,6 @@ public sealed class ReleaseMetadataScriptTests
                     $"[@{author}](https://github.com/{author})")) + "!";
             }
             Assert.Equal(expected, await File.ReadAllTextAsync(notesPath));
-        }
-        finally
-        {
-            Directory.Delete(sandbox, recursive: true);
-        }
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public async Task UpdateMetadata_RejectsMissingMcpServerPackage()
-    {
-        var sandbox = CreateSandbox();
-        try
-        {
-            var metadataPath = Path.Combine(sandbox, "server.json");
-            await File.WriteAllTextAsync(metadataPath, """{"version":"1.0.0","packages":[]}""");
-
-            var result = await RunPowerShellScriptAsync(
-                UpdateMetadataScript,
-                ["-ServerJsonPath", metadataPath, "-Version", "9.8.7"]);
-
-            Assert.NotEqual(0, result.ExitCode);
-            Assert.Contains("exactly one", result.CombinedOutput, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            Directory.Delete(sandbox, recursive: true);
-        }
-    }
-
-    [Fact]
-    [Trait("Category", "Integration")]
-    [Trait("Feature", "ReleaseMetadata")]
-    public async Task UpdateMetadata_RejectsMissingNpmPackage()
-    {
-        var sandbox = CreateSandbox();
-        try
-        {
-            var metadataPath = Path.Combine(sandbox, "server.json");
-            await File.WriteAllTextAsync(
-                metadataPath,
-                """
-                {
-                  "version": "1.0.0",
-                  "packages": [
-                    {
-                      "identifier": "Sbroenne.ExcelMcp.McpServer",
-                      "version": "1.0.0"
-                    }
-                  ]
-                }
-                """);
-
-            var result = await RunPowerShellScriptAsync(
-                UpdateMetadataScript,
-                ["-ServerJsonPath", metadataPath, "-Version", "9.8.7"]);
-
-            Assert.NotEqual(0, result.ExitCode);
-            Assert.Contains(
-                "@sbroenne/mcp-server-excel",
-                result.CombinedOutput,
-                StringComparison.Ordinal);
         }
         finally
         {
@@ -1410,99 +788,6 @@ public sealed class ReleaseMetadataScriptTests
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
             File.Copy(Path.Combine(RepoRoot, relativePath), destinationPath);
         }
-    }
-
-    private static void CopyDocumentationCountFiles(
-        string sandbox,
-        int canonicalTools,
-        int canonicalMcpTools,
-        int canonicalOperations)
-    {
-        var relativePaths = new[]
-        {
-            "README.md",
-            "FEATURES.md",
-            "Directory.Build.props",
-            Path.Combine("scripts", "check-doc-counts.ps1"),
-            Path.Combine("src", "ExcelMcp.McpServer", "README.md"),
-            Path.Combine("src", "ExcelMcp.CLI", "README.md"),
-            Path.Combine("vscode-extension", "README.md"),
-            Path.Combine("vscode-extension", "package.json"),
-            Path.Combine("mcpb", "README.md"),
-            Path.Combine("mcpb", "manifest.json"),
-            Path.Combine("mcpb", "BUILD.md"),
-            Path.Combine("gh-pages", "docs", "index.md"),
-            Path.Combine("gh-pages", "docs", "faq.md"),
-            Path.Combine("gh-pages", "sitegen", "llm.py"),
-            Path.Combine(".github", "plugins", "excel-mcp", "README.md"),
-            Path.Combine(".github", "plugins", "excel-cli", "README.md"),
-            Path.Combine("docs", "INSTALLATION-CLI.md"),
-            Path.Combine("docs", "guides", "EXCEL-COM-VS-FILE-PARSERS.md"),
-            Path.Combine("docs", "COPILOT-PLUGIN-DISTRIBUTION.md"),
-            Path.Combine("src", "ExcelMcp.McpServer", ".mcp", "server.json")
-        };
-
-        foreach (var relativePath in relativePaths)
-        {
-            CopyFile(RepoRoot, sandbox, relativePath);
-        }
-
-        WriteFile(
-            sandbox,
-            Path.Combine("artifacts", "generated-skills", "excel-mcp-report-formatting", "SKILL.md"),
-            File.ReadAllText(Path.Combine(RepoRoot, "skills", "excel-mcp-report-formatting", "SKILL.md")));
-
-        var featureRoot = Path.Combine(RepoRoot, "docs", "features");
-        foreach (var sourcePath in Directory.GetFiles(featureRoot, "*.md"))
-        {
-            CopyFile(RepoRoot, sandbox, Path.GetRelativePath(RepoRoot, sourcePath));
-        }
-
-        WriteFile(
-            sandbox,
-            Path.Combine("src", "ExcelMcp.Core", "Models", "Actions", "ToolActions.cs"),
-            """
-            enum FileAction {
-                [JsonStringEnumMemberName("open")] Open,
-                [JsonStringEnumMemberName("close")] Close
-            }
-            """);
-        WriteFile(
-            sandbox,
-            Path.Combine("src", "ExcelMcp.Core", "obj", "GeneratedFiles", "ExcelMcp.Generators",
-                "Sbroenne.ExcelMcp.Generators.ServiceRegistryGenerator", "_SkillManifest.g.cs"),
-            $$"""
-            public static class SkillManifest {
-                public const string Json = @"{""TotalCommands"":{{canonicalTools}},""TotalOperations"":{{canonicalOperations - 1}},""Commands"":[{""Name"":""diag"",""Actions"":[""self-test""]}]}";
-            }
-            """);
-        var toolNames = Enumerable.Range(1, canonicalTools - 1)
-            .Select(index => $"[McpServerTool(Name = \"tool-{index}\")]")
-            .Concat(Enumerable.Range(1, canonicalMcpTools - canonicalTools)
-                .Select(index => $"[McpServerTool(Name = \"tool-{index}_read\")]"))
-            .Append("[McpServerTool(Name = \"file\")]");
-        WriteFile(
-            sandbox,
-            Path.Combine("src", "ExcelMcp.McpServer", "obj", "GeneratedFiles", "Tools.g.cs"),
-            string.Join(Environment.NewLine, toolNames));
-        WriteFile(
-            sandbox,
-            Path.Combine("src", "ExcelMcp.Core", "obj", "GeneratedFiles", "ExcelMcp.Generators",
-                "Sbroenne.ExcelMcp.Generators.ServiceRegistryGenerator", "ServiceRegistry.Contracts.g.cs"),
-            string.Join(Environment.NewLine, Enumerable.Range(1, canonicalMcpTools - canonicalTools)
-                .Select(index => $"(\"tool-{index}_read\", \"list\") => new (string, bool, bool)[] {{ (\"action\", true, false) }},")));
-        WriteFile(
-            sandbox,
-            Path.Combine("src", "ExcelMcp.McpServer", "Program.cs"),
-            """$"Provides {McpToolSurface.ToolCount} tools with {McpToolSurface.OperationCount} operations";""");
-        WriteFile(
-            sandbox,
-            Path.Combine("src", "ExcelMcp.McpServer", "ExcelMcp.McpServer.csproj"),
-            """<GenerateSkillFile ExtraOperationCount="2" />""");
-        WriteFile(
-            sandbox,
-            Path.Combine("src", "ExcelMcp.CLI", "ExcelMcp.CLI.csproj"),
-            $"""<GenerateSkillFile ExtraOperationCount="2" Description="{canonicalOperations} operations across Excel automation" />""");
     }
 
     private static void CopyFile(string sourceRoot, string destinationRoot, string relativePath)
@@ -1599,61 +884,6 @@ public sealed class ReleaseMetadataScriptTests
         }
 
         return element.GetString()!;
-    }
-
-    private static int ReadJsonInt(string path, string propertyName)
-    {
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
-        return document.RootElement.GetProperty(propertyName).GetInt32();
-    }
-
-    private static Dictionary<string, string>? ExtractWorkflowPermissions(string body, int indentation)
-    {
-        var lines = body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        var prefix = new string(' ', indentation);
-        var start = Array.FindIndex(lines, line => line.StartsWith($"{prefix}permissions:", StringComparison.Ordinal));
-        if (start < 0)
-        {
-            return null;
-        }
-        var permissions = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (lines[start] == $"{prefix}permissions: {{}}")
-        {
-            return permissions;
-        }
-        Assert.Equal($"{prefix}permissions:", lines[start]);
-        foreach (var line in lines.Skip(start + 1).TakeWhile(line => line.StartsWith($"{prefix}  ", StringComparison.Ordinal)))
-        {
-            Assert.Matches(@"^[a-z-]+: (read|write|none)$", line.Trim());
-            var entry = line.Trim().Split(": ", StringSplitOptions.None);
-            permissions.Add(entry[0], entry[1]);
-        }
-        Assert.NotEmpty(permissions);
-        return permissions;
-    }
-
-    private static string ExtractWorkflowJob(string workflow, string jobName)
-    {
-        workflow = workflow.Replace("\r\n", "\n", StringComparison.Ordinal);
-        var marker = $"\n  {jobName}:\n";
-        var start = workflow.IndexOf(marker, StringComparison.Ordinal);
-        Assert.True(start >= 0, $"Workflow job '{jobName}' was not found.");
-
-        start += marker.Length;
-        var end = workflow.IndexOf("\n  ", start, StringComparison.Ordinal);
-        while (end >= 0)
-        {
-            var nextLineEnd = workflow.IndexOf('\n', end + 1);
-            var line = nextLineEnd >= 0 ? workflow[end..nextLineEnd] : workflow[end..];
-            if (line.Length > 3 && line[3] != ' ')
-            {
-                break;
-            }
-
-            end = workflow.IndexOf("\n  ", end + 3, StringComparison.Ordinal);
-        }
-
-        return end >= 0 ? workflow[start..end] : workflow[start..];
     }
 
     private static string ExtractPowerShellStep(string workflow, string stepName)

@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Excel = Microsoft.Office.Interop.Excel;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
@@ -26,7 +25,7 @@ public partial class ChartCommands
             try
             {
                 // Set chart type (works for both Regular and PivotCharts)
-                findResult.Chart.ChartType = (int)chartType;
+                findResult.Chart.ChartType = (Excel.XlChartType)chartType;
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath }; // Void operation completed
             }
@@ -50,6 +49,7 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
+            Excel.ChartTitle? chartTitle = null;
             try
             {
                 // Set title (empty string hides title)
@@ -60,13 +60,15 @@ public partial class ChartCommands
                 else
                 {
                     findResult.Chart.HasTitle = true;
-                    findResult.Chart.ChartTitle.Text = title;
+                    chartTitle = findResult.Chart.ChartTitle;
+                    chartTitle.Text = title;
                 }
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath }; // Void operation completed
             }
             finally
             {
+                ComUtilities.Release(ref chartTitle);
                 if (findResult.Shape != null) ComUtilities.Release(ref findResult.Shape!);
                 if (findResult.Chart != null) ComUtilities.Release(ref findResult.Chart!);
             }
@@ -89,13 +91,13 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? axes = null;
-            dynamic? targetAxis = null;
+            Excel.Axes? axes = null;
+            Excel.Axis? targetAxis = null;
             Excel.AxisTitle? axisTitle = null;
 
             try
             {
-                axes = findResult.Chart.Axes;
+                axes = (Excel.Axes)findResult.Chart.Axes();
                 var (axisType, axisGroup) = MapAxisType(axis);
                 targetAxis = axes.Item(axisType, axisGroup);
 
@@ -139,13 +141,13 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? axes = null;
-            dynamic? targetAxis = null;
-            dynamic? tickLabels = null;
+            Excel.Axes? axes = null;
+            Excel.Axis? targetAxis = null;
+            Excel.TickLabels? tickLabels = null;
 
             try
             {
-                axes = findResult.Chart.Axes;
+                axes = (Excel.Axes)findResult.Chart.Axes();
 
                 var (axisType, axisGroup) = MapAxisType(axis);
                 targetAxis = axes.Item(axisType, axisGroup);
@@ -155,7 +157,7 @@ public partial class ChartCommands
                 var invariantKeywords = labels.NumberFormat ?? "General";
                 var storedFormat = Sbroenne.ExcelMcp.ComInterop.Formatting.NumberFormatTranslator.ContainsNamedColor(invariantKeywords)
                     ? invariantKeywords
-                    : labels.NumberFormatLocal ?? "General";
+                    : (string?)(object?)labels.NumberFormatLocal ?? "General";
                 return ctx.FormatTranslator.TranslateFromLocale(storedFormat);
             }
             finally
@@ -185,13 +187,13 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? axes = null;
-            dynamic? targetAxis = null;
-            dynamic? tickLabels = null;
+            Excel.Axes? axes = null;
+            Excel.Axis? targetAxis = null;
+            Excel.TickLabels? tickLabels = null;
 
             try
             {
-                axes = findResult.Chart.Axes;
+                axes = (Excel.Axes)findResult.Chart.Axes();
 
                 var (axisType, axisGroup) = MapAxisType(axis);
                 targetAxis = axes.Item(axisType, axisGroup);
@@ -237,7 +239,7 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? legend = null;
+            Excel.Legend? legend = null;
 
             try
             {
@@ -248,7 +250,7 @@ public partial class ChartCommands
                 if (visible && legendPosition.HasValue)
                 {
                     legend = findResult.Chart.Legend;
-                    legend.Position = (int)legendPosition.Value;
+                    legend.Position = (Excel.XlLegendPosition)legendPosition.Value;
                 }
 
                 return new OperationResult { Success = true, FilePath = batch.WorkbookPath }; // Void operation completed
@@ -520,12 +522,12 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? axes = null;
-            dynamic? targetAxis = null;
+            Excel.Axes? axes = null;
+            Excel.Axis? targetAxis = null;
 
             try
             {
-                axes = findResult.Chart.Axes;
+                axes = (Excel.Axes)findResult.Chart.Axes();
 
                 // Map axis type to Excel constants
                 var (axisType, axisGroup) = MapAxisType(axis);
@@ -586,12 +588,12 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? axes = null;
-            dynamic? targetAxis = null;
+            Excel.Axes? axes = null;
+            Excel.Axis? targetAxis = null;
 
             try
             {
-                axes = findResult.Chart.Axes;
+                axes = (Excel.Axes)findResult.Chart.Axes();
 
                 // Map axis type to Excel constants
                 var (axisType, axisGroup) = MapAxisType(axis);
@@ -648,13 +650,13 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? axes = null;
-            dynamic? valueAxis = null;
-            dynamic? categoryAxis = null;
+            Excel.Axes? axes = null;
+            Excel.Axis? valueAxis = null;
+            Excel.Axis? categoryAxis = null;
 
             try
             {
-                axes = findResult.Chart.Axes;
+                axes = (Excel.Axes)findResult.Chart.Axes();
 
                 var result = new GridlinesResult
                 {
@@ -664,27 +666,19 @@ public partial class ChartCommands
                 };
 
                 // Get value axis (type 2) gridlines
-                try
+                if (Convert.ToBoolean((object)findResult.Chart.HasAxis[2, 1], System.Globalization.CultureInfo.InvariantCulture))
                 {
-                    valueAxis = axes.Item(2); // xlValue
+                    valueAxis = axes.Item(Excel.XlAxisType.xlValue);
                     result.Gridlines.HasValueMajorGridlines = valueAxis.HasMajorGridlines;
                     result.Gridlines.HasValueMinorGridlines = valueAxis.HasMinorGridlines;
                 }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    // Value axis may not exist for some chart types
-                }
 
                 // Get category axis (type 1) gridlines
-                try
+                if (Convert.ToBoolean((object)findResult.Chart.HasAxis[1, 1], System.Globalization.CultureInfo.InvariantCulture))
                 {
-                    categoryAxis = axes.Item(1); // xlCategory
+                    categoryAxis = axes.Item(Excel.XlAxisType.xlCategory);
                     result.Gridlines.HasCategoryMajorGridlines = categoryAxis.HasMajorGridlines;
                     result.Gridlines.HasCategoryMinorGridlines = categoryAxis.HasMinorGridlines;
-                }
-                catch (System.Runtime.InteropServices.COMException)
-                {
-                    // Category axis may not exist for some chart types
                 }
 
                 return result;
@@ -716,12 +710,12 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? axes = null;
-            dynamic? targetAxis = null;
+            Excel.Axes? axes = null;
+            Excel.Axis? targetAxis = null;
 
             try
             {
-                axes = findResult.Chart.Axes;
+                axes = (Excel.Axes)findResult.Chart.Axes();
 
                 // Map axis type to Excel constants
                 var (axisType, axisGroup) = MapAxisType(axis);
@@ -770,12 +764,12 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? seriesCollection = null;
-            dynamic? series = null;
+            Excel.SeriesCollection? seriesCollection = null;
+            Excel.Series? series = null;
 
             try
             {
-                seriesCollection = findResult.Chart.SeriesCollection();
+                seriesCollection = (Excel.SeriesCollection)findResult.Chart.SeriesCollection();
                 int seriesCount = seriesCollection.Count;
 
                 if (seriesIndex < 1 || seriesIndex > seriesCount)
@@ -787,7 +781,7 @@ public partial class ChartCommands
 
                 // Set marker style
                 if (markerStyle.HasValue)
-                    series.MarkerStyle = (int)markerStyle.Value;
+                    series.MarkerStyle = (Excel.XlMarkerStyle)markerStyle.Value;
 
                 // Set marker size (valid range: 2-72)
                 if (markerSize.HasValue)
@@ -819,10 +813,9 @@ public partial class ChartCommands
 
                 if (fillColor != null || fillTransparency.HasValue || lineColor != null || lineWeight.HasValue)
                 {
-                    dynamic? format = null;
+                    Excel.ChartFormat? format = null;
                     try
                     {
-                        // Excel PIA exposes Office chart formatting objects without typed Office.Core references.
                         format = series.Format;
                         ApplyMaterialFormat(format, fillColor, fillTransparency, lineColor, lineWeight);
                     }
@@ -849,16 +842,16 @@ public partial class ChartCommands
     /// <summary>
     /// Maps ChartAxisType to Excel axis type and axis group constants.
     /// </summary>
-    private static (int axisType, int axisGroup) MapAxisType(ChartAxisType axis)
+    private static (Excel.XlAxisType axisType, Excel.XlAxisGroup axisGroup) MapAxisType(ChartAxisType axis)
     {
         return axis switch
         {
-            ChartAxisType.Category => (1, 1),           // xlCategory, xlPrimary
-            ChartAxisType.Value => (2, 1),              // xlValue, xlPrimary
-            ChartAxisType.Primary => (1, 1),            // xlCategory, xlPrimary
-            ChartAxisType.Secondary => (2, 1),          // xlValue, xlPrimary
-            ChartAxisType.CategorySecondary => (1, 2),  // xlCategory, xlSecondary
-            ChartAxisType.ValueSecondary => (2, 2),     // xlValue, xlSecondary
+            ChartAxisType.Category => (Excel.XlAxisType.xlCategory, Excel.XlAxisGroup.xlPrimary),
+            ChartAxisType.Value => (Excel.XlAxisType.xlValue, Excel.XlAxisGroup.xlPrimary),
+            ChartAxisType.Primary => (Excel.XlAxisType.xlCategory, Excel.XlAxisGroup.xlPrimary),
+            ChartAxisType.Secondary => (Excel.XlAxisType.xlValue, Excel.XlAxisGroup.xlPrimary),
+            ChartAxisType.CategorySecondary => (Excel.XlAxisType.xlCategory, Excel.XlAxisGroup.xlSecondary),
+            ChartAxisType.ValueSecondary => (Excel.XlAxisType.xlValue, Excel.XlAxisGroup.xlSecondary),
             _ => throw new ArgumentOutOfRangeException(nameof(axis), axis, "Unsupported chart axis.")
         };
     }
@@ -898,13 +891,13 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? seriesCollection = null;
-            dynamic? series = null;
-            dynamic? trendlines = null;
+            Excel.SeriesCollection? seriesCollection = null;
+            Excel.Series? series = null;
+            Excel.Trendlines? trendlines = null;
 
             try
             {
-                seriesCollection = findResult.Chart.SeriesCollection();
+                seriesCollection = (Excel.SeriesCollection)findResult.Chart.SeriesCollection();
                 int seriesCount = seriesCollection.Count;
 
                 if (seriesIndex < 1 || seriesIndex > seriesCount)
@@ -913,7 +906,7 @@ public partial class ChartCommands
                 }
 
                 series = seriesCollection.Item(seriesIndex);
-                trendlines = series.Trendlines();
+                trendlines = (Excel.Trendlines)series.Trendlines();
 
                 var result = new TrendlineListResult
                 {
@@ -926,34 +919,38 @@ public partial class ChartCommands
                 int trendlineCount = trendlines.Count;
                 for (int i = 1; i <= trendlineCount; i++)
                 {
-                    dynamic? trendline = null;
+                    Excel.Trendline? trendline = null;
                     try
                     {
                         trendline = trendlines.Item(i);
                         var info = new TrendlineInfo
                         {
                             Index = i,
-                            Type = (TrendlineType)Convert.ToInt32(trendline.Type),
+                            Type = (TrendlineType)Convert.ToInt32((object)trendline.Type, System.Globalization.CultureInfo.InvariantCulture),
                             Name = trendline.Name?.ToString(),
                             DisplayEquation = trendline.DisplayEquation,
                             DisplayRSquared = trendline.DisplayRSquared
                         };
 
                         // Get forward/backward forecast periods
-                        try { info.Forward = trendline.Forward; } catch (COMException) { /* Optional COM property */ }
-                        try { info.Backward = trendline.Backward; } catch (COMException) { /* Optional COM property */ }
-                        try { info.Intercept = trendline.Intercept; } catch (COMException) { /* Optional COM property */ }
+                        if (info.Type != TrendlineType.MovingAverage)
+                        {
+                            info.Forward = trendline.Forward;
+                            info.Backward = trendline.Backward;
+                        }
+                        if (info.Type is TrendlineType.Linear or TrendlineType.Exponential or TrendlineType.Polynomial)
+                            info.Intercept = trendline.Intercept;
 
                         // Get order for polynomial trendlines
                         if (info.Type == TrendlineType.Polynomial)
                         {
-                            try { info.Order = Convert.ToInt32(trendline.Order); } catch (COMException) { /* Optional COM property */ }
+                            info.Order = Convert.ToInt32(trendline.Order);
                         }
 
                         // Get period for moving average
                         if (info.Type == TrendlineType.MovingAverage)
                         {
-                            try { info.Period = Convert.ToInt32(trendline.Period); } catch (COMException) { /* Optional COM property */ }
+                            info.Period = Convert.ToInt32(trendline.Period);
                         }
 
                         result.Trendlines.Add(info);
@@ -1011,14 +1008,14 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? seriesCollection = null;
-            dynamic? series = null;
-            dynamic? trendlines = null;
-            dynamic? newTrendline = null;
+            Excel.SeriesCollection? seriesCollection = null;
+            Excel.Series? series = null;
+            Excel.Trendlines? trendlines = null;
+            Excel.Trendline? newTrendline = null;
 
             try
             {
-                seriesCollection = findResult.Chart.SeriesCollection();
+                seriesCollection = (Excel.SeriesCollection)findResult.Chart.SeriesCollection();
                 int seriesCount = seriesCollection.Count;
 
                 if (seriesIndex < 1 || seriesIndex > seriesCount)
@@ -1027,10 +1024,10 @@ public partial class ChartCommands
                 }
 
                 series = seriesCollection.Item(seriesIndex);
-                trendlines = series.Trendlines();
+                trendlines = (Excel.Trendlines)series.Trendlines();
 
                 // Add trendline with type
-                newTrendline = trendlines.Add((int)trendlineType);
+                newTrendline = trendlines.Add((Excel.XlTrendlineType)trendlineType);
 
                 // Set optional parameters
                 if (order.HasValue && trendlineType == TrendlineType.Polynomial)
@@ -1045,12 +1042,12 @@ public partial class ChartCommands
 
                 if (forward.HasValue)
                 {
-                    newTrendline.Forward = forward.Value;
+                    newTrendline.Forward = Convert.ToInt32(forward.Value);
                 }
 
                 if (backward.HasValue)
                 {
-                    newTrendline.Backward = backward.Value;
+                    newTrendline.Backward = Convert.ToInt32(backward.Value);
                 }
 
                 if (intercept.HasValue)
@@ -1102,14 +1099,14 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? seriesCollection = null;
-            dynamic? series = null;
-            dynamic? trendlines = null;
-            dynamic? trendline = null;
+            Excel.SeriesCollection? seriesCollection = null;
+            Excel.Series? series = null;
+            Excel.Trendlines? trendlines = null;
+            Excel.Trendline? trendline = null;
 
             try
             {
-                seriesCollection = findResult.Chart.SeriesCollection();
+                seriesCollection = (Excel.SeriesCollection)findResult.Chart.SeriesCollection();
                 int seriesCount = seriesCollection.Count;
 
                 if (seriesIndex < 1 || seriesIndex > seriesCount)
@@ -1118,7 +1115,7 @@ public partial class ChartCommands
                 }
 
                 series = seriesCollection.Item(seriesIndex);
-                trendlines = series.Trendlines();
+                trendlines = (Excel.Trendlines)series.Trendlines();
                 int trendlineCount = trendlines.Count;
 
                 if (trendlineIndex < 1 || trendlineIndex > trendlineCount)
@@ -1164,14 +1161,14 @@ public partial class ChartCommands
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? seriesCollection = null;
-            dynamic? series = null;
-            dynamic? trendlines = null;
-            dynamic? trendline = null;
+            Excel.SeriesCollection? seriesCollection = null;
+            Excel.Series? series = null;
+            Excel.Trendlines? trendlines = null;
+            Excel.Trendline? trendline = null;
 
             try
             {
-                seriesCollection = findResult.Chart.SeriesCollection();
+                seriesCollection = (Excel.SeriesCollection)findResult.Chart.SeriesCollection();
                 int seriesCount = seriesCollection.Count;
 
                 if (seriesIndex < 1 || seriesIndex > seriesCount)
@@ -1180,7 +1177,7 @@ public partial class ChartCommands
                 }
 
                 series = seriesCollection.Item(seriesIndex);
-                trendlines = series.Trendlines();
+                trendlines = (Excel.Trendlines)series.Trendlines();
                 int trendlineCount = trendlines.Count;
 
                 if (trendlineIndex < 1 || trendlineIndex > trendlineCount)
@@ -1193,12 +1190,12 @@ public partial class ChartCommands
                 // Update optional parameters
                 if (forward.HasValue)
                 {
-                    trendline.Forward = forward.Value;
+                    trendline.Forward = Convert.ToInt32(forward.Value);
                 }
 
                 if (backward.HasValue)
                 {
-                    trendline.Backward = backward.Value;
+                    trendline.Backward = Convert.ToInt32(backward.Value);
                 }
 
                 if (intercept.HasValue)
@@ -1242,31 +1239,31 @@ public partial class ChartCommands
         {
             // Find chart by name
             var findResult = FindChart(ctx.Book, chartName);
-            if (findResult.Chart == null)
+            if (findResult.Chart is null || findResult.Shape is null)
             {
                 throw new InvalidOperationException($"Chart '{chartName}' not found in workbook.");
             }
 
-            dynamic? worksheet = null;
-            dynamic? range = null;
+            Excel.Worksheet? worksheet = null;
+            Excel.Range? range = null;
 
             try
             {
                 // Get the target range
-                worksheet = ctx.Book.Worksheets[sheetName];
+                worksheet = Utilities.WorksheetLookup.Get(ctx.Book, sheetName);
                 range = worksheet.Range[rangeAddress];
 
                 // Get range geometry
-                double left = Convert.ToDouble(range.Left);
-                double top = Convert.ToDouble(range.Top);
-                double width = Convert.ToDouble(range.Width);
-                double height = Convert.ToDouble(range.Height);
+                double left = Convert.ToDouble((object)range.Left, System.Globalization.CultureInfo.InvariantCulture);
+                double top = Convert.ToDouble((object)range.Top, System.Globalization.CultureInfo.InvariantCulture);
+                double width = Convert.ToDouble((object)range.Width, System.Globalization.CultureInfo.InvariantCulture);
+                double height = Convert.ToDouble((object)range.Height, System.Globalization.CultureInfo.InvariantCulture);
 
                 // Apply to chart shape
-                findResult.Shape.Left = left;
-                findResult.Shape.Top = top;
-                findResult.Shape.Width = width;
-                findResult.Shape.Height = height;
+                findResult.Shape.Left = (float)left;
+                findResult.Shape.Top = (float)top;
+                findResult.Shape.Width = (float)width;
+                findResult.Shape.Height = (float)height;
 
                 // Collision detection after repositioning
                 var warnings = ChartPositionHelpers.DetectCollisions(

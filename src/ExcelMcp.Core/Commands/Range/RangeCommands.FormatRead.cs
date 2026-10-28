@@ -115,18 +115,11 @@ public partial class RangeCommands
         {
             if (!styleDefinition && !tableStyleDefinition) return getter();
             try { return getter(); }
-            catch (Exception ex) when (ex is COMException or ArgumentException &&
-                ex.HResult is unchecked((int)0x800A03EC) or unchecked((int)0x80070057))
+            catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
             {
                 mixed.Add($"{field}.unavailable");
                 return null;
             }
-        }
-        object? ReadThemeFont()
-        {
-            if (!tableStyleDefinition) return font.ThemeFont;
-            // PIA gap: differential Font.ThemeFont can be native null, unlike the declared value-type enum.
-            return ((dynamic)font).ThemeFont;
         }
         var fontFormat = new CellFontFormat(
             ReadFormatText(Read(() => font.Name, "font.name"), "font.name", mixed),
@@ -137,7 +130,7 @@ public partial class RangeCommands
             ReadFormatValue<bool>((object)font.Strikethrough, "font.strikethrough", mixed),
             ReadFormatValue<bool>(Read(() => font.Subscript, "font.subscript"), "font.subscript", mixed),
             ReadFormatValue<bool>(Read(() => font.Superscript, "font.superscript"), "font.superscript", mixed),
-            ReadFormatValue<int>(Read(ReadThemeFont, "font.themeFont"), "font.themeFont", mixed),
+            ReadFormatValue<int>(Read(() => font.ThemeFont, "font.themeFont"), "font.themeFont", mixed),
             ReadFormatColor(Read(() => font.Color, "font.color.rgb"), Read(() => font.ColorIndex, "font.color.colorIndex"), Read(() => font.TintAndShade, "font.color.tintAndShade"),
                 () => font.ThemeColor, "font.color", mixed));
         var fillFormat = new CellFillFormat(
@@ -236,11 +229,11 @@ public partial class RangeCommands
                 try
                 {
                     stop = stops[index];
-                    int color = Convert.ToInt32(stop.Color, CultureInfo.InvariantCulture);
-                    result.Add(new CellGradientStop(stop.Position,
+                    int color = Convert.ToInt32((object)stop.Color, CultureInfo.InvariantCulture);
+                    result.Add(new CellGradientStop((double)(object)stop.Position,
                         new CellColorFormat(FormattingHelpers.ColorToHex(color), null,
-                            ReadFormatTheme(() => stop.ThemeColor, $"fill.gradient.stops[{index}].themeColor", mixed),
-                            stop.TintAndShade)));
+                            ReadFormatTheme(() => (object)stop.ThemeColor, $"fill.gradient.stops[{index}].themeColor", mixed),
+                            (double)(object)stop.TintAndShade)));
                 }
                 finally
                 {
@@ -307,9 +300,9 @@ public partial class RangeCommands
         {
             return ReadFormatValue<int>(theme(), field, mixed);
         }
-        catch (COMException ex) when (ex.HResult == unchecked((int)0x800A03EC))
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
-            // Excel's ThemeColor getter rejects valid colors that are not theme-based.
+            // An older Excel implementation may not expose theme metadata.
             return null;
         }
         catch (ArgumentException ex) when (ex.HResult == unchecked((int)0x80070057))

@@ -13,7 +13,7 @@ namespace Sbroenne.ExcelMcp.Core.Commands;
 /// Update refreshes by default unless refresh=false. Load-to changes destinations; refresh updates loaded data.
 /// Trivial literal tables or already-validated code with unchanged dependencies need no redundant evaluation.
 ///
-/// IF CREATE/UPDATE FAILS: Changes are not rolled back. Privacy errors use category Privacy.
+/// IF CREATE/UPDATE FAILS: Changes are not rolled back. Formula.Firewall failures use category PrivacyFirewall and point to set-privacy-settings.
 /// Errors after storing the definition include partialState with the surviving query/load configuration.
 /// Inspect list/view/get-load-config; correct an existing query with update rather than repeating create.
 ///
@@ -28,14 +28,20 @@ namespace Sbroenne.ExcelMcp.Core.Commands;
 /// it sends M code to powerqueryformatter.com.
 ///
 /// TARGET CELL: targetCellAddress places tables without clearing sheet.
-/// TIMEOUT: Refresh accepts a caller timeout; load-to uses the fixed 30-minute data-operation timeout.
+/// TIMEOUT: Create, load-to, and update-with-refresh use a 30-minute wait; refresh accepts an override. Expiry ends the caller wait, not Excel execution.
 /// READS: list returns compact metadata, exact load state, and an M preview of at
 /// most 80 characters. Use view for one query's full M code.
+/// DIAGNOSTICS: Loads/refreshes report durationMs and verified rowsLoaded,
+/// worksheetRowsLoaded and modelRowsLoaded where available. Null/omitted counts
+/// are unknown, not zero; both destinations are not double-counted.
+/// These are loaded-row counts, not cell-error or warning counts.
+/// Wrong credential errors include Authentication guidance; unsupported Analysis
+/// Services cultures include a Culture hint without rewriting M code.
 /// </summary>
 [ServiceCategory("PowerQuery")]
 [McpTool("powerquery", Title = "Power Query Operations", Destructive = true, Category = "query",
-    Description = "Create, change, evaluate, refresh, and remove Power Query M code and data loads. Prefer evaluate for new or changed M code before persisting; it reports engine errors and verifies temporary-object cleanup. Create loads its selected destination (worksheet by default); connection-only stores without loading. Update refreshes unless refresh=false. Use load-to to change destinations and refresh to update loaded data. refresh-all refreshes every loaded query, skips parameter and connection-only staging queries (listed in skippedQueries), then refreshes dependent PivotTables by default (listed in refreshedPivotTables); set refresh_pivot_tables=false (CLI: --refresh-pivot-tables false) for query-only behavior. It keeps going when a query or PivotTable refresh fails; success is false and failures are listed in failedQueries or failedPivotTables; already-refreshed data is not rolled back. A timeout, cancellation, or lost Excel connection stops the whole run. Use workbook refresh-all for Excel-style refresh of all workbook connections and PivotTables. To refresh a single loaded query, use refresh with queryName. Load detection and cleanup use exact case-insensitive mashup Location. Set explicit column types for dates and Data Model relationships. Destinations: worksheet, data-model, both, connection-only; unknown values are rejected. M code is preserved; formatMCode=true sends it to powerqueryformatter.com and requires user consent. targetCellAddress places tables without clearing other content. Refresh accepts a caller timeout; load-to uses the fixed 30-minute data-operation timeout.")]
-[McpReadOnlyActions("list", "view", "get-load-config")]
+    Description = "Create, change, evaluate, refresh, and remove Power Query M code and data loads. Prefer evaluate for new or changed M code before persisting; it reports engine errors and verifies temporary-object cleanup. Create loads its selected destination (worksheet by default); connection-only stores without loading. Update refreshes unless refresh=false. Use load-to to change destinations and refresh to update loaded data. Set trace=true on refresh or refresh-all to include a short Power Query trace summary; use powerquery_trace_read to inspect trace files or read more detail. refresh-all refreshes every loaded query, skips parameter and connection-only staging queries (listed in skippedQueries), then refreshes dependent PivotTables by default (listed in refreshedPivotTables); set refresh_pivot_tables=false (CLI: --refresh-pivot-tables false) for query-only behavior. It keeps going when a query or PivotTable refresh fails; success is false and failures are listed in failedQueries or failedPivotTables; already-refreshed data is not rolled back. Excel execution cancellation or a lost connection stops the run; a caller timeout or cancellation ends only its wait, and Excel work may continue. Use workbook refresh-all for Excel-style refresh of all workbook connections and PivotTables. To refresh a single loaded query, use refresh with queryName. Read the configured privacy setting with the read-only action and change it with set-privacy-settings; Excel's global privacy option may override it. CLI: powerquery set-privacy-settings --ignore-privacy-levels true; MCP: powerquery action set-privacy-settings with ignore_privacy_levels=true. Setting true may allow data from different sources to be combined and sent between them; the setting is saved with the workbook when it is saved. Formula.Firewall errors include this recovery action. Load detection and cleanup use exact case-insensitive mashup Location. Set explicit column types for dates and Data Model relationships. Destinations: worksheet, data-model, both, connection-only; unknown values are rejected. M code is preserved; formatMCode=true sends it to powerqueryformatter.com and requires user consent. targetCellAddress places tables without clearing other content. Create, load-to, and update-with-refresh use a 30-minute wait; refresh accepts an override. Expiry preserves the session and reveals Excel when possible; inspect session status before further work.")]
+[McpReadOnlyActions("list", "view", "get-load-config", "get-privacy-settings")]
 public interface IPowerQueryCommands
 {
     /// <summary>
@@ -61,9 +67,10 @@ public interface IPowerQueryCommands
     /// <param name="batch">Excel batch session</param>
     /// <param name="queryName">Name of the query to refresh</param>
     /// <param name="timeout">Public input is whole seconds from 0 through 2147483. Omitted or 0 uses the 30-minute data-operation default.</param>
+    /// <param name="trace">Include a Power Query trace summary for this refresh</param>
     /// <param name="progress">Optional progress reporter</param>
     [ServiceAction("refresh")]
-    PowerQueryRefreshResult Refresh(IExcelBatch batch, [RequiredParameter] string queryName, TimeSpan timeout = default, IProgress<ProgressInfo>? progress = null);
+    PowerQueryRefreshResult Refresh(IExcelBatch batch, [RequiredParameter] string queryName, TimeSpan timeout = default, bool trace = false, IProgress<ProgressInfo>? progress = null);
 
     /// <summary>
     /// Gets the current load configuration of a Power Query
@@ -72,6 +79,28 @@ public interface IPowerQueryCommands
     /// <param name="queryName">Name of the query</param>
     [ServiceAction("get-load-config")]
     PowerQueryLoadConfigResult GetLoadConfig(IExcelBatch batch, [RequiredParameter] string queryName);
+
+    /// <summary>
+    /// Reads the workbook's configured FastCombine setting. Excel's global privacy option may override
+    /// whether the setting is applied when combining data sources.
+    /// </summary>
+    /// <param name="batch">Excel batch session</param>
+    [ServiceAction("get-privacy-settings")]
+    PowerQueryPrivacySettingsResult GetPrivacySettings(IExcelBatch batch);
+
+    /// <summary>
+    /// Sets the workbook's configured FastCombine value, which controls whether Power Query ignores
+    /// privacy levels when combining data sources. Excel's global privacy option may override whether
+    /// the setting is applied. Setting it to true may allow data from different sources to be combined
+    /// and sent between them.
+    /// The change is stored in the workbook when it is saved.
+    /// </summary>
+    /// <param name="batch">Excel batch session</param>
+    /// <param name="ignorePrivacyLevels">Configured workbook FastCombine value: true to ignore privacy levels, false not to ignore them. Excel's global privacy option may override whether the setting is applied.</param>
+    [ServiceAction("set-privacy-settings")]
+    PowerQueryPrivacySettingsResult SetPrivacySettings(
+        IExcelBatch batch,
+        [RequiredParameter] bool ignorePrivacyLevels);
 
     /// <summary>
     /// Deletes a Power Query and only the destinations with the exact mashup Location identity.
@@ -95,7 +124,7 @@ public interface IPowerQueryCommands
     /// <param name="targetCellAddress">Optional target cell address for worksheet loads (e.g., "B5"). Required when loading to an existing worksheet with other data.</param>
     /// <param name="formatMCode">Whether to send M code to the remote powerqueryformatter.com service before saving. Defaults to false to preserve privacy.</param>
     /// <exception cref="InvalidOperationException">Thrown when query cannot be created, M code is invalid, or load operation fails</exception>
-    OperationResult Create(
+    PowerQueryCreateResult Create(
         IExcelBatch batch,
         [RequiredParameter] string queryName,
         [RequiredParameter][FileOrValue] string mCode,
@@ -114,7 +143,7 @@ public interface IPowerQueryCommands
     /// <param name="refresh">Whether to refresh data after update (default: true)</param>
     /// <param name="formatMCode">Whether to send M code to the remote powerqueryformatter.com service before saving. Defaults to false to preserve privacy.</param>
     /// <exception cref="InvalidOperationException">Thrown when the query is not found, M code is invalid, or refresh fails</exception>
-    OperationResult Update(IExcelBatch batch, [RequiredParameter] string queryName, [RequiredParameter][FileOrValue] string mCode, bool refresh = true, bool formatMCode = false);
+    PowerQueryOperationResult Update(IExcelBatch batch, [RequiredParameter] string queryName, [RequiredParameter][FileOrValue] string mCode, bool refresh = true, bool formatMCode = false);
 
     /// <summary>
     /// Atomically sets load destination and refreshes data
@@ -126,7 +155,7 @@ public interface IPowerQueryCommands
     /// <param name="targetSheet">Target worksheet name (required for LoadToTable and LoadToBoth)</param>
     /// <param name="targetCellAddress">Optional target cell address (e.g., "B5"). Required when loading to an existing worksheet to avoid clearing other content.</param>
     /// <exception cref="InvalidOperationException">Thrown when the query is not found, load destination is invalid, or refresh fails</exception>
-    OperationResult LoadTo(
+    PowerQueryLoadResult LoadTo(
         IExcelBatch batch,
         [RequiredParameter] string queryName,
         [FromString("loadDestination")] PowerQueryLoadMode loadMode,
@@ -149,11 +178,13 @@ public interface IPowerQueryCommands
     /// <param name="batch">Excel batch session</param>
     /// <param name="timeout">Public input is whole seconds from 0 through 2147483. Omitted or 0 uses the 30-minute data-operation default.</param>
     /// <param name="refreshPivotTables">Refresh PivotTables dependent on successfully refreshed queries (default true).</param>
+    /// <param name="trace">Include a Power Query trace summary for this refresh</param>
     /// <param name="progress">Optional progress reporter</param>
     PowerQueryRefreshAllResult RefreshAll(
         IExcelBatch batch,
         TimeSpan timeout = default,
         bool refreshPivotTables = true,
+        bool trace = false,
         IProgress<ProgressInfo>? progress = null);
 
     /// <summary>

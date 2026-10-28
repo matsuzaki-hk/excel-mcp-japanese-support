@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.ComInterop.Session;
-using Sbroenne.ExcelMcp.Core.Utilities;
 
 namespace Sbroenne.ExcelMcp.CLI.Infrastructure;
 
@@ -16,13 +15,13 @@ internal sealed class CliServiceTray : IDisposable
     private readonly ContextMenuStrip _contextMenu;
     private readonly ToolStripMenuItem _sessionsMenu;
     private readonly SessionManager _sessionManager;
-    private readonly Action _requestShutdown;
+    private readonly Func<string?> _requestShutdown;
     private readonly System.Windows.Forms.Timer _refreshTimer;
     private readonly TaskbarNotificationWindow _taskbarWindow;
     private bool _disposed;
     private DateTime _lastBalloonShown = DateTime.MinValue;
 
-    public CliServiceTray(SessionManager sessionManager, Action requestShutdown)
+    public CliServiceTray(SessionManager sessionManager, Func<string?> requestShutdown)
     {
         _sessionManager = sessionManager;
         _requestShutdown = requestShutdown;
@@ -95,6 +94,8 @@ internal sealed class CliServiceTray : IDisposable
     /// <summary>
     /// Checks NuGet for a newer version after a 5-second delay and shows a balloon tip if available.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL001",
+        Justification = "Optional tray release notifications must not terminate the service or affect workbook operations when the network or notification UI is unavailable.")]
     private async void CheckForUpdateAsync()
     {
         try
@@ -123,6 +124,8 @@ internal sealed class CliServiceTray : IDisposable
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL001",
+        Justification = "Refreshing the informational tray menu may race UI disposal and must not terminate the daemon. No workbook operation or close request is executed by this refresh.")]
     private void RefreshSessionsMenu()
     {
         if (_disposed) return;
@@ -148,11 +151,12 @@ internal sealed class CliServiceTray : IDisposable
             {
                 foreach (var session in sessions)
                 {
-                    var fileName = Path.GetFileName(session.FilePath);
+                    var fileName = session.WorkbookName ?? Path.GetFileName(session.FilePath ?? string.Empty);
+                    var location = session.FilePath ?? "No saved location";
                     var sessionMenu = new ToolStripMenuItem(fileName);
                     sessionMenu.AccessibleName = $"Session: {fileName}";
-                    sessionMenu.AccessibleDescription = $"Excel session for {session.FilePath}";
-                    sessionMenu.ToolTipText = $"Session: {session.SessionId}\nPath: {session.FilePath}";
+                    sessionMenu.AccessibleDescription = $"Excel session for {location}";
+                    sessionMenu.ToolTipText = $"Session: {session.SessionId}\nPath: {location}";
 
                     // Close session with save prompt
                     var closeItem = new ToolStripMenuItem("&Close Session...");
@@ -195,6 +199,8 @@ internal sealed class CliServiceTray : IDisposable
         CloseSession(sessionId, save: result == System.Windows.Forms.DialogResult.Yes);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Tray action boundary presents the exact failed close/save message in an Error balloon rather than terminating the UI thread or claiming the session closed.")]
     private void CloseSession(string sessionId, bool save)
     {
         try
@@ -210,6 +216,8 @@ internal sealed class CliServiceTray : IDisposable
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Tray action boundary presents the original close failure in an Error balloon; the success balloon is not shown when any session close fails.")]
     private void CloseAllSessions()
     {
         try
@@ -241,7 +249,8 @@ internal sealed class CliServiceTray : IDisposable
         }
         else
         {
-            var message = string.Join("\n", sessions.Select(s => $"• {Path.GetFileName(s.FilePath)}"));
+            var message = string.Join("\n", sessions.Select(s =>
+                $"• {s.WorkbookName ?? Path.GetFileName(s.FilePath ?? string.Empty)}"));
             ShowBalloon($"Active Sessions ({sessions.Count})", message);
         }
     }
@@ -252,6 +261,8 @@ internal sealed class CliServiceTray : IDisposable
         _notifyIcon.ShowBalloonTip(3000, title, message, icon);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL001",
+        Justification = "Optional version metadata in the About dialog must not terminate the daemon or affect sessions; the dialog remains accurate without release-notification information.")]
     private static async void ShowAbout()
     {
         var version = GetCurrentVersion();
@@ -344,11 +355,7 @@ internal sealed class CliServiceTray : IDisposable
             AccessibleName = "GitHub repository link",
             AccessibleDescription = $"Opens {githubUrl} in browser"
         };
-        githubLink.Click += (_, _) =>
-        {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(githubUrl) { UseShellExecute = true }); }
-            catch { /* Ignore navigation errors */ }
-        };
+        githubLink.Click += (_, _) => OpenLink(githubUrl);
 
         var docsLabel = new Label
         {
@@ -366,11 +373,7 @@ internal sealed class CliServiceTray : IDisposable
             AccessibleName = "Documentation link",
             AccessibleDescription = $"Opens {docsUrl} in browser"
         };
-        docsLink.Click += (_, _) =>
-        {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(docsUrl) { UseShellExecute = true }); }
-            catch { /* Ignore navigation errors */ }
-        };
+        docsLink.Click += (_, _) => OpenLink(docsUrl);
 
         var tabIndex = 2;
         var buttonY = 165;
@@ -421,6 +424,21 @@ internal sealed class CliServiceTray : IDisposable
         form.ShowDialog();
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Optional About-dialog browser navigation failure is traced, not allowed to terminate the daemon or alter any workbook operation.")]
+    private static void OpenLink(string url)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning("Could not open the requested product link: {0}", ex.Message);
+        }
+    }
+
     private static int CompareVersions(string current, string latest)
     {
         if (Version.TryParse(current, out var currentVer) && Version.TryParse(latest, out var latestVer))
@@ -437,18 +455,68 @@ internal sealed class CliServiceTray : IDisposable
 
     private void ExitService()
     {
-        var sessions = _sessionManager.GetActiveSessions();
+        var report = ExitService(_sessionManager, _requestShutdown, MessageBox.Show, ShowBalloon);
+        if (report is not null)
+            ShowReportAfterExit(report);
+    }
+
+    // Shutdown ends this thread's message loop, which would close a box shown here at once.
+    // The report gets its own thread, which the tray does not wait for: the tray can finish,
+    // so the service lock is released and a new service can start while the report is open.
+    // A foreground thread keeps this process running until the user closes the report. Until
+    // then this process still holds its claim on the reported Excel copies, so the report says
+    // to close it before attaching to them from a new service.
+    private static void ShowReportAfterExit(string report)
+    {
+        var text = report + "\n\nClose this message before attaching to these Excel copies from a new ExcelMCP service.";
+        var thread = new Thread(() =>
+            MessageBox.Show(text, "ExcelMCP CLI stopped", MessageBoxButtons.OK, MessageBoxIcon.Warning))
+        {
+            IsBackground = false
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+    }
+
+    /// <summary>
+    /// Asks what to do with open sessions, then stops the service. Returns the shutdown report,
+    /// or null when nothing was left; the caller shows the report.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Tray exit boundary shows exact release/save/close failures to the user. A failed requested save leaves the service running so the user can decide again; shutdown itself always completes and its report is returned.")]
+    internal static string? ExitService(
+        SessionManager sessionManager,
+        Func<string?> requestShutdown,
+        Func<string, string, MessageBoxButtons, MessageBoxIcon, DialogResult> showMessage,
+        Action<string, string, ToolTipIcon> showBalloon)
+    {
+        try
+        {
+            sessionManager.CloseSessionsClosedInExcel();
+        }
+        catch (Exception ex)
+        {
+            showMessage(
+                $"A workbook closed in Excel could not be released: {ex.Message}\n\nIts session is listed below.",
+                "Error",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        var sessions = sessionManager.GetActiveSessions().Where(session => !session.IsAttached).ToList();
         if (sessions.Count > 0)
         {
-            var result = MessageBox.Show(
-                $"There are {sessions.Count} active session(s).\n\n" +
-                "Do you want to save all sessions before exiting?",
+            var result = showMessage(
+                $"There are {sessions.Count} active session(s) opened by ExcelMCP.\n\n" +
+                "Save and close those sessions before exiting?\n\n" +
+                "Yes: save and close. No: close saved workbooks and leave unsaved ones open and visible without saving.\n\n" +
+                "Attached workbooks will remain open.",
                 "Exit ExcelMCP CLI",
                 MessageBoxButtons.YesNoCancel,
                 MessageBoxIcon.Question);
 
             if (result == System.Windows.Forms.DialogResult.Cancel)
-                return;
+                return null;
 
             if (result == System.Windows.Forms.DialogResult.Yes)
             {
@@ -456,46 +524,24 @@ internal sealed class CliServiceTray : IDisposable
                 {
                     foreach (var session in sessions)
                     {
-                        _sessionManager.CloseSession(session.SessionId, save: true);
+                        sessionManager.CloseSession(session.SessionId, save: true);
                     }
-                    ShowBalloon("Sessions Saved", $"Saved and closed {sessions.Count} session(s).");
+                    showBalloon("Sessions Saved", $"Saved and closed {sessions.Count} session(s).", ToolTipIcon.Info);
                 }
                 catch (Exception ex)
                 {
-                    var continueResult = MessageBox.Show(
-                        $"Error saving sessions: {ex.Message}\n\nExit anyway?",
+                    showMessage(
+                        $"Error saving sessions: {ex.Message}\n\nThe service remains running. Inspect the remaining workbooks before retrying.",
                         "Error",
-                        MessageBoxButtons.YesNo,
+                        MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
 
-                    if (continueResult != System.Windows.Forms.DialogResult.Yes)
-                        return;
-                }
-            }
-            else
-            {
-                try
-                {
-                    foreach (var session in sessions)
-                    {
-                        _sessionManager.CloseSession(session.SessionId, save: false);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ShowBalloon("Warning", $"Error closing sessions: {ex.Message}", ToolTipIcon.Warning);
+                    return null;
                 }
             }
         }
 
-        try
-        {
-            _requestShutdown();
-        }
-        catch (Exception ex) when (OperationFailureClassifier.Classify(ex) == "Busy")
-        {
-            ShowBalloon("Shutdown Refused", ex.Message, ToolTipIcon.Warning);
-        }
+        return requestShutdown();
     }
 
     /// <summary>

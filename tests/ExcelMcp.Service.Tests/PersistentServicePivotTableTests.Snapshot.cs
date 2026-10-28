@@ -1,5 +1,6 @@
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.Core.Commands.PivotTable;
+using Sbroenne.ExcelMcp.Core.Commands.Range;
 using Sbroenne.ExcelMcp.Core.Models;
 using Xunit;
 using Excel = Microsoft.Office.Interop.Excel;
@@ -8,6 +9,45 @@ namespace Sbroenne.ExcelMcp.Service.Tests;
 
 public sealed partial class PersistentServicePivotTableTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReadAndListFields_PreserveRealColumnsMatchingTheValuesMarker(bool multipleValues)
+    {
+        var batch = _fixture.BatchToken;
+        var source = _fixture.CreateTestSheet(batch);
+        RequireSuccess(_commands.SetNumberFormat(batch, source, "D1", "@"));
+        RequireSuccess(_commands.SetValues(batch, source, "A1:E5",
+            [
+                ["Region", "Sales", "Quantity", "-2146826246", "Values"],
+                ["North", 17, 1, "One", "First"],
+                ["South", 29, 2, "Two", "Second"],
+                ["North", 31, 3, "Three", "Third"],
+                ["South", 43, 4, "Four", "Fourth"]
+            ], overwritePolicy: OverwritePolicy.Allow));
+        RequireSuccess(_pivotCommands.CreateFromRange(batch, source, "A1:E5", source, "G1", "MarkerPivot"));
+        RequireSuccess(_pivotCommands.AddRowField(batch, "MarkerPivot", "Region"));
+        if (multipleValues)
+        {
+            RequireSuccess(_pivotCommands.AddValueField(batch, "MarkerPivot", "Sales"));
+            RequireSuccess(_pivotCommands.AddValueField(batch, "MarkerPivot", "Quantity"));
+        }
+
+        var listed = RequireSuccess(_pivotCommands.ListFields(batch, "MarkerPivot"));
+        var snapshot = RequireSuccess(_pivotCommands.Read(batch, "MarkerPivot", source));
+
+        // The version-4 cache used by create-from-range reserves Values and exposes the source field as Values2.
+        string[] expected = ["Region", "Sales", "Quantity", "-2146826246", "Values2"];
+        Assert.Equal(expected.Order(StringComparer.Ordinal), listed.Fields.Select(field => field.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(expected.Order(StringComparer.Ordinal), snapshot.Fields.Select(field => field.Name).Order(StringComparer.Ordinal));
+        Assert.True(snapshot.SnapshotComplete, System.Text.Json.JsonSerializer.Serialize(snapshot));
+        Assert.Equal("Region", Assert.Single(snapshot.FieldSelections).FieldName);
+        Assert.Equal(multipleValues ? 2 : 0, snapshot.ValueFields.Count);
+        var unchanged = RequireSuccess(_commands.GetValues(batch, source, "A1:E5"));
+        Assert.Equal(["Region", "Sales", "Quantity", "-2146826246", "Values"], unchanged.Values[0]);
+        Assert.Equal(["South", 43, 4, "Four", "Fourth"], unchanged.Values[4]);
+    }
+
     [Fact]
     public void Read_ReturnsBoundedSemanticSelectionsForPlacedRegularFields()
     {
@@ -28,7 +68,7 @@ public sealed partial class PersistentServicePivotTableTests
 
         Assert.False(snapshot.IsOlap);
         Assert.True(snapshot.IsOlapAvailable);
-        Assert.True(snapshot.FieldSelectionsAvailable);
+        Assert.True(snapshot.FieldSelectionsAvailable, snapshot.FieldSelectionsError);
         Assert.True(snapshot.ValueFieldsAvailable);
         Assert.Equal(1, snapshot.MaxSelectedMembers);
         Assert.False(snapshot.SnapshotComplete);
@@ -149,8 +189,8 @@ public sealed partial class PersistentServicePivotTableTests
 
         var snapshot = RequireSuccess(_pivotCommands.Read(batch, pivotName, _salesSheetName));
 
-        Assert.True(snapshot.FieldSelectionsAvailable);
-        Assert.True(snapshot.SnapshotComplete);
+        Assert.True(snapshot.FieldSelectionsAvailable, System.Text.Json.JsonSerializer.Serialize(snapshot));
+        Assert.True(snapshot.SnapshotComplete, System.Text.Json.JsonSerializer.Serialize(snapshot));
         var region = Assert.Single(snapshot.FieldSelections);
         Assert.Equal("Region", region.FieldName);
         Assert.Equal(PivotFieldArea.Column, region.Area);
@@ -163,6 +203,8 @@ public sealed partial class PersistentServicePivotTableTests
         Assert.Equal(["Sum of Sales", "Count of Sales"], snapshot.ValueFields.Select(value => value.FieldName));
         Assert.Equal([AggregationFunction.Sum, AggregationFunction.Count],
             snapshot.ValueFields.Select(value => value.Function));
+        Assert.Equal(["Date", "Product", "Region", "Sales"],
+            snapshot.Fields.Select(field => field.Name).Order(StringComparer.Ordinal));
     }
 
     [Fact]

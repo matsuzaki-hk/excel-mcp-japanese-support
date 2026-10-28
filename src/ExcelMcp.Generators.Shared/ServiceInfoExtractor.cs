@@ -15,13 +15,15 @@ public static class ServiceInfoExtractor
     /// <summary>
     /// Derives the command group name shared by MCP routing, CLI commands, and batch files:
     /// the MCP tool name without underscores, or the lowercased PascalName when there is no MCP tool.
+    /// An explicit command name preserves existing names when the MCP tool name differs.
     /// </summary>
-    public static string GetCommandGroupName(string? mcpToolName, string pascalName) =>
-        mcpToolName is not null ? mcpToolName.Replace("_", "") : pascalName.ToLowerInvariant();
+    public static string GetCommandGroupName(string? mcpToolName, string pascalName, string? commandName = null) =>
+        commandName ?? (mcpToolName is not null ? mcpToolName.Replace("_", "") : pascalName.ToLowerInvariant());
 
     public static ServiceInfo? ExtractServiceInfo(INamedTypeSymbol interfaceSymbol)
     {
         string? pascalName = null;
+        string? commandName = null;
         string? mcpTool = null;
         bool noSession = false;
         string? mcpToolTitle = null;
@@ -41,6 +43,8 @@ public static class ServiceInfoExtractor
                 {
                     pascalName = attr.ConstructorArguments[0].Value?.ToString();
                 }
+                commandName = attr.NamedArguments.FirstOrDefault(argument => argument.Key == "CommandName")
+                    .Value.Value as string;
             }
             else if (attrName == "McpToolAttribute")
             {
@@ -93,7 +97,7 @@ public static class ServiceInfoExtractor
             return null;
 
         // One group name for MCP routing, CLI commands, and batch files.
-        var category = GetCommandGroupName(mcpTool, pascalName!);
+        var category = GetCommandGroupName(mcpTool, pascalName!, commandName);
 
         // Extract interface-level XML documentation
         var interfaceSummary = ExtractInterfaceSummary(interfaceSymbol);
@@ -166,10 +170,10 @@ public static class ServiceInfoExtractor
             // Normalize multi-line XML doc comments: collapse whitespace runs into single space
             return Regex.Replace(text, @"\s+", " ");
         }
-        catch (Exception)
+        catch (XmlException exception)
         {
-            // XML comment parsing is best-effort — malformed XML should not break generation
-            return null;
+            throw new InvalidOperationException(
+                $"Cannot read XML documentation for '{interfaceSymbol.ToDisplayString()}': {exception.Message}", exception);
         }
     }
 
@@ -375,10 +379,10 @@ public static class ServiceInfoExtractor
 
             return new XmlDocumentation(summary, parameters);
         }
-        catch (Exception)
+        catch (XmlException exception)
         {
-            // XML doc parsing is best-effort — malformed XML should not break generation
-            return null;
+            throw new InvalidOperationException(
+                $"Cannot read XML documentation for '{method.ToDisplayString()}': {exception.Message}", exception);
         }
     }
 

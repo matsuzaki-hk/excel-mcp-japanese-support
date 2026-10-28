@@ -161,6 +161,12 @@ public interface IWorkbookCommands
     [ServiceAction("get-info")]
     WorkbookInfoResult GetInfo(IExcelBatch batch);
 
+    /// <summary>Changes AutoSave only for the selected workbook and returns its confirmed status. Enabling AutoSave can immediately save pending edits. Unsupported settings and native failures are errors; no rollback is promised.</summary>
+    /// <param name="batch">Excel batch session.</param>
+    /// <param name="enabled">Whether Excel AutoSave should be enabled.</param>
+    [ServiceAction("set-auto-save")]
+    WorkbookInfoResult SetAutoSave(IExcelBatch batch, [RequiredParameter] bool enabled);
+
     /// <summary>Reads all 12 native workbook theme colors and major/minor Latin, East Asian, and complex-script font definitions. Empty script font names remain empty; no fallback font is invented.</summary>
     /// <param name="batch">Excel batch session.</param>
     [ServiceAction("get-theme")]
@@ -172,7 +178,7 @@ public interface IWorkbookCommands
     [ServiceAction("apply-theme")]
     WorkbookThemeResult ApplyTheme(IExcelBatch batch, [RequiredParameter] string themePath);
 
-    /// <summary>Lists built-in and/or custom workbook document properties.</summary>
+    /// <summary>Lists built-in and/or custom workbook document properties. Each property reports valueAvailable and valueError. An unreadable built-in value can be undefined or its getter can have failed; valueAvailable=false does not prove absence. Inspect the native error rather than interpreting a null value as empty metadata.</summary>
     /// <param name="batch">Excel batch session</param>
     /// <param name="includeBuiltIn">Include built-in document properties</param>
     /// <param name="includeCustom">Include custom document properties</param>
@@ -182,7 +188,7 @@ public interface IWorkbookCommands
         bool includeBuiltIn = true,
         bool includeCustom = true);
 
-    /// <summary>Gets one built-in or custom workbook document property.</summary>
+    /// <summary>Gets one built-in or custom workbook document property, including valueAvailable and valueError. An unreadable value is explicitly reported, not treated as confirmed absence; unexpected native errors still fail the operation.</summary>
     /// <param name="batch">Excel batch session</param>
     /// <param name="propertyName">Document property name</param>
     /// <param name="scope">Property collection: built-in or custom</param>

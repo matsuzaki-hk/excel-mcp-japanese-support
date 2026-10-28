@@ -1,3 +1,4 @@
+#Requires -Version 7.4
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$PlanFile,
@@ -5,7 +6,8 @@ param(
     [switch]$ListProjects
 )
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'Invoke-BuildTool.ps1')
-$arguments = @('build', '--plan', $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PlanFile), '--group', $Group)
-if ($ListProjects) { $arguments += '--list-projects' }
-Invoke-ExcelMcpBuild -Arguments $arguments
+. (Join-Path $PSScriptRoot 'ValidationExecution.ps1')
+$plan = Read-ValidationPlan $PlanFile
+if ($ListProjects) { Get-SelectedBuildProjects $plan $Group }
+else { Invoke-SelectedBuild $plan $Group }
+$global:LASTEXITCODE = 0

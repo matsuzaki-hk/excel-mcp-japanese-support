@@ -11,33 +11,17 @@ namespace Sbroenne.ExcelMcp.Core.Commands.Chart;
 public class RegularChartStrategy : IChartStrategy
 {
     /// <inheritdoc />
-    public bool CanHandle(dynamic chart)
-    {
-        // Regular charts: chart.PivotLayout is null or doesn't exist
-        dynamic? pivotLayout = null;
-        try
-        {
-            pivotLayout = chart.PivotLayout;
-            return pivotLayout == null;
-        }
-        catch (COMException)
-        {
-            return true; // No PivotLayout property = Regular chart
-        }
-        finally
-        {
-            ComUtilities.Release(ref pivotLayout);
-        }
-    }
+    public bool CanHandle(Excel.Chart chart) =>
+        !PivotChartStrategy.HasPivotLayout(() => chart.PivotLayout);
 
     /// <inheritdoc />
-    public ChartInfo GetInfo(dynamic chart, string chartName, string sheetName, dynamic shape)
+    public ChartInfo GetInfo(Excel.Chart chart, string chartName, string sheetName, Excel.Shape shape)
     {
         var info = new ChartInfo
         {
             Name = chartName,
             SheetName = sheetName,
-            ChartType = (ChartType)Convert.ToInt32(chart.ChartType),
+            ChartType = (ChartType)Convert.ToInt32((object)chart.ChartType, System.Globalization.CultureInfo.InvariantCulture),
             IsPivotChart = false,
             Left = Convert.ToDouble(shape.Left),
             Top = Convert.ToDouble(shape.Top),
@@ -46,14 +30,14 @@ public class RegularChartStrategy : IChartStrategy
         };
 
         // Get anchor cells and placement mode
-        dynamic? topLeftCell = null;
-        dynamic? bottomRightCell = null;
+        Excel.Range? topLeftCell = null;
+        Excel.Range? bottomRightCell = null;
         try
         {
             topLeftCell = shape.TopLeftCell;
             info.TopLeftCell = topLeftCell.Address?.ToString();
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // TopLeftCell not available - optional COM property
         }
@@ -67,7 +51,7 @@ public class RegularChartStrategy : IChartStrategy
             bottomRightCell = shape.BottomRightCell;
             info.BottomRightCell = bottomRightCell.Address?.ToString();
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // BottomRightCell not available - optional COM property
         }
@@ -78,37 +62,27 @@ public class RegularChartStrategy : IChartStrategy
 
         try
         {
-            info.Placement = Convert.ToInt32(shape.Placement);
+            info.Placement = (int)shape.Placement;
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // Placement not available - optional COM property
         }
 
-        // Count series
-        dynamic? seriesCollection = null;
-        try
-        {
-            seriesCollection = chart.SeriesCollection();
-            info.SeriesCount = Convert.ToInt32(seriesCollection.Count);
-        }
-        finally
-        {
-            ComUtilities.Release(ref seriesCollection!);
-        }
+        info.SeriesCount = ChartSeriesReader.Count(chart);
 
         return info;
     }
 
     /// <inheritdoc />
-    public ChartInfoResult GetDetailedInfo(dynamic chart, string chartName, string sheetName, dynamic shape)
+    public ChartInfoResult GetDetailedInfo(Excel.Chart chart, string chartName, string sheetName, Excel.Shape shape)
     {
         var info = new ChartInfoResult
         {
             Success = true,
             Name = chartName,
             SheetName = sheetName,
-            ChartType = (ChartType)Convert.ToInt32(chart.ChartType),
+            ChartType = (ChartType)Convert.ToInt32((object)chart.ChartType, System.Globalization.CultureInfo.InvariantCulture),
             IsPivotChart = false,
             Left = Convert.ToDouble(shape.Left),
             Top = Convert.ToDouble(shape.Top),
@@ -117,14 +91,14 @@ public class RegularChartStrategy : IChartStrategy
         };
 
         // Get anchor cells and placement mode
-        dynamic? topLeftCell = null;
-        dynamic? bottomRightCell = null;
+        Excel.Range? topLeftCell = null;
+        Excel.Range? bottomRightCell = null;
         try
         {
             topLeftCell = shape.TopLeftCell;
             info.TopLeftCell = topLeftCell.Address?.ToString();
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // TopLeftCell not available - optional COM property
         }
@@ -138,7 +112,7 @@ public class RegularChartStrategy : IChartStrategy
             bottomRightCell = shape.BottomRightCell;
             info.BottomRightCell = bottomRightCell.Address?.ToString();
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // BottomRightCell not available - optional COM property
         }
@@ -149,52 +123,46 @@ public class RegularChartStrategy : IChartStrategy
 
         try
         {
-            info.Placement = Convert.ToInt32(shape.Placement);
+            info.Placement = (int)shape.Placement;
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // Placement not available - optional COM property
         }
 
         // Get title
-        try
+        if (chart.HasTitle)
         {
-            if (chart.HasTitle)
+            Excel.ChartTitle? chartTitle = null;
+            try
             {
-                info.Title = chart.ChartTitle.Text?.ToString() ?? string.Empty;
+                chartTitle = chart.ChartTitle;
+                info.Title = chartTitle.Text?.ToString() ?? string.Empty;
             }
-        }
-        catch (COMException)
-        {
-            // No title - optional COM property, safe to ignore
+            finally
+            {
+                ComUtilities.Release(ref chartTitle);
+            }
         }
 
         // Get legend
-        try
-        {
-            info.HasLegend = chart.HasLegend;
-        }
-        catch (COMException)
-        {
-            info.HasLegend = false; // Safe fallback for optional COM property
-        }
+        info.HasLegend = chart.HasLegend;
 
         // Get source range
-        dynamic? chartArea = null;
-        dynamic? chartParent = null;
-        dynamic? sourceSeriesCollection = null;
-        dynamic? sourceSeries = null;
+        Excel.ChartArea? chartArea = null;
+        Excel.Chart? chartParent = null;
+        Excel.SeriesCollection? sourceSeriesCollection = null;
+        Excel.Series? sourceSeries = null;
         try
         {
             chartArea = chart.ChartArea;
-            chartParent = chartArea.Parent;
-            sourceSeriesCollection = chartParent.SeriesCollection();
-            sourceSeries = sourceSeriesCollection.Item(1);
-            info.SourceRange = sourceSeries.Formula?.ToString() ?? string.Empty;
-        }
-        catch (COMException)
-        {
-            // No source range or no series - optional COM property, safe to ignore
+            chartParent = (Excel.Chart)chartArea.Parent;
+            sourceSeriesCollection = (Excel.SeriesCollection)chartParent.SeriesCollection();
+            if (Convert.ToInt32(sourceSeriesCollection.Count) > 0)
+            {
+                sourceSeries = sourceSeriesCollection.Item(1);
+                info.SourceRange = sourceSeries.Formula?.ToString() ?? string.Empty;
+            }
         }
         finally
         {
@@ -210,12 +178,12 @@ public class RegularChartStrategy : IChartStrategy
     }
 
     /// <inheritdoc />
-    public void SetSourceRange(dynamic chart, string sourceRange, CancellationToken ct)
+    public void SetSourceRange(Excel.Chart chart, string sourceRange, CancellationToken ct)
     {
         Excel.ChartObject? chartObject = null;
         Excel.Worksheet? chartSheet = null;
         Excel.Workbook? book = null;
-        dynamic? sourceRangeObj = null;
+        Excel.Range? sourceRangeObj = null;
         try
         {
             chartObject = (Excel.ChartObject)chart.Parent;
@@ -234,7 +202,7 @@ public class RegularChartStrategy : IChartStrategy
     }
 
     /// <inheritdoc />
-    public SeriesInfo AddSeries(dynamic chart, string seriesName, string valuesRange, string? categoryRange)
+    public SeriesInfo AddSeries(Excel.Chart chart, string seriesName, string valuesRange, string? categoryRange)
     {
         Excel.ChartObject? chartObject = null;
         Excel.Worksheet? chartSheet = null;
@@ -314,14 +282,14 @@ public class RegularChartStrategy : IChartStrategy
     }
 
     /// <inheritdoc />
-    public void RemoveSeries(dynamic chart, int seriesIndex)
+    public void RemoveSeries(Excel.Chart chart, int seriesIndex)
     {
-        dynamic? seriesCollection = null;
-        dynamic? series = null;
+        Excel.SeriesCollection? seriesCollection = null;
+        Excel.Series? series = null;
 
         try
         {
-            seriesCollection = chart.SeriesCollection();
+            seriesCollection = (Excel.SeriesCollection)chart.SeriesCollection();
             series = seriesCollection.Item(seriesIndex);
             series.Delete();
         }

@@ -2,6 +2,7 @@
 // Copyright (c) Stephan Brenner. All rights reserved.
 // </copyright>
 
+using Sbroenne.ExcelMcp.Core.Commands.Window;
 using Xunit;
 
 namespace Sbroenne.ExcelMcp.Service.Tests;
@@ -34,7 +35,7 @@ public sealed partial class PersistentServiceWindowTests
         var info = _commands.GetInfo(batch);
         Assert.True(info.Success, info.ErrorMessage);
         Assert.True(info.IsVisible);
-        Assert.True(info.IsForeground);
+        Assert.Equal(result.IsForeground, info.IsForeground);
 
         // Cleanup: hide again so tests don't leave visible Excel windows
         RequireSuccess(_commands.Hide(batch));
@@ -116,6 +117,33 @@ public sealed partial class PersistentServiceWindowTests
         RequireSuccess(_commands.Hide(batch));
     }
 
+    [Fact]
+    public void BringToFront_WhenForegroundIsRefused_Throws()
+    {
+        var batch = _fixture.BatchToken;
+        RequireSuccess(_commands.Show(batch));
+        var previousForegroundRequest = WindowCommands.ForegroundActivationForTests;
+
+        try
+        {
+            WindowCommands.ForegroundActivationForTests = _ => false;
+
+            var exception = Assert.Throws<InvalidOperationException>(
+                () => _commands.BringToFront(batch));
+
+            Assert.Contains(
+                "Windows could not bring the Excel window to the foreground. " +
+                "Select Excel on the Windows taskbar, or press Alt+Tab to switch to Excel.",
+                exception.Message,
+                StringComparison.Ordinal);
+            Assert.True(RequireSuccess(_commands.GetInfo(batch)).IsVisible);
+        }
+        finally
+        {
+            WindowCommands.ForegroundActivationForTests = previousForegroundRequest;
+        }
+    }
+
     [Theory]
     [InlineData("normal")]
     [InlineData("maximized")]
@@ -127,11 +155,11 @@ public sealed partial class PersistentServiceWindowTests
         RequireSuccess(_commands.Hide(batch));
         Assert.False(RequireSuccess(_commands.GetInfo(batch)).IsVisible);
 
-        RequireSuccess(_commands.Show(batch));
+        var shown = RequireSuccess(_commands.Show(batch));
 
         var after = RequireSuccess(_commands.GetInfo(batch));
         Assert.True(after.IsVisible);
-        Assert.True(after.IsForeground);
+        Assert.Equal(shown.IsForeground, after.IsForeground);
         Assert.Equal(originalState, after.WindowState);
     }
 

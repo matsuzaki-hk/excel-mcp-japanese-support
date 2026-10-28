@@ -15,6 +15,151 @@ public sealed class FileToolRecordingContractTests(
 {
     private readonly RecordingProgramTransportFixture _fixture = fixture;
 
+    [Theory]
+    [InlineData("enable-editing", false)]
+    [InlineData("enable-connections", false)]
+    [InlineData("enable-macros", false)]
+    [InlineData("enable-editing", true)]
+    [InlineData("enable-connections", true)]
+    [InlineData("enable-macros", true)]
+    public async Task SecurityAction_MapsApprovalsWithoutGrantingDefaults(string action, bool approve)
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["action"] = action,
+            ["workbook_session_id"] = "target"
+        };
+        if (approve)
+        {
+            arguments["approved"] = true;
+            arguments[action == "enable-macros" ? "allow_reopen" : "allow_remembered_trust"] = true;
+        }
+        object expectedArgs = action == "enable-macros"
+            ? new { approved = approve, allowReopen = approve }
+            : new { approved = approve, allowRememberedTrust = approve };
+        const string response = """{"success":true,"security":{"action":"fixture","changed":false,"trustMayBeRemembered":false,"reopened":false,"message":"No change."}}""";
+        var call = await _fixture.CallToolAsync("file", arguments,
+            new ServiceResponse { Success = true, Result = response }, "session." + action,
+            expectedSessionId: "target", expectedArgsJson: JsonSerializer.Serialize(expectedArgs));
+        using var result = JsonDocument.Parse(call.JsonResult);
+        Assert.False(result.RootElement.GetProperty("security").GetProperty("changed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Notices_MapsSelectedSessionAndPreservesIncompleteInspection()
+    {
+        const string response = """{"success":true,"notices":{"protectedView":true,"vbaState":"unknown","connectionsState":"unknown","complete":false,"messages":["Check Excel."]}}""";
+        var call = await _fixture.CallToolAsync("file_read", new Dictionary<string, object?>
+        {
+            ["action"] = "notices",
+            ["workbook_session_id"] = "target"
+        }, new ServiceResponse { Success = true, Result = response }, "session.notices",
+            expectedSessionId: "target", expectedArgsJson: null);
+        using var result = JsonDocument.Parse(call.JsonResult);
+        var notices = result.RootElement.GetProperty("notices");
+        Assert.True(notices.GetProperty("protectedView").GetBoolean());
+        Assert.False(notices.GetProperty("complete").GetBoolean());
+        Assert.Equal("unknown", notices.GetProperty("vbaState").GetString());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WorkbookAutoSave_MapsExplicitSettingAndPreservesStatus(bool enabled)
+    {
+        var resultJson = JsonSerializer.Serialize(new { success = true, autoSaveOn = enabled });
+        var call = await _fixture.CallToolAsync("workbook", new Dictionary<string, object?>
+        {
+            ["action"] = "set-auto-save",
+            ["workbook_session_id"] = "target",
+            ["enabled"] = enabled
+        }, new ServiceResponse { Success = true, Result = resultJson },
+            "workbook.set-auto-save", expectedSessionId: "target",
+            expectedArgsJson: JsonSerializer.Serialize(new { enabled }));
+        using var result = JsonDocument.Parse(call.JsonResult);
+        Assert.Equal(enabled, result.RootElement.GetProperty("autoSaveOn").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Save_DispatchesExistingSessionAndReturnsSavedWithoutClosing()
+    {
+        var call = await _fixture.CallToolAsync(
+            "file",
+            new Dictionary<string, object?>
+            {
+                ["action"] = "save",
+                ["workbook_session_id"] = "save-session"
+            },
+            new ServiceResponse { Success = true, Result = """{"success":true,"saved":true}""" },
+            "session.save",
+            expectedSessionId: "save-session",
+            expectedArgsJson: null);
+        using var result = JsonDocument.Parse(call.JsonResult);
+        Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+        Assert.True(result.RootElement.GetProperty("saved").GetBoolean());
+        Assert.Equal("save-session", result.RootElement.GetProperty("workbook_session_id").GetString());
+    }
+
+    [Fact]
+    public async Task Attach_DispatchesWorkbookIdAndPreservesOptionalLocationAndAutoSave()
+    {
+        const string workbookId = "open-workbook-123";
+        var response = new ServiceResponse
+        {
+            Success = true,
+            SessionId = "attached-session",
+            Result = JsonSerializer.Serialize(new
+            {
+                success = true,
+                sessionId = "attached-session",
+                name = "Book1",
+                warning = "Excel AutoSave is off."
+            }, ServiceProtocol.JsonOptions)
+        };
+
+        var call = await _fixture.CallToolAsync(
+            "file",
+            new Dictionary<string, object?>
+            {
+                ["action"] = "attach",
+                ["open_workbook_id"] = workbookId
+            },
+            response,
+            "session.attach",
+            expectedSessionId: null,
+            expectedArgsJson: JsonSerializer.Serialize(
+                new { workbookId }, ServiceProtocol.JsonOptions));
+
+        using var result = JsonDocument.Parse(call.JsonResult);
+        var root = result.RootElement;
+        Assert.True(root.GetProperty("success").GetBoolean());
+        Assert.Equal("attached-session", root.GetProperty("workbook_session_id").GetString());
+        Assert.Equal("Book1", root.GetProperty("name").GetString());
+        Assert.Equal("Excel AutoSave is off.", root.GetProperty("warning").GetString());
+        Assert.False(root.TryGetProperty("filePath", out _));
+        Assert.False(root.TryGetProperty("autoSaveOn", out _));
+    }
+
+    [Fact]
+    public async Task Discover_DispatchesWithoutHidingIncompleteResults()
+    {
+        const string resultJson = """{"success":true,"complete":false,"workbooks":[],"errors":[{"processId":1234,"message":"Window callback failed."}]}""";
+        var call = await _fixture.CallToolAsync(
+            "file_read",
+            new Dictionary<string, object?> { ["action"] = "discover" },
+            new ServiceResponse { Success = true, Result = resultJson },
+            "session.discover",
+            expectedSessionId: null,
+            expectedArgsJson: null);
+
+        using var result = JsonDocument.Parse(call.JsonResult);
+        Assert.False(result.RootElement.GetProperty("complete").GetBoolean());
+        Assert.Equal(
+            "Window callback failed.",
+            Assert.Single(result.RootElement.GetProperty("errors").EnumerateArray())
+                .GetProperty("message").GetString());
+    }
+
     [Fact]
     public async Task Open_SharePointUrl_DispatchesWithoutLocalFileExistenceCheck()
     {
@@ -208,9 +353,11 @@ public sealed class FileToolRecordingContractTests(
                         filePath = @"C:\workbook.xlsx",
                         isExcelVisible,
                         activeOperations = 0,
+                        operationPending = false,
                         canClose,
                         excelState = canClose ? "ready" : "dialogOpen",
-                        blockingReason = canClose ? null : "Check the Excel window for a prompt."
+                        blockingReason = canClose ? null : "Check the Excel window for a prompt.",
+                        blockingMessage = (string?)null
                     }
                 }
             }, ServiceProtocol.JsonOptions)
@@ -236,12 +383,60 @@ public sealed class FileToolRecordingContractTests(
         Assert.Equal(@"C:\workbook.xlsx", session.GetProperty("filePath").GetString());
         Assert.Equal(isExcelVisible, session.GetProperty("isExcelVisible").GetBoolean());
         Assert.Equal(0, session.GetProperty("activeOperations").GetInt32());
+        Assert.False(session.GetProperty("operationPending").GetBoolean());
         Assert.Equal(canClose, session.GetProperty("canClose").GetBoolean());
         Assert.Equal(canClose ? "ready" : "dialogOpen", session.GetProperty("excelState").GetString());
         if (!canClose)
         {
             Assert.Equal("Check the Excel window for a prompt.", session.GetProperty("blockingReason").GetString());
         }
+    }
+
+    [Fact]
+    public async Task List_PreservesGenericDialogAndPendingGuidance()
+    {
+        var response = new ServiceResponse
+        {
+            Success = true,
+            Result = JsonSerializer.Serialize(new
+            {
+                success = true,
+                count = 1,
+                sessions = new[]
+                {
+                    new
+                    {
+                        sessionId = "pending-native-query",
+                        filePath = @"C:\workbook.xlsx",
+                        isExcelVisible = false,
+                        activeOperations = 1,
+                        operationPending = true,
+                        canClose = false,
+                        excelState = "dialogOpen",
+                        blockingReason = "dialogOpen",
+                        blockingMessage = "Check the Excel window and respond there.\nDialog text: The database is unavailable."
+                    }
+                }
+            }, ServiceProtocol.JsonOptions)
+        };
+
+        var call = await _fixture.CallToolAsync(
+            "file_read",
+            new Dictionary<string, object?> { ["action"] = "list" },
+            response,
+            "session.list",
+            expectedSessionId: null,
+            expectedArgsJson: null);
+
+        using var result = JsonDocument.Parse(call.JsonResult);
+        var session = Assert.Single(result.RootElement.GetProperty("sessions").EnumerateArray());
+        Assert.Equal("pending-native-query", session.GetProperty("workbook_session_id").GetString());
+        Assert.Equal("dialogOpen", session.GetProperty("excelState").GetString());
+        Assert.Equal("dialogOpen", session.GetProperty("blockingReason").GetString());
+        Assert.Equal("Check the Excel window and respond there.\nDialog text: The database is unavailable.", session.GetProperty("blockingMessage").GetString());
+        Assert.True(session.GetProperty("operationPending").GetBoolean());
+        Assert.Equal(1, session.GetProperty("activeOperations").GetInt32());
+        Assert.False(session.GetProperty("canClose").GetBoolean());
     }
 
     [Theory]

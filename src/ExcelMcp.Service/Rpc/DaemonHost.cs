@@ -8,50 +8,39 @@ internal sealed class DaemonHost : IDisposable
 {
     internal static readonly TimeSpan InitialBackoff = TimeSpan.FromMilliseconds(100);
     internal static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(5);
+    internal const int MaximumConnections = 64;
 
     private readonly ConcurrentDictionary<Task, byte> _activeConnectionTasks = new();
+    private readonly ConcurrentDictionary<string, byte> _busySessions = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly Func<ServiceRequest, Task<ServiceResponse>> _requestHandler;
-    private readonly Func<int> _sessionCount;
-    private readonly TimeProvider _timeProvider;
+    private readonly Action<ServiceRequest, ServiceResponse?>? _requestAbandoned;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<string, NamedPipeServerStream> _serverFactory;
     private readonly TaskCompletionSource _acceptLoopStopped =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private DateTimeOffset _lastActivityTime;
+    private int _activeRequests;
     private bool _disposed;
 
     internal DaemonHost(
         Func<ServiceRequest, Task<ServiceResponse>> requestHandler,
-        Func<int> sessionCount,
-        TimeProvider? timeProvider = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        Func<string, NamedPipeServerStream>? serverFactory = null)
+        Func<string, NamedPipeServerStream>? serverFactory = null,
+        Action<ServiceRequest, ServiceResponse?>? requestAbandoned = null)
     {
         ArgumentNullException.ThrowIfNull(requestHandler);
-        ArgumentNullException.ThrowIfNull(sessionCount);
         _requestHandler = requestHandler;
-        _sessionCount = sessionCount;
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _requestAbandoned = requestAbandoned;
         _delay = delay
-            ?? ((duration, cancellationToken) =>
-                Task.Delay(duration, _timeProvider, cancellationToken));
+            ?? Task.Delay;
         _serverFactory = serverFactory ?? ServiceSecurity.CreateSecureServer;
-        _lastActivityTime = _timeProvider.GetUtcNow();
     }
 
-    internal async Task RunAsync(string pipeName, TimeSpan? idleTimeout = null)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "The pipe accept-loop retries listener failures with bounded backoff so the daemon remains available; this boundary never converts a workbook operation failure into success.")]
+    internal async Task RunAsync(string pipeName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
-        using var connectionLimit = new SemaphoreSlim(10, 10);
-
-        if (idleTimeout.HasValue)
-        {
-            _ = Task.Run(
-                () => MonitorIdleTimeoutAsync(idleTimeout.Value, _shutdownCts.Token),
-                _shutdownCts.Token);
-        }
-
         var currentBackoff = InitialBackoff;
         while (!_shutdownCts.IsCancellationRequested)
         {
@@ -61,11 +50,15 @@ internal sealed class DaemonHost : IDisposable
                 server = _serverFactory(pipeName);
                 await server.WaitForConnectionAsync(_shutdownCts.Token);
                 currentBackoff = InitialBackoff;
-                RecordActivity();
+                if (_activeConnectionTasks.Count >= MaximumConnections)
+                {
+                    System.Diagnostics.Trace.TraceWarning("Daemon connection capacity reached; refusing a new connection.");
+                    continue;
+                }
 
                 var clientServer = server;
                 server = null;
-                var connectionTask = RunConnectionAsync(clientServer, connectionLimit);
+                var connectionTask = RunConnectionAsync(clientServer);
                 _activeConnectionTasks.TryAdd(connectionTask, 0);
                 _ = connectionTask.ContinueWith(
                     completed => _activeConnectionTasks.TryRemove(completed, out _),
@@ -77,8 +70,9 @@ internal sealed class DaemonHost : IDisposable
             {
                 break;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                System.Diagnostics.Trace.TraceWarning("Pipe accept failed: {0}", ex.Message);
                 try
                 {
                     await _delay(currentBackoff, _shutdownCts.Token);
@@ -102,9 +96,9 @@ internal sealed class DaemonHost : IDisposable
                             server.Disconnect();
                         }
                     }
-                    catch (Exception)
+                    catch (IOException ex)
                     {
-                        // The peer may already have disconnected.
+                        System.Diagnostics.Trace.TraceWarning("Pipe disconnect cleanup failed: {0}", ex.Message);
                     }
 
                     await server.DisposeAsync();
@@ -126,19 +120,22 @@ internal sealed class DaemonHost : IDisposable
         _ = ShutdownAfterResponseAsync();
     }
 
-    internal void RecordActivity() => _lastActivityTime = _timeProvider.GetUtcNow();
-
     internal Task WaitForAcceptLoopStoppedAsync() => _acceptLoopStopped.Task;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "A disconnected or faulted RPC connection is diagnosed and its pipe disposed without taking down unrelated clients. Request errors are transported by StreamJsonRpc before this connection boundary.")]
     private async Task RunConnectionAsync(
-        NamedPipeServerStream clientServer,
-        SemaphoreSlim connectionLimit)
+        NamedPipeServerStream clientServer)
     {
-        await connectionLimit.WaitAsync();
         try
         {
-            var rpcTarget = new DaemonRpcTarget(_requestHandler, RecordActivity);
-            using var rpc = JsonRpc.Attach(clientServer, rpcTarget);
+            var rpcTarget = new DaemonRpcTarget(
+                DispatchRequestAsync, _requestAbandoned);
+            using var rpc = new JsonRpc(clientServer, clientServer, rpcTarget)
+            {
+                CancelLocallyInvokedMethodsWhenConnectionIsClosed = true
+            };
+            rpc.StartListening();
             await rpc.Completion;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -151,7 +148,6 @@ internal sealed class DaemonHost : IDisposable
         }
         finally
         {
-            connectionLimit.Release();
             try
             {
                 if (clientServer.IsConnected)
@@ -175,32 +171,52 @@ internal sealed class DaemonHost : IDisposable
         }
     }
 
-    private async Task MonitorIdleTimeoutAsync(
-        TimeSpan idleTimeout,
-        CancellationToken cancellationToken)
+    private async Task<ServiceResponse> DispatchRequestAsync(ServiceRequest request)
     {
+        var sessionId = request.SessionId;
+        var control = request.Command is "service.ping" or "service.status" or "session.list"
+            or "window.show" or "window.hide";
+        var category = request.Command.Split('.', 2)[0];
+        var sessionless = category is "service" or "diag" or "settings" or "powerquerytrace"
+            || request.Command is "session.open" or "session.create" or "session.test"
+                or "sheet.copy-to-file" or "sheet.move-to-file";
+        var claimSession = !control && !sessionless && !string.IsNullOrWhiteSpace(sessionId);
+        if (claimSession && !_busySessions.TryAdd(sessionId!, 0))
+        {
+            return BusyResponse(request, "Another request is still running for this session. " +
+                "Inspect session list for its state before submitting more work.");
+        }
+        var admitted = false;
         try
         {
-            while (!cancellationToken.IsCancellationRequested)
+            if (!control)
             {
-                await _delay(TimeSpan.FromSeconds(30), cancellationToken);
-                if (_sessionCount() > 0)
+                if (Interlocked.Increment(ref _activeRequests) > 10)
                 {
-                    RecordActivity();
-                    continue;
+                    Interlocked.Decrement(ref _activeRequests);
+                    return BusyResponse(request, "The service is at its request capacity. No Excel work was started.");
                 }
-
-                if (_timeProvider.GetUtcNow() - _lastActivityTime >= idleTimeout)
-                {
-                    RequestShutdown();
-                    break;
-                }
+                admitted = true;
             }
+            return await _requestHandler(request);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        finally
         {
+            if (admitted)
+                Interlocked.Decrement(ref _activeRequests);
+            if (claimSession)
+                _busySessions.TryRemove(sessionId!, out _);
         }
     }
+
+    private static ServiceResponse BusyResponse(ServiceRequest request, string message) => new()
+    {
+        Success = false,
+        Command = request.Command,
+        SessionId = request.SessionId,
+        ErrorCategory = "Busy",
+        ErrorMessage = message
+    };
 
     private async Task ShutdownAfterResponseAsync()
     {
@@ -211,9 +227,12 @@ internal sealed class DaemonHost : IDisposable
         }
         catch (OperationCanceledException) when (_shutdownCts.IsCancellationRequested)
         {
+            return;
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Shutdown observes and diagnoses already-faulted connection tasks while allowing the remaining connections to drain; no operation result is changed.")]
     private static async Task ObserveConnectionTaskAsync(Task connectionTask)
     {
         try

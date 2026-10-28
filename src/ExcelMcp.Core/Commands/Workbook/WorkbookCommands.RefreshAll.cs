@@ -16,35 +16,35 @@ public partial class WorkbookCommands
         IProgress<ProgressInfo>? progress = null)
     {
         timeout = global::Sbroenne.ExcelMcp.Core.Commands.PowerQueryCommands.NormalizeRefreshTimeout(timeout);
-        using var timeoutCts = new CancellationTokenSource(timeout);
         var result = new WorkbookRefreshAllResult { FilePath = batch.WorkbookPath };
 
-        return batch.Execute((ctx, ct) =>
+        return ExcelBatchWait.Execute(batch, timeout, (ctx, ct) =>
         {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
             var queryNames = global::Sbroenne.ExcelMcp.Core.Commands.PowerQueryCommands.ReadQueryNames(
                 ctx.Book,
-                linkedCts.Token);
+                ct);
             var queryResult = global::Sbroenne.ExcelMcp.Core.Commands.PowerQueryCommands.RefreshQueries(
                 queryNames,
                 queryName =>
                     global::Sbroenne.ExcelMcp.Core.Commands.PowerQueryCommands.RefreshConnectionByQueryName(
                         ctx.Book,
                         queryName,
-                        linkedCts.Token),
-                linkedCts.Token,
+                        ct),
+                ct,
                 progress);
             result.RefreshedQueries.AddRange(queryResult.RefreshedQueries);
             result.SkippedQueries.AddRange(queryResult.SkippedQueries);
             result.FailedQueries.AddRange(queryResult.FailedQueries);
 
-            RefreshNonPowerQueryConnections(ctx.Book, result, linkedCts.Token, progress);
-            RefreshAllPivotTables(ctx.Book, result, linkedCts.Token, progress);
+            RefreshNonPowerQueryConnections(ctx.Book, result, ct, progress);
+            RefreshAllPivotTables(ctx.Book, result, ct, progress);
             FinalizeWorkbookRefreshAllResult(result);
             return result;
-        }, timeoutCts.Token);
+        });
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Reports each refresh failure with its connection name, original message, exception type and HRESULT; cancellation and disconnection are not recordable.")]
     private static void RefreshNonPowerQueryConnections(
         Excel.Workbook workbook,
         WorkbookRefreshAllResult result,
@@ -106,6 +106,8 @@ public partial class WorkbookCommands
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Reports each cache refresh failure on its affected pivots with the original message, exception type and HRESULT; cancellation and disconnection propagate.")]
     private static void RefreshAllPivotTables(
         Excel.Workbook workbook,
         WorkbookRefreshAllResult result,

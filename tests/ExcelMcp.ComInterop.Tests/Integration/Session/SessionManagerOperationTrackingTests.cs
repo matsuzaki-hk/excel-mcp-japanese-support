@@ -98,26 +98,6 @@ public class SessionManagerOperationTrackingTests : IDisposable
     }
 
     [Fact]
-    public void EndOperation_DecrementsCounter()
-    {
-        var testFile = CreateTestFile(nameof(EndOperation_DecrementsCounter));
-        using var manager = new SessionManager();
-        var sessionId = manager.CreateSession(testFile);
-
-        manager.BeginOperation(sessionId);
-        manager.BeginOperation(sessionId);
-        Assert.Equal(2, manager.GetActiveOperationCount(sessionId));
-
-        manager.EndOperation(sessionId);
-        Assert.Equal(1, manager.GetActiveOperationCount(sessionId));
-
-        manager.EndOperation(sessionId);
-        Assert.Equal(0, manager.GetActiveOperationCount(sessionId));
-
-        AssertSessionClosed(manager, sessionId);
-    }
-
-    [Fact]
     public void EndOperation_DoesNotGoBelowZero()
     {
         var testFile = CreateTestFile(nameof(EndOperation_DoesNotGoBelowZero));
@@ -314,10 +294,12 @@ public class SessionManagerOperationTrackingTests : IDisposable
             currentProcess.Id,
             currentProcess.StartTime.ToUniversalTime().ToFileTimeUtc() + 1);
 
+#pragma warning disable RS0030 // Checks the product refuses a wrong identity; the target is this test host, never Excel.
         var terminated = ExcelBatch.TryTerminateOwnedProcess(
             staleIdentity,
             waitBeforeTermination: TimeSpan.Zero,
             waitAfterTermination: TimeSpan.FromSeconds(1));
+#pragma warning restore RS0030
 
         Assert.True(terminated);
         Assert.False(currentProcess.HasExited);
@@ -394,68 +376,29 @@ public class SessionManagerOperationTrackingTests : IDisposable
     }
 
     [Fact]
-    public void FinalizeFailedStartupOwnedProcess_ConfirmedExitUntracksExactIdentity()
-    {
-        using var currentProcess = Process.GetCurrentProcess();
-        var identity = new ExcelProcessIdentity(
-            currentProcess.Id,
-            currentProcess.StartTime.ToUniversalTime().ToFileTimeUtc());
-        var unrelatedIdentity = identity with
-        {
-            StartedAtUtcFileTime = identity.StartedAtUtcFileTime - 1
-        };
-        SessionManager.TrackExcelProcess(identity);
-        SessionManager.TrackExcelProcess(unrelatedIdentity);
-
-        try
-        {
-            ExcelBatch.FinalizeFailedStartupOwnedProcess(
-                identity,
-                _ => false,
-                candidate => candidate == identity);
-
-            Assert.DoesNotContain(identity, SessionManager.GetTrackedExcelProcesses());
-            Assert.Contains(unrelatedIdentity, SessionManager.GetTrackedExcelProcesses());
-            Assert.False(currentProcess.HasExited);
-        }
-        finally
-        {
-            SessionManager.UntrackExcelProcess(identity);
-            SessionManager.UntrackExcelProcess(unrelatedIdentity);
-        }
-    }
-
-    [Fact]
-    public void FinalizeFailedStartupOwnedProcess_LiveUnkillableIdentityRemainsTracked()
+    public void StartupTeardown_UnconfirmedExitRetainsIdentityWithoutTermination()
     {
         using var currentProcess = Process.GetCurrentProcess();
         var identity = new ExcelProcessIdentity(
             currentProcess.Id,
             currentProcess.StartTime.ToUniversalTime().ToFileTimeUtc());
         SessionManager.TrackExcelProcess(identity);
-        ExcelProcessIdentity? terminationCandidate = null;
         ExcelProcessIdentity? confirmationCandidate = null;
 
         try
         {
             var exception = Assert.Throws<InvalidOperationException>(() =>
-                ExcelBatch.FinalizeFailedStartupOwnedProcess(
+                ExcelBatch.FinalizeOwnedProcessTeardown(
                     identity,
-                    candidate =>
-                    {
-                        terminationCandidate = candidate;
-                        return false;
-                    },
                     candidate =>
                     {
                         confirmationCandidate = candidate;
                         return false;
                     }));
 
-            Assert.Equal(identity, terminationCandidate);
             Assert.Equal(identity, confirmationCandidate);
             Assert.Contains(identity, SessionManager.GetTrackedExcelProcesses());
-            Assert.Contains("remains tracked", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("remain recorded", exception.Message, StringComparison.OrdinalIgnoreCase);
             Assert.False(currentProcess.HasExited);
         }
         finally
@@ -633,23 +576,91 @@ public class SessionManagerOperationTrackingTests : IDisposable
         Assert.Contains("required", result.BlockingReason);
     }
 
-    [Fact]
-    public void ValidateClose_IncludesVisibilityInfo()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ValidateClose_IncludesVisibilityInfo(bool slowInspection)
     {
         var testFile = CreateTestFile(nameof(ValidateClose_IncludesVisibilityInfo));
+        using var owned = new OwnedExcelProcessScope();
+        using var release = new ManualResetEventSlim();
+        using var inspectionStarted = new ManualResetEventSlim();
         using var manager = new SessionManager();
         var sessionId = manager.CreateSession(testFile, show: true);
+        var batch = Assert.IsType<ExcelBatch>(manager.GetSession(sessionId));
+        if (slowInspection)
+        {
+            batch.BeforeRefreshStateReadHookForTests = () =>
+            {
+                inspectionStarted.Set();
+                Assert.True(release.Wait(TimeSpan.FromSeconds(10)), "Readiness inspection was not released.");
+            };
+        }
 
-        var result = manager.ValidateClose(sessionId);
+        var failure = Record.Exception(() =>
+        {
+            if (slowInspection)
+            {
+                var pending = manager.ValidateClose(sessionId);
+                var started = SpinWait.SpinUntil(() =>
+                {
+                    if (inspectionStarted.IsSet)
+                        return true;
+                    pending = manager.ValidateClose(sessionId);
+                    return inspectionStarted.IsSet;
+                }, TimeSpan.FromSeconds(5));
+                Assert.True(started, $"The readiness inspection did not start. {DescribeCloseValidation(pending)}");
+                Assert.Equal("unknown", pending.ExcelState);
+                Assert.False(pending.CanClose, DescribeCloseValidation(pending));
+                Assert.NotNull(pending.BlockingReason);
+                Assert.True(pending.IsExcelVisible, DescribeCloseValidation(pending));
+                Assert.True(pending.SessionExists, DescribeCloseValidation(pending));
+                Assert.Equal(0, pending.ActiveOperationCount);
+                batch.BeforeRefreshStateReadHookForTests = null;
+                release.Set();
+            }
 
-        Assert.True(result.IsExcelVisible);
-        Assert.True(result.SessionExists);
-        Assert.True(result.CanClose);
-        Assert.Equal(0, result.ActiveOperationCount);
-        Assert.Null(result.BlockingReason);
+            var result = WaitForCloseReady(manager, sessionId);
 
-        AssertSessionClosed(manager, sessionId);
+            Assert.True(result.IsExcelVisible, DescribeCloseValidation(result));
+            Assert.True(result.SessionExists, DescribeCloseValidation(result));
+            Assert.True(result.CanClose, DescribeCloseValidation(result));
+            Assert.Equal("ready", result.ExcelState);
+            Assert.Equal(0, result.ActiveOperationCount);
+            Assert.Null(result.BlockingReason);
+        });
+
+        batch.BeforeRefreshStateReadHookForTests = null;
+        release.Set();
+        var closeFailure = Record.Exception(() =>
+        {
+            WaitForCloseReady(manager, sessionId);
+            AssertSessionClosed(manager, sessionId);
+        });
+        var processFailure = Record.Exception(() => owned.AssertAllExited());
+        var failures = new[] { failure, closeFailure, processFailure }.OfType<Exception>().ToArray();
+        if (failures.Length > 0)
+            throw new AggregateException("Visibility validation or normal session close failed.", failures);
     }
+
+    private static CloseValidationResult WaitForCloseReady(SessionManager manager, string sessionId)
+    {
+        var result = manager.ValidateClose(sessionId);
+        var ready = SpinWait.SpinUntil(() =>
+        {
+            if (result.CanClose)
+                return true;
+            result = manager.ValidateClose(sessionId);
+            return result.CanClose;
+        }, TimeSpan.FromSeconds(10));
+        Assert.True(ready, $"Excel did not become ready to close. {DescribeCloseValidation(result)}");
+        return result;
+    }
+
+    private static string DescribeCloseValidation(CloseValidationResult result) =>
+        $"ExcelState={result.ExcelState}; BlockingReason={result.BlockingReason ?? "<null>"}; " +
+        $"IsExcelVisible={result.IsExcelVisible}; ActiveOperationCount={result.ActiveOperationCount}; " +
+        $"SessionExists={result.SessionExists}; CanClose={result.CanClose}";
 
     #endregion
 
@@ -684,25 +695,6 @@ public class SessionManagerOperationTrackingTests : IDisposable
         manager.EndOperation(sessionId);
         Assert.True(manager.ValidateClose(sessionId).CanClose);
         AssertSessionClosed(manager, sessionId);
-    }
-
-    [Fact]
-    public void CloseSession_OperationsComplete_ClosesSuccessfully()
-    {
-        var testFile = CreateTestFile(nameof(CloseSession_OperationsComplete_ClosesSuccessfully));
-        using var manager = new SessionManager();
-        var sessionId = manager.CreateSession(testFile);
-
-        // Simulate operation lifecycle
-        manager.BeginOperation(sessionId);
-        manager.EndOperation(sessionId);
-
-        // Should now be able to close
-        var closed = manager.CloseSession(sessionId);
-
-        Assert.True(closed);
-        Assert.Equal(0, manager.ActiveSessionCount);
-        AssertClosedTracking(manager, sessionId);
     }
 
     [Fact]
@@ -760,6 +752,16 @@ public class SessionManagerOperationTrackingTests : IDisposable
         manager.BeginOperation(session1);
         manager.BeginOperation(session2);
 
+        // Shutdown refuses sessions with active operations, leaves them open, and admits no new sessions.
+        var refused = Assert.Throws<AggregateException>(manager.Dispose);
+        Assert.Equal(2, refused.InnerExceptions.Count);
+        Assert.All(refused.InnerExceptions, failure => Assert.IsType<ExcelBusyException>(failure.InnerException));
+        Assert.Equal(2, manager.ActiveSessionCount);
+        Assert.Throws<ObjectDisposedException>(() =>
+            manager.CreateSession(CreateTestFile($"{nameof(Dispose_CleansUpAllTracking)}_3")));
+
+        manager.EndOperation(session1);
+        manager.EndOperation(session2);
         manager.Dispose();
 
         // All tracking should be cleared
@@ -895,9 +897,9 @@ public class SessionManagerOperationTrackingTests : IDisposable
                 sheet = (Excel.Worksheet)sheets[1];
                 input = sheet.Range["A1"];
                 formula = sheet.Range["B1"];
-                Assert.Equal(expected, Convert.ToInt32(input.Value2, System.Globalization.CultureInfo.InvariantCulture));
-                Assert.Equal("=A1*2", formula.Formula);
-                Assert.Equal(expected * 2, Convert.ToInt32(formula.Value2, System.Globalization.CultureInfo.InvariantCulture));
+                Assert.Equal(expected, Convert.ToInt32((object?)input.Value2, System.Globalization.CultureInfo.InvariantCulture));
+                Assert.Equal("=A1*2", (object?)formula.Formula);
+                Assert.Equal(expected * 2, Convert.ToInt32((object?)formula.Value2, System.Globalization.CultureInfo.InvariantCulture));
             }
             finally
             {

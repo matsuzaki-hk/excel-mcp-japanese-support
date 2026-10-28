@@ -41,9 +41,9 @@ public partial class DataModelCommands
                 {
                     var tableInfo = new DataModelTableInfo
                     {
-                        Name = ComUtilities.SafeGetString(table, "Name"),
-                        SourceName = ComUtilities.SafeGetString(table, "SourceName"),
-                        RecordCount = ComUtilities.SafeGetInt(table, "RecordCount")
+                        Name = table.Name ?? string.Empty,
+                        SourceName = table.SourceName ?? string.Empty,
+                        RecordCount = table.RecordCount
                     };
 
                     result.Tables.Add(tableInfo);
@@ -80,6 +80,7 @@ public partial class DataModelCommands
 
                 model = ctx.Book.Model;
                 var engineFormulas = TryReadStoredMeasureFormulas(model!);
+                var measureTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // Iterate through all measures (they're at model level)
                 ForEachMeasure(model!, (measure, index) =>
@@ -97,23 +98,26 @@ public partial class DataModelCommands
                         ComUtilities.Release(ref associatedTable);
                     }
 
+                    if (!string.IsNullOrWhiteSpace(measureTableName))
+                        measureTables.Add(measureTableName);
+
                     // Skip if filtering by table and this measure isn't in that table
                     if (tableName != null && !measureTableName.Equals(tableName, StringComparison.OrdinalIgnoreCase))
                     {
                         return;
                     }
 
-                    string measureName = ComUtilities.SafeGetString(measure, "Name");
+                    string measureName = measure.Name ?? string.Empty;
                     string formula = engineFormulas != null && engineFormulas.TryGetValue(measureName, out var stored)
                         ? stored
-                        : ComUtilities.SafeGetString(measure, "Formula");
+                        : measure.Formula ?? string.Empty;
 
                     var measureInfo = new DataModelMeasureInfo
                     {
                         Name = measureName,
                         Table = measureTableName,
                         FormulaPreview = formula, // Will be formatted after retrieval
-                        Description = ComUtilities.SafeGetString(measure, "Description")
+                        Description = measure.Description ?? string.Empty
                     };
 
                     result.Measures.Add(measureInfo);
@@ -122,7 +126,24 @@ public partial class DataModelCommands
                 // Check if table filter was specified but not found
                 if (tableName != null && result.Measures.Count == 0)
                 {
-                    throw new InvalidOperationException(DataModelErrorMessages.TableNotFound(tableName));
+                    Excel.ModelTable? requestedTable = null;
+                    try
+                    {
+                        requestedTable = FindModelTable(model!, tableName);
+                        if (requestedTable is null)
+                            throw new InvalidOperationException(DataModelErrorMessages.TableNotFound(tableName));
+                    }
+                    finally
+                    {
+                        ComUtilities.Release(ref requestedTable);
+                    }
+
+                    var otherTables = measureTables
+                        .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    result.Message = otherTables.Length == 0
+                        ? $"Table '{tableName}' has no measures. The Data Model contains no measures."
+                        : $"Table '{tableName}' has no measures. Measures are stored on: {string.Join(", ", otherTables)}.";
                 }
 
                 result.Success = true;
@@ -171,12 +192,12 @@ public partial class DataModelCommands
                 }
 
                 // Get measure details using safe helpers
-                string storedName = ComUtilities.SafeGetString(measure, "Name");
+                string storedName = measure.Name ?? string.Empty;
                 var engineFormulas = TryReadStoredMeasureFormulas(model!);
                 result.DaxFormula = engineFormulas != null && engineFormulas.TryGetValue(storedName, out var stored)
                     ? stored
-                    : ComUtilities.SafeGetString(measure, "Formula");
-                result.Description = ComUtilities.SafeGetString(measure, "Description");
+                    : measure.Formula ?? string.Empty;
+                result.Description = measure.Description ?? string.Empty;
                 result.CharacterCount = result.DaxFormula.Length;
                 result.TableName = GetMeasureTableName(model!, measureName) ?? "";
 
@@ -228,14 +249,7 @@ public partial class DataModelCommands
 
                 ForEachRelationship(model!, (relationship, index) =>
                 {
-                    var relInfo = new DataModelRelationshipInfo
-                    {
-                        FromTable = ComUtilities.SafeGetString(relationship.ForeignKeyColumn.Parent, "Name"),
-                        FromColumn = ComUtilities.SafeGetString(relationship.ForeignKeyColumn, "Name"),
-                        ToTable = ComUtilities.SafeGetString(relationship.PrimaryKeyColumn.Parent, "Name"),
-                        ToColumn = ComUtilities.SafeGetString(relationship.PrimaryKeyColumn, "Name"),
-                        IsActive = relationship.Active
-                    };
+                    var relInfo = ReadRelationshipInfo(relationship);
 
                     result.Relationships.Add(relInfo);
                 });
@@ -249,6 +263,40 @@ public partial class DataModelCommands
 
             return result;
         });
+    }
+
+    private static DataModelRelationshipInfo ReadRelationshipInfo(Excel.ModelRelationship relationship)
+    {
+        Excel.ModelTableColumn? foreignKey = null;
+        Excel.ModelTableColumn? primaryKey = null;
+        Excel.ModelTable? fromTable = null;
+        Excel.ModelTable? toTable = null;
+        try
+        {
+            foreignKey = relationship.ForeignKeyColumn;
+            RelationshipReferenceAcquiredForTests?.Invoke(foreignKey);
+            primaryKey = relationship.PrimaryKeyColumn;
+            RelationshipReferenceAcquiredForTests?.Invoke(primaryKey);
+            fromTable = (Excel.ModelTable)foreignKey.Parent;
+            RelationshipReferenceAcquiredForTests?.Invoke(fromTable);
+            toTable = (Excel.ModelTable)primaryKey.Parent;
+            RelationshipReferenceAcquiredForTests?.Invoke(toTable);
+            return new DataModelRelationshipInfo
+            {
+                FromTable = fromTable.Name,
+                FromColumn = foreignKey.Name,
+                ToTable = toTable.Name,
+                ToColumn = primaryKey.Name,
+                IsActive = relationship.Active
+            };
+        }
+        finally
+        {
+            ComUtilities.Release(ref toTable);
+            ComUtilities.Release(ref fromTable);
+            ComUtilities.Release(ref primaryKey);
+            ComUtilities.Release(ref foreignKey);
+        }
     }
 
     /// <inheritdoc />
@@ -273,24 +321,14 @@ public partial class DataModelCommands
                 DataModelRelationshipInfo? foundRelationship = null;
                 ForEachRelationship(model!, (relationship, index) =>
                 {
-                    var relFromTable = ComUtilities.SafeGetString(relationship.ForeignKeyColumn.Parent, "Name");
-                    var relFromColumn = ComUtilities.SafeGetString(relationship.ForeignKeyColumn, "Name");
-                    var relToTable = ComUtilities.SafeGetString(relationship.PrimaryKeyColumn.Parent, "Name");
-                    var relToColumn = ComUtilities.SafeGetString(relationship.PrimaryKeyColumn, "Name");
+                    var info = ReadRelationshipInfo(relationship);
 
-                    if (string.Equals(relFromTable, fromTable, StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(relFromColumn, fromColumn, StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(relToTable, toTable, StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(relToColumn, toColumn, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(info.FromTable, fromTable, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(info.FromColumn, fromColumn, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(info.ToTable, toTable, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(info.ToColumn, toColumn, StringComparison.OrdinalIgnoreCase))
                     {
-                        foundRelationship = new DataModelRelationshipInfo
-                        {
-                            FromTable = relFromTable,
-                            FromColumn = relFromColumn,
-                            ToTable = relToTable,
-                            ToColumn = relToColumn,
-                            IsActive = relationship.Active
-                        };
+                        foundRelationship = info;
                     }
                 });
 
@@ -391,8 +429,8 @@ public partial class DataModelCommands
                 }
 
                 // Get table properties
-                result.SourceName = ComUtilities.SafeGetString(table, "SourceName");
-                result.RecordCount = ComUtilities.SafeGetInt(table, "RecordCount");
+                result.SourceName = table.SourceName ?? string.Empty;
+                result.RecordCount = table.RecordCount;
 
                 Excel.WorkbookConnection? sourceConnection = null;
                 try
@@ -419,10 +457,19 @@ public partial class DataModelCommands
                 result.MeasureCount = 0;
                 ForEachMeasure(model!, (measure, index) =>
                 {
-                    string measureTableName = ComUtilities.SafeGetString(measure.AssociatedTable, "Name");
-                    if (string.Equals(measureTableName, tableName, StringComparison.OrdinalIgnoreCase))
+                    Excel.ModelTable? associatedTable = null;
+                    try
                     {
-                        result.MeasureCount++;
+                        associatedTable = measure.AssociatedTable;
+                        string measureTableName = associatedTable.Name ?? string.Empty;
+                        if (string.Equals(measureTableName, tableName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            result.MeasureCount++;
+                        }
+                    }
+                    finally
+                    {
+                        ComUtilities.Release(ref associatedTable);
                     }
                 });
 
@@ -463,8 +510,8 @@ public partial class DataModelCommands
                 ForEachTable(model!, (table, index) =>
                 {
                     result.TableCount++;
-                    totalRows += ComUtilities.SafeGetInt(table, "RecordCount");
-                    result.TableNames.Add(ComUtilities.SafeGetString(table, "Name"));
+                    totalRows += table.RecordCount;
+                    result.TableNames.Add(table.Name ?? string.Empty);
                 });
                 result.TotalRows = totalRows;
 

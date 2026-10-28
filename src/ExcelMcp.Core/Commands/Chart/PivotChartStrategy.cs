@@ -1,3 +1,4 @@
+using Excel = Microsoft.Office.Interop.Excel;
 using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.ComInterop;
 
@@ -10,16 +11,20 @@ namespace Sbroenne.ExcelMcp.Core.Commands.Chart;
 public class PivotChartStrategy : IChartStrategy
 {
     /// <inheritdoc />
-    public bool CanHandle(dynamic chart)
+    public bool CanHandle(Excel.Chart chart) =>
+        HasPivotLayout(() => chart.PivotLayout);
+
+    internal delegate Excel.PivotLayout? PivotLayoutReader();
+
+    internal static bool HasPivotLayout(PivotLayoutReader readPivotLayout)
     {
-        // PivotCharts: chart.PivotLayout exists
-        dynamic? pivotLayout = null;
+        Excel.PivotLayout? pivotLayout = null;
         try
         {
-            pivotLayout = chart.PivotLayout;
+            pivotLayout = readPivotLayout();
             return pivotLayout != null;
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             return false;
         }
@@ -30,13 +35,13 @@ public class PivotChartStrategy : IChartStrategy
     }
 
     /// <inheritdoc />
-    public ChartInfo GetInfo(dynamic chart, string chartName, string sheetName, dynamic shape)
+    public ChartInfo GetInfo(Excel.Chart chart, string chartName, string sheetName, Excel.Shape shape)
     {
         var info = new ChartInfo
         {
             Name = chartName,
             SheetName = sheetName,
-            ChartType = (ChartType)Convert.ToInt32(chart.ChartType),
+            ChartType = (ChartType)Convert.ToInt32((object)chart.ChartType, System.Globalization.CultureInfo.InvariantCulture),
             IsPivotChart = true,
             Left = Convert.ToDouble(shape.Left),
             Top = Convert.ToDouble(shape.Top),
@@ -45,14 +50,14 @@ public class PivotChartStrategy : IChartStrategy
         };
 
         // Get anchor cells and placement mode
-        dynamic? topLeftCell = null;
-        dynamic? bottomRightCell = null;
+        Excel.Range? topLeftCell = null;
+        Excel.Range? bottomRightCell = null;
         try
         {
             topLeftCell = shape.TopLeftCell;
             info.TopLeftCell = topLeftCell.Address?.ToString();
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // TopLeftCell not available - optional COM property
         }
@@ -66,7 +71,7 @@ public class PivotChartStrategy : IChartStrategy
             bottomRightCell = shape.BottomRightCell;
             info.BottomRightCell = bottomRightCell.Address?.ToString();
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // BottomRightCell not available - optional COM property
         }
@@ -77,16 +82,16 @@ public class PivotChartStrategy : IChartStrategy
 
         try
         {
-            info.Placement = Convert.ToInt32(shape.Placement);
+            info.Placement = (int)shape.Placement;
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // Placement not available - optional COM property
         }
 
         // Get linked PivotTable name
-        dynamic? pivotLayout = null;
-        dynamic? pivotTable = null;
+        Excel.PivotLayout? pivotLayout = null;
+        Excel.PivotTable? pivotTable = null;
         try
         {
             pivotLayout = chart.PivotLayout;
@@ -105,14 +110,14 @@ public class PivotChartStrategy : IChartStrategy
     }
 
     /// <inheritdoc />
-    public ChartInfoResult GetDetailedInfo(dynamic chart, string chartName, string sheetName, dynamic shape)
+    public ChartInfoResult GetDetailedInfo(Excel.Chart chart, string chartName, string sheetName, Excel.Shape shape)
     {
         var info = new ChartInfoResult
         {
             Success = true,
             Name = chartName,
             SheetName = sheetName,
-            ChartType = (ChartType)Convert.ToInt32(chart.ChartType),
+            ChartType = (ChartType)Convert.ToInt32((object)chart.ChartType, System.Globalization.CultureInfo.InvariantCulture),
             IsPivotChart = true,
             Left = Convert.ToDouble(shape.Left),
             Top = Convert.ToDouble(shape.Top),
@@ -121,14 +126,14 @@ public class PivotChartStrategy : IChartStrategy
         };
 
         // Get anchor cells and placement mode
-        dynamic? topLeftCell = null;
-        dynamic? bottomRightCell = null;
+        Excel.Range? topLeftCell = null;
+        Excel.Range? bottomRightCell = null;
         try
         {
             topLeftCell = shape.TopLeftCell;
             info.TopLeftCell = topLeftCell.Address?.ToString();
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // TopLeftCell not available - optional COM property
         }
@@ -142,7 +147,7 @@ public class PivotChartStrategy : IChartStrategy
             bottomRightCell = shape.BottomRightCell;
             info.BottomRightCell = bottomRightCell.Address?.ToString();
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // BottomRightCell not available - optional COM property
         }
@@ -153,16 +158,16 @@ public class PivotChartStrategy : IChartStrategy
 
         try
         {
-            info.Placement = Convert.ToInt32(shape.Placement);
+            info.Placement = (int)shape.Placement;
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             // Placement not available - optional COM property
         }
 
         // Get linked PivotTable name
-        dynamic? pivotLayout = null;
-        dynamic? pivotTable = null;
+        Excel.PivotLayout? pivotLayout = null;
+        Excel.PivotTable? pivotTable = null;
         try
         {
             pivotLayout = chart.PivotLayout;
@@ -178,7 +183,7 @@ public class PivotChartStrategy : IChartStrategy
         // Get title
         if (chart.HasTitle)
         {
-            dynamic? chartTitle = null;
+            Excel.ChartTitle? chartTitle = null;
             try
             {
                 chartTitle = chart.ChartTitle;
@@ -191,14 +196,7 @@ public class PivotChartStrategy : IChartStrategy
         }
 
         // Get legend
-        try
-        {
-            info.HasLegend = chart.HasLegend;
-        }
-        catch (COMException)
-        {
-            info.HasLegend = false;
-        }
+        info.HasLegend = chart.HasLegend;
 
         info.Series = ChartSeriesReader.Read(chart);
 
@@ -206,7 +204,7 @@ public class PivotChartStrategy : IChartStrategy
     }
 
     /// <inheritdoc />
-    public void SetSourceRange(dynamic chart, string sourceRange, CancellationToken ct)
+    public void SetSourceRange(Excel.Chart chart, string sourceRange, CancellationToken ct)
     {
         throw new NotSupportedException(
             "Cannot set source range for PivotChart. " +
@@ -215,7 +213,7 @@ public class PivotChartStrategy : IChartStrategy
     }
 
     /// <inheritdoc />
-    public SeriesInfo AddSeries(dynamic chart, string seriesName, string valuesRange, string? categoryRange)
+    public SeriesInfo AddSeries(Excel.Chart chart, string seriesName, string valuesRange, string? categoryRange)
     {
         throw new NotSupportedException(
             "Cannot add series directly to PivotChart. " +
@@ -224,7 +222,7 @@ public class PivotChartStrategy : IChartStrategy
     }
 
     /// <inheritdoc />
-    public void RemoveSeries(dynamic chart, int seriesIndex)
+    public void RemoveSeries(Excel.Chart chart, int seriesIndex)
     {
         throw new NotSupportedException(
             "Cannot remove series directly from PivotChart. " +

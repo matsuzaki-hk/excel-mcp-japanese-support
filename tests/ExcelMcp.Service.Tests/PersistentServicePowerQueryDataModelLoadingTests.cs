@@ -24,10 +24,60 @@ public class PersistentServicePowerQueryDataModelLoadingTests(
         fixture.CreateCommands<IDataModelCommands>();
 
     [Fact]
-    public void Create_LoadToDataModel_TableAppearsInDataModel()
+    public void ListColumnsAndReadTable_WithTypedModelColumns_ReportActualTypesWithoutChangingValues()
     {
-        var name = CreateQuery(["ID", "Name"], [[1, "Alpha"], [2, "Beta"]]);
-        AssertLoaded(name, ["ID", "Name"], [[1, "Alpha"], [2, "Beta"]]);
+        var name = "ColumnTypes_" + Guid.NewGuid().ToString("N")[..8];
+        const string code = """
+            let
+                Source = #table(
+                    {"Number", "Currency", "Integer", "Text", "Boolean", "Date"},
+                    {{29358677.2207, 29358677.2207, 42, "Alpha", true, #datetime(2026, 10, 15, 0, 0, 0)}}),
+                Typed = Table.TransformColumnTypes(Source, {
+                    {"Number", type number}, {"Currency", Currency.Type}, {"Integer", Int64.Type},
+                    {"Text", type text}, {"Boolean", type logical}, {"Date", type datetime}})
+            in
+                Typed
+            """;
+        _fixture.RegisterPowerQueryForCleanup(name);
+        RequireSuccess(_queries.Create(_fixture.BatchToken, name, code, PowerQueryLoadMode.LoadToDataModel));
+
+        var values = RequireSuccess(_model.Evaluate(_fixture.BatchToken, $"EVALUATE '{name}'"));
+        Assert.Equal(1, values.RowCount);
+        Assert.Equal(6, values.ColumnCount);
+        string[] columnNames = ["Number", "Currency", "Integer", "Text", "Boolean", "Date"];
+        Assert.Equal(
+            columnNames.Select(column => $"{name}[{column}]"),
+            values.Columns);
+        var row = Assert.Single(values.Rows);
+        Assert.Equal(29358677.2207, Assert.IsType<double>(row[0]));
+        Assert.Equal(29358677.2207, Assert.IsType<double>(row[1]));
+        Assert.Equal(42, Convert.ToInt64(row[2], CultureInfo.InvariantCulture));
+        Assert.Equal("Alpha", Assert.IsType<string>(row[3]));
+        Assert.True(Assert.IsType<bool>(row[4]));
+        Assert.Equal("2026-10-15T00:00:00.0000000", Assert.IsType<string>(row[5]));
+
+        (string Name, int Code, string Label)[] expected =
+        [
+            ("Number", 5, "DOUBLE"),
+            ("Currency", 5, "DOUBLE"),
+            ("Integer", 20, "BIGINT"),
+            ("Text", 130, "WCHAR"),
+            ("Boolean", 11, "BOOLEAN"),
+            ("Date", 7, "DATE")
+        ];
+        var listed = RequireSuccess(_model.ListColumns(_fixture.BatchToken, name));
+        var table = RequireSuccess(_model.ReadTable(_fixture.BatchToken, name));
+        foreach (var columns in new[] { listed.Columns, table.Columns })
+        {
+            Assert.Equal(expected.Length, columns.Count);
+            foreach (var (columnName, dataType, label) in expected)
+            {
+                var column = Assert.Single(columns, column => column.Name == columnName);
+                Assert.Equal(dataType, column.DataTypeValue);
+                Assert.Equal(dataType.ToString(CultureInfo.InvariantCulture), column.DataType);
+                Assert.Equal(label, column.DataTypeName);
+            }
+        }
     }
 
     [Fact]
@@ -61,22 +111,6 @@ public class PersistentServicePowerQueryDataModelLoadingTests(
     [Fact]
     public void Refresh_LoadedToBoth_PreservesSettings() =>
         AssertDeferredRefresh(PowerQueryLoadMode.LoadToBoth);
-
-    [Fact]
-    public void GetLoadConfig_MultipleQueriesDifferentModes_ReturnsCorrectModeForEach()
-    {
-        foreach (var (mode, seed) in new[]
-        {
-            (PowerQueryLoadMode.ConnectionOnly, 17),
-            (PowerQueryLoadMode.LoadToTable, 29),
-            (PowerQueryLoadMode.LoadToDataModel, 43),
-            (PowerQueryLoadMode.LoadToBoth, 61)
-        })
-        {
-            var name = CreateQuery(["Val"], [[seed], [seed + 1]], mode);
-            AssertLoaded(name, ["Val"], [[seed], [seed + 1]], mode);
-        }
-    }
 
     [Fact]
     public void Update_LoadedToDataModel_AddColumn_HandlesSchemaChange()

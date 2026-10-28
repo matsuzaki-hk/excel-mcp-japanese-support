@@ -11,12 +11,20 @@ public static class McpServerVersionChecker
     /// Checks for updates and returns the latest version if an update is available.
     /// </summary>
     /// <returns>Latest version string if update available, null otherwise.</returns>
-    public static async Task<string?> CheckForUpdateAsync(CancellationToken cancellationToken = default)
+    public static Task<string?> CheckForUpdateAsync(CancellationToken cancellationToken = default) =>
+        CheckForUpdateAsync(GetCurrentVersion, NuGetVersionChecker.GetLatestVersionAsync, cancellationToken);
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Optional release notification must not affect MCP host availability or tool outcomes; failed version metadata is omitted.")]
+    internal static async Task<string?> CheckForUpdateAsync(
+        Func<string> currentVersionProvider,
+        Func<CancellationToken, Task<string?>> latestVersionProvider,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var currentVersion = GetCurrentVersion();
-            var latestVersion = await NuGetVersionChecker.GetLatestVersionAsync(cancellationToken);
+            var currentVersion = currentVersionProvider();
+            var latestVersion = await latestVersionProvider(cancellationToken);
 
             if (latestVersion != null && CompareVersions(currentVersion, latestVersion) < 0)
             {

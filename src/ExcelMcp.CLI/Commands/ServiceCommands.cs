@@ -17,6 +17,8 @@ namespace Sbroenne.ExcelMcp.CLI.Commands;
 /// </summary>
 internal sealed class ServiceStartCommand : AsyncCommand
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "CLI service-start boundary writes success=false JSON with the startup error message and returns exit code 1.")]
     public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
     {
         try
@@ -34,12 +36,12 @@ internal sealed class ServiceStartCommand : AsyncCommand
 }
 
 /// <summary>
-/// Stops the ExcelMCP CLI Service daemon and Excel processes tracked for its selected pipe.
+/// Requests normal CLI service shutdown without terminating retained Excel processes.
 /// </summary>
 internal sealed class ServiceStopCommand : AsyncCommand
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan ShutdownRequestTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan ShutdownRequestTimeout = Timeout.InfiniteTimeSpan;
     private static readonly TimeSpan ShutdownWaitTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ShutdownPollInterval = TimeSpan.FromMilliseconds(250);
 
@@ -52,6 +54,8 @@ internal sealed class ServiceStopCommand : AsyncCommand
             cancellationToken);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "CLI shutdown boundary reports unconfirmed shutdown or cleanup errors as success=false JSON and returns exit code 1 without terminating a running service.")]
     private static async Task<int> ExecuteWithStartupLockAsync(
         string pipeName,
         CancellationToken cancellationToken)
@@ -64,6 +68,18 @@ internal sealed class ServiceStopCommand : AsyncCommand
             var response = await CliTelemetry.TrackCommandAsync(
                 request,
                 () => client.SendAsync(request, cancellationToken));
+            if (!response.Success
+                && !client.HasConnected
+                && DaemonConnectionPolicy.IsTransportFailure(response)
+                && !DaemonAutoStart.IsDaemonMutexHeld(pipeName))
+            {
+                return await WriteCleanupResultAsync(
+                    pipeName,
+                    preShutdownSnapshot,
+                    cancellationToken,
+                    "Service not running.");
+            }
+
             if (response.Success)
             {
                 if (await WaitForDaemonExitAsync(pipeName, cancellationToken))
@@ -72,83 +88,45 @@ internal sealed class ServiceStopCommand : AsyncCommand
                         pipeName,
                         preShutdownSnapshot,
                         cancellationToken,
-                        "Service stopped.");
-                }
-
-                if (await TryForceStopTrackedDaemonAsync(
-                    pipeName,
-                    preShutdownSnapshot,
-                    cancellationToken))
-                {
-                    CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(new { success = true, message = "Service stopped.", forced = true }, ServiceProtocol.JsonOptions));
-                    return 0;
+                        "Service stopped.",
+                        response.PartialState);
                 }
 
                 CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(
-                    new { success = false, errorMessage = $"Service acknowledged shutdown but did not exit within {ShutdownWaitTimeout.TotalSeconds:0} seconds." },
+                    new
+                    {
+                        success = false,
+                        errorCategory = "Timeout",
+                        errorMessage = $"Service acknowledged shutdown but did not exit within {ShutdownWaitTimeout.TotalSeconds:0} seconds. " +
+                            "The service and its workbooks have not been terminated."
+                    },
                     ServiceProtocol.JsonOptions));
                 return 1;
             }
 
-            if (response.ErrorCategory == "Busy" ||
-                (response.ErrorCategory == "Timeout" && response.ErrorMessage == "Service request timed out"))
-            {
-                CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(response, ServiceProtocol.JsonOptions));
-                return 1;
-            }
-
-            if (!DaemonAutoStart.IsDaemonMutexHeld(pipeName))
-            {
-                return await WriteCleanupResultAsync(
-                    pipeName,
-                    preShutdownSnapshot,
-                    cancellationToken,
-                    "Service not running.");
-            }
-
-            if (await TryForceStopTrackedDaemonAsync(
-                pipeName,
-                preShutdownSnapshot,
-                cancellationToken))
-            {
-                CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(new { success = true, message = "Service stopped.", forced = true }, ServiceProtocol.JsonOptions));
-                return 0;
-            }
-
+            CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(response, ServiceProtocol.JsonOptions));
+            return 1;
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
+        {
             CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(
                 new
                 {
                     success = false,
-                    errorMessage = response.ErrorMessage ?? "Daemon is running but not responding, and the tracked daemon process could not be stopped."
-                },
-                ServiceProtocol.JsonOptions));
+                    errorCategory = ex is TimeoutException ? "Timeout" : "Cancelled",
+                    errorMessage = "The shutdown wait ended without confirmation. The service and its workbooks have not been terminated.",
+                    cause = ex.Message
+                }, ServiceProtocol.JsonOptions));
             return 1;
         }
         catch (Exception ex)
         {
-            if (!DaemonAutoStart.IsDaemonMutexHeld(pipeName))
-            {
-                return await WriteCleanupResultAsync(
-                    pipeName,
-                    preShutdownSnapshot,
-                    cancellationToken,
-                    "Service not running.");
-            }
-
-            if (await TryForceStopTrackedDaemonAsync(
-                pipeName,
-                preShutdownSnapshot,
-                cancellationToken))
-            {
-                CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(new { success = true, message = "Service stopped.", forced = true }, ServiceProtocol.JsonOptions));
-                return 0;
-            }
-
             CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(
                 new
                 {
                     success = false,
-                    errorMessage = $"Daemon is running but not responding, and the tracked daemon process could not be stopped. {ex.GetType().Name}: {ex.Message}"
+                    errorMessage = "The shutdown response could not be confirmed. The service and its workbooks have not been terminated. " +
+                        $"{ex.GetType().Name}: {ex.Message}"
                 },
                 ServiceProtocol.JsonOptions));
             return 1;
@@ -171,25 +149,12 @@ internal sealed class ServiceStopCommand : AsyncCommand
         return !DaemonAutoStart.IsDaemonMutexHeld(pipeName);
     }
 
-    private static async Task<bool> TryForceStopTrackedDaemonAsync(
-        string pipeName,
-        OwnedProcessCleanup.ProcessSnapshot preShutdownSnapshot,
-        CancellationToken cancellationToken)
-    {
-        var cleanupResult = await OwnedProcessCleanup.CleanupAsync(
-            pipeName,
-            preShutdownSnapshot,
-            cancellationToken);
-        return cleanupResult.Success
-            && cleanupResult.DaemonMatched
-            && await WaitForDaemonExitAsync(pipeName, cancellationToken);
-    }
-
     private static async Task<int> WriteCleanupResultAsync(
         string pipeName,
         OwnedProcessCleanup.ProcessSnapshot preShutdownSnapshot,
         CancellationToken cancellationToken,
-        string successMessage)
+        string successMessage,
+        string? shutdownWarning = null)
     {
         var cleanupResult = await OwnedProcessCleanup.CleanupAsync(
             pipeName,
@@ -202,14 +167,23 @@ internal sealed class ServiceStopCommand : AsyncCommand
                 {
                     success = false,
                     errorMessage = cleanupResult.ErrorMessage
-                        ?? $"One or more processes tracked for CLI pipe '{pipeName}' could not be stopped."
+                        ?? "Recorded Excel copies could not be checked. Ownership checks did not close Excel."
                 },
                 ServiceProtocol.JsonOptions));
             return 1;
         }
 
+        var retained = OwnedProcessCleanup.GetRetainedExcelProcesses(pipeName, serviceRunning: false);
         CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(
-            new { success = true, message = successMessage },
+            new
+            {
+                success = true,
+                message = successMessage,
+                shutdownWarning,
+                retainedExcelProcessCount = retained.Count,
+                retainedExcelProcesses = retained,
+                recoveryMessage = retained.Count > 0 ? OwnedProcessCleanup.RecoveryMessage : null
+            },
             ServiceProtocol.JsonOptions));
         return 0;
     }
@@ -224,17 +198,13 @@ internal sealed class ServiceStatusCommand : AsyncCommand
     public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
     {
         var pipeName = DaemonAutoStart.GetPipeName();
-        var observation = DaemonConnectionPolicy.Observe(pipeName);
         var request = new ServiceRequest { Command = "service.status" };
         var response = await CliTelemetry.TrackCommandAsync(
             request,
-            () => DaemonConnectionPolicy.SendControlRequestAsync(
+            () => DaemonConnectionPolicy.SendObservedControlRequestAsync(
                 pipeName,
                 request,
-                cancellationToken,
-                observation.IsStopped
-                    ? DaemonConnectionPolicy.InitialProbeTimeout
-                    : DaemonConnectionPolicy.ControlTimeout));
+                cancellationToken));
         if (response.Success && response.Result != null)
         {
             ServiceStatus? status;
@@ -249,17 +219,23 @@ internal sealed class ServiceStatusCommand : AsyncCommand
             }
             if (status != null)
             {
+                var (retained, retainedError) = ReadRetainedExcelProcesses(pipeName, serviceRunning: true);
                 CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(new
                 {
-                    success = true,
+                    success = retainedError is null,
                     daemonState = DaemonConnectionPolicy.RunningState,
                     running = status.Running,
                     processId = status.ProcessId,
                     sessionCount = status.SessionCount,
                     startTime = status.StartTime,
-                    uptime = status.Uptime.ToString(@"d\.hh\:mm\:ss", CultureInfo.InvariantCulture)
+                    uptime = status.Uptime.ToString(@"d\.hh\:mm\:ss", CultureInfo.InvariantCulture),
+                    retainedExcelProcessCount = retained?.Count,
+                    retainedExcelProcesses = retained,
+                    recoveryMessage = retained?.Count > 0 ? OwnedProcessCleanup.RecoveryMessage : null,
+                    retainedExcelError = retainedError,
+                    errorMessage = retainedError
                 }, ServiceProtocol.JsonOptions));
-                return 0;
+                return retainedError is null ? 0 : 1;
             }
         }
 
@@ -278,24 +254,45 @@ internal sealed class ServiceStatusCommand : AsyncCommand
         var failureState = DaemonConnectionPolicy.ResolveFailureState(pipeName, response);
         if (failureState.Name == DaemonConnectionPolicy.StoppedState)
         {
-            return WriteStoppedStatus();
+            return WriteStoppedStatus(pipeName);
         }
 
-        return CliErrorOutput.WriteDaemonError(response, failureState.Name, failureState.Running);
+        var (retainedProcesses, retainedErrorMessage) = ReadRetainedExcelProcesses(pipeName, failureState.Running);
+        return CliErrorOutput.WriteDaemonError(response, failureState.Name, failureState.Running,
+            retainedProcesses, retainedErrorMessage);
     }
 
-    private static int WriteStoppedStatus()
+    private static int WriteStoppedStatus(string pipeName)
     {
+        var (retained, retainedError) = ReadRetainedExcelProcesses(pipeName, serviceRunning: false);
         CliCommandRuntime.Current.Output.WriteLine(JsonSerializer.Serialize(new
         {
-            success = true,
+            success = retainedError is null,
             daemonState = DaemonConnectionPolicy.StoppedState,
             running = false,
             processId = 0,
             sessionCount = 0,
             startTime = (DateTime?)null,
-            uptime = TimeSpan.Zero.ToString(@"d\.hh\:mm\:ss", CultureInfo.InvariantCulture)
+            uptime = TimeSpan.Zero.ToString(@"d\.hh\:mm\:ss", CultureInfo.InvariantCulture),
+            retainedExcelProcessCount = retained?.Count,
+            retainedExcelProcesses = retained,
+            recoveryMessage = retained?.Count > 0 ? OwnedProcessCleanup.RecoveryMessage : null,
+            retainedExcelError = retainedError,
+            errorMessage = retainedError
         }, ServiceProtocol.JsonOptions));
-        return 0;
+        return retainedError is null ? 0 : 1;
+    }
+
+    private static (IReadOnlyList<OwnedProcessCleanup.RetainedExcelProcess>? Processes, string? Error)
+        ReadRetainedExcelProcesses(string pipeName, bool serviceRunning)
+    {
+        try
+        {
+            return (OwnedProcessCleanup.GetRetainedExcelProcesses(pipeName, serviceRunning), null);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return (null, ex.Message);
+        }
     }
 }

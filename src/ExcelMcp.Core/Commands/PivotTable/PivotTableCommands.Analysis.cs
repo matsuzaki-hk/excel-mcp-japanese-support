@@ -18,15 +18,15 @@ public partial class PivotTableCommands
     {
         return batch.Execute((ctx, ct) =>
         {
-            dynamic? pivot = null;
-            dynamic? tableRange = null;
+            Excel.PivotTable? pivot = null;
+            Excel.Range? tableRange = null;
 
             try
             {
                 pivot = FindPivotTable(ctx.Book, pivotTableName);
                 tableRange = pivot.TableRange2;
 
-                var values = ExcelValueNormalizer.Normalize(tableRange.Value2);
+                var values = ExcelValueNormalizer.Normalize((object?)tableRange.Value2);
 
                 return new PivotTableDataResult
                 {
@@ -72,7 +72,11 @@ public partial class PivotTableCommands
             return result;
         }
 
-        return batch.Execute((ctx, ct) =>
+        return batch.Execute(ReadReportFilter);
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+            Justification = "Reports the original report-filter error and failure phase in a failed result; cancellation and disconnected sessions propagate.")]
+        PivotReportFilterResult ReadReportFilter(ExcelContext ctx, CancellationToken ct)
         {
             Excel.Sheets? sheets = null;
             Excel.Worksheet? sheet = null;
@@ -115,7 +119,7 @@ public partial class PivotTableCommands
                 pivotField = pivotFields.Item(1);
 
                 failurePhase = "read-filter-state";
-                ReadReportFilterSelection(cubeField, pivotField, result, ct);
+                ReadReportFilterSelection(cubeField, pivotField, result, ct, batch as IExcelBatchWindowControl);
                 result.Success = true;
             }
             catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
@@ -139,7 +143,7 @@ public partial class PivotTableCommands
             }
 
             return result;
-        });
+        }
     }
 
     /// <summary>
@@ -156,7 +160,11 @@ public partial class PivotTableCommands
             return invalidRequest;
         }
 
-        return batch.Execute((ctx, ct) =>
+        return batch.Execute(WriteReportFilter);
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+            Justification = "Preserves mutation and update-restoration errors, reports the failed phase and possible partial state, and appends readback failures; cancellation and disconnection propagate.")]
+        PivotReportFilterResult WriteReportFilter(ExcelContext ctx, CancellationToken ct)
         {
             Excel.Sheets? sheets = null;
             Excel.Worksheet? sheet = null;
@@ -254,20 +262,7 @@ public partial class PivotTableCommands
                 if (manualUpdateChanged)
                 {
                     failurePhase = "restore-update";
-                    try
-                    {
-                        pivot.ManualUpdate = previousManualUpdate;
-                    }
-                    catch (Exception restoreException) when (
-                        mutationFailure is not null && CreatedObjectFailure.CanReport(restoreException))
-                    {
-                        if (CreatedObjectFailure.CanReport(mutationFailure))
-                        {
-                            mutationFailure = new AggregateException(
-                                "Filter mutation and update restoration both failed.",
-                                mutationFailure, restoreException);
-                        }
-                    }
+                    OperationCleanup.Run(() => pivot.ManualUpdate = previousManualUpdate, mutationFailure);
                 }
                 if (mutationFailure is not null)
                 {
@@ -276,7 +271,7 @@ public partial class PivotTableCommands
                 }
 
                 failurePhase = "read-filter-state";
-                ReadReportFilterSelection(cubeField, pivotField, result, ct);
+                ReadReportFilterSelection(cubeField, pivotField, result, ct, batch as IExcelBatchWindowControl);
                 result.Success = true;
             }
             catch (Exception ex) when (CreatedObjectFailure.CanReport(ex))
@@ -292,7 +287,7 @@ public partial class PivotTableCommands
                     failurePhase = "read-filter-state-after-failure";
                     try
                     {
-                        ReadReportFilterSelection(cubeField, pivotField, result, ct);
+                        ReadReportFilterSelection(cubeField, pivotField, result, ct, batch as IExcelBatchWindowControl);
                     }
                     catch (Exception readException) when (CreatedObjectFailure.CanReport(readException))
                     {
@@ -314,7 +309,7 @@ public partial class PivotTableCommands
             }
 
             return result;
-        });
+        }
     }
 
     private static PivotReportFilterResult? ValidateReportFilterRequest(
@@ -382,7 +377,8 @@ public partial class PivotTableCommands
 
     private static void ReadReportFilterSelection(
         Excel.CubeField cubeField, Excel.PivotField pivotField,
-        PivotReportFilterResult result, CancellationToken cancellationToken)
+        PivotReportFilterResult result, CancellationToken cancellationToken,
+        IExcelBatchWindowControl? windowControl)
     {
         result.FieldArea = PivotFieldArea.Filter;
         result.MultipleSelectionEnabled = cubeField.EnableMultiplePageItems;
@@ -390,7 +386,7 @@ public partial class PivotTableCommands
         {
             string currentPageName = pivotField.CurrentPageName;
             result.ShowAll = PivotTableHelpers.IsAllOlapReportFilterMember(
-                cubeField, currentPageName, cancellationToken);
+                cubeField, currentPageName, cancellationToken, windowControl);
             result.SelectedItems = result.ShowAll ? [] : [currentPageName];
             result.SelectionStateAvailable = true;
             return;
@@ -404,7 +400,7 @@ public partial class PivotTableCommands
             return;
         }
 
-        var visibleItems = pivotField.VisibleItemsList;
+        object? visibleItems = pivotField.VisibleItemsList;
         result.SelectedItems = visibleItems is Array items
             ? items.Cast<object>().Select(item => item.ToString() ?? string.Empty).ToList()
             : [];
@@ -461,7 +457,7 @@ public partial class PivotTableCommands
                 }
                 RequireAxisField(field);
                 values = (Excel.PivotFields)pivot.DataFields;
-                value = FindValueField(values, dataFieldName, ct);
+                value = FindValueField(values, dataFieldName, ct, allowOlapNames: isOlap);
                 string sortBy = isOlap ? value.SourceName : value.Name;
                 ct.ThrowIfCancellationRequested();
                 var order = direction == SortDirection.Ascending

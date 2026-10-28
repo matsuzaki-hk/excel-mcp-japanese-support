@@ -13,6 +13,45 @@ namespace Sbroenne.ExcelMcp.CLI.Tests.Unit;
 [Trait("RequiresExcel", "false")]
 public sealed class CliTelemetryTests
 {
+    [Theory]
+    [InlineData("discover")]
+    [InlineData("attach")]
+    public void CreateCommandInvocationTelemetry_RecoveryUsesCanonicalLabels(string action)
+    {
+        var (invocation, request) = CliTelemetry.CreateCommandInvocationTelemetry(
+            $"session.{action}", 25, succeeded: true, errorCategory: null);
+        Assert.Equal($"session/{action}", invocation.Name);
+        Assert.Equal("session", invocation.Properties["Tool"]);
+        Assert.Equal(action, invocation.Properties["Action"]);
+        Assert.Equal("session", request.Properties["Tool"]);
+        Assert.Equal(action, request.Properties["Action"]);
+    }
+
+    [Theory]
+    [InlineData("save", true)]
+    [InlineData("save", false)]
+    [InlineData("notices", true)]
+    [InlineData("notices", false)]
+    [InlineData("enable-editing", true)]
+    [InlineData("enable-editing", false)]
+    [InlineData("enable-connections", true)]
+    [InlineData("enable-connections", false)]
+    [InlineData("enable-macros", true)]
+    [InlineData("enable-macros", false)]
+    public void CreateCommandInvocationTelemetry_SessionUsesCanonicalLabels(string action, bool succeeded)
+    {
+        var (eventTelemetry, requestTelemetry) = CliTelemetry.CreateCommandInvocationTelemetry(
+            $"session.{action}", 25, succeeded, succeeded ? null : "Busy");
+
+        Assert.Equal($"session/{action}", eventTelemetry.Name);
+        Assert.Equal("session", eventTelemetry.Properties["Tool"]);
+        Assert.Equal(action, eventTelemetry.Properties["Action"]);
+        Assert.Equal($"session/{action}", requestTelemetry.Name);
+        Assert.Equal("session", requestTelemetry.Properties["Tool"]);
+        Assert.Equal(action, requestTelemetry.Properties["Action"]);
+        Assert.Equal(succeeded, requestTelemetry.Success);
+    }
+
     [Fact]
     public async Task TrackCommandAsync_TracksTheExecutedCliCommand()
     {

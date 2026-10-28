@@ -20,7 +20,7 @@ internal sealed class Program
     private static Task<int> Main(string[] args) => RunEntryPointAsync(args);
 
     /// <summary>
-    /// The process entry path: enables telemetry, runs the command, then flushes.
+    /// The process entry path: enables telemetry, runs the command, then signals reporting exit.
     /// Tests call it directly so they cover the same routes as <c>Main</c>.
     /// </summary>
     internal static async Task<int> RunEntryPointAsync(
@@ -43,10 +43,12 @@ internal sealed class Program
         }
         finally
         {
-            CliTelemetry.Flush();
+            CliTelemetry.SignalExit();
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Top-level CLI boundary writes the exact exception as JSON or stderr diagnostics and returns nonzero; it must not let a fatal command failure appear successful.")]
     internal static async Task<int> RunAsync(
         string[] args,
         CliCommandRuntime? runtime = null)
@@ -82,6 +84,11 @@ internal sealed class Program
             return await HandleVersionAsync();
         }
 
+        if (ActionHelp.TryWrite(filteredArgs))
+        {
+            return 0;
+        }
+
         // Handle "service run" — runs the CLI daemon with tray icon (no banner)
         // Optional: --pipe-name <name> to override the default CLI pipe (used by tests)
         if (filteredArgs.Length >= 2
@@ -97,6 +104,7 @@ internal sealed class Program
                     break;
                 }
             }
+            CliTelemetry.StartDaemonReporting();
             var daemonRunner = CliCommandRuntime.Current.ServiceDaemonRunner ?? RunServiceDaemon;
             return daemonRunner(pipeNameOverride);
         }
@@ -129,7 +137,7 @@ internal sealed class Program
                 branch.AddCommand<ServiceStartCommand>("start")
                     .WithDescription("Start the ExcelMCP Service if needed and wait up to 30 seconds for readiness.");
                 branch.AddCommand<ServiceStopCommand>("stop")
-                    .WithDescription("Stop the CLI service and its pipe-owned Excel processes.");
+                    .WithDescription("Stop the CLI service normally; preserve unsaved workbooks and Excel left by earlier services.");
                 branch.AddCommand<ServiceStatusCommand>("status")
                     .WithDescription("Show stopped, starting, running, or unresponsive daemon state; readiness checks wait up to 10 seconds.");
             });
@@ -141,15 +149,29 @@ internal sealed class Program
             // Session commands
             config.AddBranch("session", branch =>
             {
-                branch.SetDescription("Session management. WORKFLOW: open -> use sessionId -> close (--save to persist). Use --show for IRM/auth prompts.");
+                branch.SetDescription("Session management. Use discover to find an already-open workbook, then attach --workbook-id without reopening it. WORKFLOW: open or attach -> use sessionId -> close (--save to persist). Use --show for IRM/auth prompts.");
+                branch.AddCommand<SessionDiscoverCommand>("discover")
+                    .WithDescription("Find already-open workbooks without reopening them. Results include saved state and AutoSave setting.");
+                branch.AddCommand<SessionAttachCommand>("attach")
+                    .WithDescription("Attach to a workbook returned by session discover. Does not reopen the workbook; existing AutoSave remains unchanged.");
                 branch.AddCommand<SessionCreateCommand>("create")
                     .WithDescription("Create a new Excel file, open it, and create a session. Add --show for visible Excel.");
                 branch.AddCommand<SessionOpenCommand>("open")
-                    .WithDescription("Open an Excel file and create a session. Add --show for visible Excel.");
+                    .WithDescription("Open an Excel file with VBA macros disabled and create a session. Add --show for visible Excel.");
+                branch.AddCommand<SessionNoticesCommand>("notices")
+                    .WithDescription("Inspect workbook restrictions without enabling content. Reports Protected View, read-only access, known VBA opening state, and inspection gaps.");
+                branch.AddCommand<SessionSecurityCommand>("enable-editing")
+                    .WithDescription("Leave Protected View only with --approved and --allow-remembered-trust. Excel can remember trust for this file. Does not enable VBA macros.");
+                branch.AddCommand<SessionSecurityCommand>("enable-connections")
+                    .WithDescription("Enable all workbook data connections with --approved and --allow-remembered-trust. Can contact data sources or start refresh; completion is not established.");
+                branch.AddCommand<SessionSecurityCommand>("enable-macros")
+                    .WithDescription("Enable VBA by reopening a saved local workbook with --approved and --allow-reopen. Only for a session-owned workbook without neighbors; opening macros can run.");
                 branch.AddCommand<SessionCloseCommand>("close")
                     .WithDescription("Close a session. Use --save to persist changes.");
+                branch.AddCommand<SessionSaveCommand>("save")
+                    .WithDescription("Save the current workbook without closing its session. Excel must be ready.");
                 branch.AddCommand<SessionListCommand>("list")
-                    .WithDescription("List active sessions with canClose, excelState and blockingReason. For dialogOpen, check Excel for a prompt; transport failures return unresponsive instead of an empty list.");
+                    .WithDescription("List active sessions with canClose, excelState, operationPending and blocker details. Confirmed blocking dialogs automatically reveal Excel and include readable dialog text in blockingMessage; partial or unavailable reads are reported. Ask the user to respond in Excel. Dialog types are not identified and input values are not read.");
                 branch.AddCommand<SessionTestCommand>("test")
                     .WithDescription("Test file existence, validity, openability, and IRM/AIP read-only requirements.");
             });
@@ -228,7 +250,7 @@ internal sealed class Program
         // even when capturing with $result = excelcli ...).
         var err = CreateErrorConsole();
         err.Write(new FigletText("Excel CLI").Color(Spectre.Console.Color.Blue));
-        err.MarkupLine("[dim]Excel automation powered by ExcelMcp Core[/]");
+        err.MarkupLine("[dim]Automate Microsoft Excel from the command line[/]");
         err.MarkupLine("[yellow]Workflow:[/] [green]session open <file>[/] → run commands with [green]--session <id>[/] → [green]session close --save[/].");
         err.MarkupLine("[dim]A background service manages sessions for performance.[/]");
         err.WriteLine();
@@ -304,8 +326,10 @@ internal sealed class Program
     /// <summary>
     /// Runs the CLI as a daemon process with system tray icon.
     /// The service listens on the CLI pipe name (shared across CLI invocations).
-    /// Auto-exits after 10 minutes of inactivity with no active sessions.
+    /// Remains running until explicitly stopped or its process exits.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Daemon process entry boundary observes the service task failure, writes its original message to stderr, returns exit code 1, and still disposes owned resources.")]
     private static int RunServiceDaemon(string? pipeNameOverride = null)
     {
         Application.EnableVisualStyles();
@@ -391,6 +415,10 @@ internal sealed class Program
                         process.StartedAtUtcFileTime)
                 ]);
         SessionManager.ExcelProcessIdentityTracked += excelProcessTracker;
+        Action<ExcelProcessIdentity> preserveExcelProcess = process =>
+            DaemonProcessTracker.PreserveExcelProcess(pipeName, daemonIdentity,
+                new DaemonProcessTracker.ProcessIdentity(process.ProcessId, process.StartedAtUtcFileTime));
+        SessionManager.ExcelProcessIdentityPreserved += preserveExcelProcess;
         foreach (var process in SessionManager.GetTrackedExcelProcesses())
         {
             excelProcessTracker(process);
@@ -399,7 +427,7 @@ internal sealed class Program
         Service.ExcelMcpService? service = null;
         try
         {
-            service = new Service.ExcelMcpService();
+            service = new Service.ExcelMcpService(CliTelemetry.TrackDaemonRequestAsync);
 
             // Capture the UI synchronization context after Application starts
             SynchronizationContext? uiContext = null;
@@ -407,8 +435,9 @@ internal sealed class Program
             // Run WinForms message loop with tray icon on main thread
             using var tray = new CliServiceTray(service.SessionManager, () =>
             {
-                service.RequestShutdown();
+                var report = service.RequestShutdown();
                 Application.ExitThread();
+                return report;
             });
 
             uiContext = SynchronizationContext.Current;
@@ -416,9 +445,9 @@ internal sealed class Program
             // Start accepting RPC only after daemon host initialization succeeds.
             // Otherwise auto-start clients can observe a successful ping from a pipe
             // server whose owning WinForms/tray host is still able to fail and exit.
-            var serviceTask = Task.Run(() => service.RunAsync(pipeName, idleTimeout: TimeSpan.FromMinutes(10)));
+            var serviceTask = Task.Run(() => service.RunAsync(pipeName));
 
-            // When service shuts down (idle timeout or remote shutdown), exit the WinForms loop
+            // When service shuts down, exit the WinForms loop.
             serviceTask.ContinueWith(_ =>
             {
                 if (uiContext != null)
@@ -459,6 +488,7 @@ internal sealed class Program
                 service.Dispose();
             }
             SessionManager.ExcelProcessIdentityTracked -= excelProcessTracker;
+            SessionManager.ExcelProcessIdentityPreserved -= preserveExcelProcess;
 
             // Release the daemon mutex so a new daemon can start if needed.
             if (ownsLegacyDaemonMutex)

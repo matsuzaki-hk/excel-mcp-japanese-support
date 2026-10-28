@@ -6,9 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Note: Microsoft.ApplicationInsights comes transitively from McpServer's WorkerService SDK -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
-    <!-- Test-only: verifies OpenTelemetry metric View drop configuration for noisy HttpClient meters -->
     <PackageReference Include="OpenTelemetry" />
     <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
   </ItemGroup>
@@ -23,8 +21,8 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\ConfiguredIrmFactAttribute.cs" Link="Helpers\ConfiguredIrmFactAttribute.cs" />
-    <Compile Include="..\Shared\TestRunExcelLifetime.cs" Link="Helpers\TestRunExcelLifetime.cs" />
-    <Compile Include="..\Shared\ExcelLifetimeTestFramework.cs" Link="Helpers\ExcelLifetimeTestFramework.cs" />
+    <Compile Include="..\Shared\TestRunExcelLeftoverCheck.cs" Link="Helpers\TestRunExcelLeftoverCheck.cs" />
+    <Compile Include="..\Shared\ExcelLeftoverTestFramework.cs" Link="Helpers\ExcelLeftoverTestFramework.cs" />
     <Compile Include="..\Shared\TestClassificationArchitectureTests.cs" Link="Helpers\TestClassificationArchitectureTests.cs" />
     <Compile Include="..\Shared\LocalTelemetryTests.cs" Link="Unit\LocalTelemetryTests.cs" />
     <Compile Include="..\Shared\TelemetryUserIdentityTests.cs" Link="Unit\TelemetryUserIdentityTests.cs" />

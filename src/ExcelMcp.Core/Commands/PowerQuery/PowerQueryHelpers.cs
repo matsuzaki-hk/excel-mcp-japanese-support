@@ -126,7 +126,7 @@ public static class PowerQueryHelpers
             string? connectionString = oleDbConnection == null
                 ? null
                 : Convert.ToString(
-                    oleDbConnection.Connection,
+                    (object)oleDbConnection.Connection,
                     CultureInfo.InvariantCulture);
             if (oleDbConnection != null &&
                 TryParseMashupIdentity(
@@ -201,6 +201,8 @@ public static class PowerQueryHelpers
                         try
                         {
                             queryTable = queryTables.Item(qt);
+                            if (queryTable.QueryType is not (Excel.XlQueryType.xlOLEDBQuery or Excel.XlQueryType.xlODBCQuery))
+                                continue;
                             queryTableConnection = queryTable.WorkbookConnection;
                             if (string.Equals(
                                 queryTableConnection.Name,
@@ -209,10 +211,6 @@ public static class PowerQueryHelpers
                             {
                                 queryTable.Delete();
                             }
-                        }
-                        catch (COMException ex) when (ex.HResult == unchecked((int)0x800A03EC))
-                        {
-                            // The QueryTable has no accessible WorkbookConnection.
                         }
                         finally
                         {
@@ -385,15 +383,20 @@ public static class PowerQueryHelpers
         Excel.WorkbookConnection connection,
         out MashupIdentity identity)
     {
+        if (connection.Type != Excel.XlConnectionType.xlConnectionTypeOLEDB)
+        {
+            identity = default;
+            return false;
+        }
         Excel.OLEDBConnection? oleDbConnection = null;
         try
         {
             oleDbConnection = connection.OLEDBConnection;
             return TryParseMashupIdentity(
-                Convert.ToString(oleDbConnection.Connection, CultureInfo.InvariantCulture),
+                Convert.ToString((object)oleDbConnection.Connection, CultureInfo.InvariantCulture),
                 out identity);
         }
-        catch (COMException)
+        catch (COMException ex) when (ComErrors.IsMemberUnavailable(ex))
         {
             identity = default;
             return false;

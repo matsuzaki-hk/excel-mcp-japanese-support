@@ -1,3 +1,4 @@
+#Requires -Version 7.4
 [CmdletBinding()]
 param(
     [string]$BaseRef,
@@ -15,7 +16,7 @@ if ($Full) {
     $range = if ($Comparison -eq 'MergeBase') { "$BaseRef...$HeadRef" } else { "$BaseRef..$HeadRef" }
     $paths = @(git -c core.quotepath=false diff --name-only --no-renames $range)
     if ($LASTEXITCODE -ne 0) { throw 'Cannot determine changed validation inputs.' }
-    $plan = Get-ValidationPlan -Paths $paths
+    $plan = Get-ValidationPlan -Paths $paths -BaseRef $BaseRef -HeadRef $HeadRef -Comparison $Comparison
 }
 $plan.Reasons | ForEach-Object { Write-Host $_ }
 $directory = Split-Path -Parent $OutputPath
@@ -34,16 +35,18 @@ if ($env:GITHUB_OUTPUT) {
     $codeQlMatrix = @{ include = $languages } | ConvertTo-Json -Compress -Depth 5
     @(
         "matrix=$matrix"
-        "source_checks_group=$($plan.SourceChecksGroup)"
+        "documentation_checks_group=$($plan.DocumentationChecksGroup)"
         "documentation_counts=$($plan.DocumentationCounts)".ToLowerInvariant()
         "full_solution_build=$($plan.FullSolutionBuild)".ToLowerInvariant()
         "full_solution_build_group=$($plan.FullSolutionBuildGroup)"
         "tests=$($plan.CiTestGroups.Count -gt 0)".ToLowerInvariant()
-        "packages=$($plan.Packages)".ToLowerInvariant()
-        "package_build=$($plan.PackageBuild)".ToLowerInvariant()
+        "build_only=$($plan.BuildOnly)".ToLowerInvariant()
+        "packages=$($plan.PackageComponents.Count -gt 0)".ToLowerInvariant()
+        "npm=$($plan.NpmTests)".ToLowerInvariant()
+        "package_skills=$(@($plan.PackageComponents | Where-Object { $_ -in @('Extension', 'Plugins') }).Count -gt 0)".ToLowerInvariant()
+        "package_dotnet=$(@($plan.PackageComponents | Where-Object { $_ -in @('Cli', 'Mcp', 'Extension') }).Count -gt 0)".ToLowerInvariant()
         "codeql_matrix=$codeQlMatrix"
         "codeql=$($plan.CodeQlLanguages.Count -gt 0)".ToLowerInvariant()
-        "npm=$($plan.NpmTests)".ToLowerInvariant()
         "docs=$($plan.Docs)".ToLowerInvariant()
     ) | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
 }

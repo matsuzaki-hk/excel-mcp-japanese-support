@@ -1,3 +1,4 @@
+#Requires -Version 7.4
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$SourceDirectory,
@@ -18,8 +19,13 @@ $source = (Resolve-Path -LiteralPath $SourceDirectory).Path
 $published = (Resolve-Path -LiteralPath $PublishedRepoDirectory).Path
 $built = (Resolve-Path -LiteralPath $BuiltPluginsDirectory).Path
 if ((git -C $source rev-parse "refs/tags/$tag^{commit}") -ne $SourceCommit) { throw 'Source release tag/commit mismatch.' }
-if ((git -C $source rev-parse HEAD) -ne $SourceCommit -or @(git -C $source status --porcelain).Count) {
-    throw 'Source checkout must be clean and match the exact release commit.'
+$sourceHead = git -C $source rev-parse HEAD
+if ($sourceHead -ne $SourceCommit) {
+    throw "Source checkout HEAD: $sourceHead`nExpected release commit: $SourceCommit"
+}
+$sourceChanges = @(git -C $source status --porcelain)
+if ($sourceChanges.Count) {
+    throw "Source checkout must be clean.`nRelease commit: $SourceCommit`nGit status:`n$($sourceChanges -join "`n")"
 }
 if (@(git -C $published status --porcelain).Count) { throw 'Published checkout must be clean.' }
 $baselineCommit = git -C $published rev-parse HEAD
@@ -142,7 +148,7 @@ try {
         $message = if ($status -eq 'skipped') { 'Plugin publication skipped: no content changes.' } else { 'Plugin publication prepared/published.' }
         "$message Actual published tag: ``$actualTag``; commit: ``$actualCommit``. Changed plugins: $($result.changed_plugins -join ', ')." >> $env:GITHUB_STEP_SUMMARY
         if ($result.handoff) {
-            "Awesome Copilot listings are updated manually: run ``update-awesome-copilot.lock.yml`` with ``published_tag=$actualTag`` (preview first)." >> $env:GITHUB_STEP_SUMMARY
+            "Review the changed plugin listings in github/awesome-copilot manually. Use output tag ``$actualTag`` and output commit ``$actualCommit``; product release tags are not interchangeable." >> $env:GITHUB_STEP_SUMMARY
         }
     }
 }

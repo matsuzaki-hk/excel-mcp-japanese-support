@@ -10,7 +10,9 @@ host-owned bridge. CLI invocations connect to a persistent named-pipe daemon.
 Their live session sets are separate.
 
 The Service owns routing and sessions; the daemon host owns accepting and
-draining pipe connections and idle shutdown. Core does not own either transport.
+draining pipe connections. The CLI daemon stays running until explicitly stopped
+or its process exits; it does not shut down automatically when idle.
+Core does not own either transport.
 
 ## Reasons and tradeoffs
 
@@ -31,4 +33,4 @@ names, output envelopes, or session identifiers across hosts.
 - [Service](../src/ExcelMcp.Service/ExcelMcpService.cs)
 - [CLI daemon host](../src/ExcelMcp.Service/Rpc/DaemonHost.cs)
 - [MCP bridge](../src/ExcelMcp.McpServer/ServiceBridge/ServiceBridge.cs)
-- [System map](../CONTEXT.md) and [runtime instructions](agents/rules/architecture-patterns.md)
+- [System map](../CONTEXT.md) and [runtime instructions](../src/AGENTS.md)

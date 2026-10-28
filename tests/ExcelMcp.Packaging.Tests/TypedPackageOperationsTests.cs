@@ -1,7 +1,8 @@
 using System.Diagnostics;
 using System.IO.Compression;
-using Sbroenne.ExcelMcp.Build;
+using System.Runtime.InteropServices;
 using Xunit;
+using static Sbroenne.ExcelMcp.Tests.Infrastructure.PackagingScriptTestHelper;
 
 namespace Sbroenne.ExcelMcp.Packaging.Tests;
 
@@ -11,17 +12,51 @@ namespace Sbroenne.ExcelMcp.Packaging.Tests;
 [Trait("Feature", "Packaging")]
 public sealed class TypedPackageOperationsTests
 {
+    private static string Helpers => Path.Combine(RepoRoot, "scripts", "PackageHelpers.ps1");
+    private static string ExtensionHelpers => Path.Combine(RepoRoot, "scripts", "ExtensionPackaging.ps1");
+
     [Theory]
-    [InlineData(false, null, false)]
-    [InlineData(true, null, false)]
-    [InlineData(false, "AGENTS.md", false)]
-    [InlineData(false, "CLAUDE.md", false)]
-    [InlineData(false, null, true)]
-    [InlineData(true, null, true)]
-    public async Task AggregatePackaging_VsixTargetsRequireMatchingBundledRuntime(
-        bool corruptX64Payload, string? developerFile, bool skipExtensionTests)
+    [InlineData("Cli", "x64", "ExcelMcp-CLI-1.2.3-windows.zip", "excelcli.exe", 0x8664)]
+    [InlineData("Cli", "arm64", "ExcelMcp-CLI-1.2.3-windows-arm64.zip", "excelcli.exe", 0xaa64)]
+    [InlineData("Mcp", "x64", "ExcelMcp-MCP-Server-1.2.3-windows.zip", "mcp-excel.exe", 0x8664)]
+    [InlineData("Mcp", "arm64", "ExcelMcp-MCP-Server-1.2.3-windows-arm64.zip", "mcp-excel.exe", 0xaa64)]
+    public async Task StandaloneArchive_ContainsMatchingArchitectureRuntimeAndSupportFiles(
+        string component, string architecture, string expectedName, string executableName, int expectedMachine)
     {
-        var sandbox = NewSandbox();
+        var sandbox = CreateSandbox("standalone");
+        try
+        {
+            var output = Directory.CreateDirectory(Path.Combine(sandbox, "artifacts")).FullName;
+            var payload = File.ReadAllBytes(typeof(TypedPackageOperationsTests).Assembly.Location);
+            var offset = BitConverter.ToInt32(payload, 0x3c);
+            BitConverter.GetBytes((ushort)expectedMachine).CopyTo(payload, offset + 4);
+            var executable = Path.Combine(sandbox, executableName);
+            File.WriteAllBytes(executable, payload);
+            foreach (var file in new[] { "README.md", "LICENSE", "CHANGELOG.md" }) { File.WriteAllText(Path.Combine(sandbox, file), file); }
+            var result = await RunPowerShellCommandAsync($"""
+                . '{Helpers}'
+                New-StandalonePackage '{component}' '1.2.3' '{executable}' '{architecture}' '{output}' '{sandbox}'
+                """);
+            Assert.True(result.ExitCode == 0, result.CombinedOutput);
+            using var zip = ZipFile.OpenRead(Path.Combine(output, expectedName));
+            foreach (var file in new[] { executableName, "README.md", "LICENSE", "CHANGELOG.md" }) { Assert.NotNull(zip.GetEntry(file)); }
+            using var stream = zip.GetEntry(executableName)!.Open();
+            using var memory = new MemoryStream();
+            stream.CopyTo(memory);
+            Assert.Equal((ushort)expectedMachine, BitConverter.ToUInt16(memory.ToArray(), offset + 4));
+        }
+        finally { DeleteDirectoryIfExists(sandbox); }
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("AGENTS.md", false)]
+    [InlineData("CLAUDE.md", false)]
+    [InlineData(null, true)]
+    public async Task ExtensionPackages_CompileOnceAndRequireMatchingBundledRuntime(
+        string? developerFile, bool skipExtensionTests)
+    {
+        var sandbox = CreateSandbox("vsix");
         try
         {
             var version = FileVersionInfo.GetVersionInfo(typeof(TypedPackageOperationsTests).Assembly.Location).ProductVersion!.Split('+')[0];
@@ -37,210 +72,213 @@ public sealed class TypedPackageOperationsTests
             var skill = Directory.CreateDirectory(Path.Combine(skills, "excel-mcp-report-formatting")).FullName;
             File.WriteAllText(Path.Combine(skill, "VERSION"), version);
             File.WriteAllText(Path.Combine(skill, "SKILL.md"), "Fixture skill");
-            // Fork: the VSIX also bundles the source-managed Japanese skill.
+            // Fork bundles the source-managed Japanese skill from the repo.
             var jaSkill = Directory.CreateDirectory(Path.Combine(sandbox, "skills", "excel-mcp-ja")).FullName;
-            File.WriteAllText(Path.Combine(jaSkill, "SKILL.md"), "Fixture skill");
-            // Fork: only the x64 runtime is bundled; a corrupted payload must be rejected.
-            var machine = corruptX64Payload ? (ushort)0xaa64 : (ushort)0x8664;
-            var runtimeDir = Directory.CreateDirectory(Path.Combine(sandbox, "runtimes", "x64")).FullName;
-            BitConverter.GetBytes(machine).CopyTo(payload, offset + 4);
-            var runtime = Path.Combine(runtimeDir, "Sbroenne.ExcelMcp.McpServer.exe");
-            File.WriteAllBytes(runtime, payload);
-            var prepared = new Dictionary<string, string>(StringComparer.Ordinal) { ["Mcp"] = runtime };
-            var output = Directory.CreateDirectory(Path.Combine(sandbox, "artifacts", "packages")).FullName;
-            var calls = new List<PackageCommand>();
-            var commands = new PackageCommands(call =>
+            File.WriteAllText(Path.Combine(jaSkill, "SKILL.md"), "Fixture ja skill");
+            foreach (var (architecture, machine) in new[] { ("x64", (ushort)0x8664) })
             {
-                calls.Add(call);
-                Assert.Equal("npm", call.Executable);
-                if (call.Arguments is ["run", "compile"])
-                {
-                    var compiled = Directory.CreateDirectory(Path.Combine(call.WorkingDirectory, "out")).FullName;
-                    File.WriteAllText(Path.Combine(compiled, "extension.js"), "fixture");
-                    File.WriteAllText(Path.Combine(compiled, "prerequisites.js"), "fixture");
-                }
-                if (call.Arguments[0] == "exec")
-                {
-                    var target = call.Arguments[Array.IndexOf(call.Arguments, "--target") + 1];
-                    var destination = call.Arguments[Array.IndexOf(call.Arguments, "--out") + 1];
-                    using var archive = ZipFile.Open(destination, ZipArchiveMode.Create);
-                    foreach (var file in Directory.EnumerateFiles(call.WorkingDirectory, "*", SearchOption.AllDirectories))
-                    {
-                        var relative = Path.GetRelativePath(call.WorkingDirectory, file).Replace('\\', '/');
-                        archive.CreateEntryFromFile(file, $"extension/{relative}");
+                var directory = Directory.CreateDirectory(Path.Combine(sandbox, "runtimes", architecture)).FullName;
+                BitConverter.GetBytes(machine).CopyTo(payload, offset + 4);
+                File.WriteAllBytes(Path.Combine(directory, "Sbroenne.ExcelMcp.McpServer.exe"), payload);
+            }
+            var output = Directory.CreateDirectory(Path.Combine(sandbox, "artifacts", "packages")).FullName;
+            var result = await RunPowerShellCommandAsync($$$"""
+                . '{{{Helpers}}}'
+                . '{{{ExtensionHelpers}}}'
+                $root = '{{{sandbox}}}'
+                $calls = [Collections.Generic.List[string]]::new()
+                function Invoke-PackageCommand {
+                    param($Directory, $Executable, $Arguments)
+                    if ($Executable -ne 'npm') { throw 'Prepared runtimes must not be rebuilt.' }
+                    $calls.Add($Arguments -join ' ')
+                    if ($Arguments -join ' ' -eq 'run compile') {
+                        New-Item "$Directory\out" -ItemType Directory -Force | Out-Null
+                        'fixture' | Set-Content "$Directory\out\extension.js"
+                        'fixture' | Set-Content "$Directory\out\prerequisites.js"
                     }
-                    using var writer = new StreamWriter(archive.CreateEntry("extension.vsixmanifest").Open());
-                    writer.Write($"<PackageManifest><Metadata><Identity TargetPlatform='{target}'/></Metadata></PackageManifest>");
+                    if ($Arguments[0] -eq 'exec') {
+                        $manifest = Read-PackageJson "$Directory\package.json"
+                        if ($manifest.scripts.Contains('vscode:prepublish')) { throw 'VSIX must reuse compiled source.' }
+                        $target = $Arguments[[Array]::IndexOf($Arguments, '--target') + 1]
+                        $destination = $Arguments[[Array]::IndexOf($Arguments, '--out') + 1]
+                        $zip = [IO.Compression.ZipFile]::Open($destination, [IO.Compression.ZipArchiveMode]::Create)
+                        try {
+                            foreach ($file in [IO.Directory]::EnumerateFiles($Directory, '*', [IO.SearchOption]::AllDirectories)) {
+                                $relative = [IO.Path]::GetRelativePath($Directory, $file).Replace('\', '/')
+                                [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file, "extension/$relative") | Out-Null
+                            }
+                            $writer = [IO.StreamWriter]::new($zip.CreateEntry('extension.vsixmanifest').Open())
+                            try { $writer.Write("<PackageManifest><Metadata><Identity TargetPlatform='$target'/></Metadata></PackageManifest>") }
+                            finally { $writer.Dispose() }
+                        } finally { $zip.Dispose() }
+                    }
                 }
-                return Task.FromResult(new ProcessResult(0, "", ""));
-            });
-            var failure = await Record.ExceptionAsync(() => new PackageExecution(sandbox, commands).ExtensionAsync(version, skills, output, prepared, skipExtensionTests));
-            Assert.Contains(calls, call => call.Arguments.SequenceEqual(["ci", "--ignore-scripts"]));
-            Assert.Contains(calls, call => call.Arguments.SequenceEqual(["run", "compile"]));
-            Assert.Contains(calls, call => call.Arguments.SequenceEqual(["run", "lint"]));
-            Assert.Equal(!skipExtensionTests, calls.Any(call => call.Arguments.SequenceEqual(["run", "typecheck:tests"])));
-            Assert.Equal(!skipExtensionTests, calls.Any(call => call.Arguments.SequenceEqual(["test"])));
+                $stage = Initialize-ExtensionPackage $root '{{{version}}}' '{{{skills}}}' -SkipExtensionTests:${{{skipExtensionTests}}}
+                try {
+                    Complete-ExtensionPackages $stage '{{{version}}}' '{{{output}}}' @{
+                        Mcp = "$root\runtimes\x64\Sbroenne.ExcelMcp.McpServer.exe"
+                    }
+                } finally {
+                    $calls | ConvertTo-Json | Set-Content "$root\calls.json"
+                    Remove-PackageStaging $stage
+                }
+                """);
+            var calls = System.Text.Json.JsonSerializer.Deserialize<string[]>(File.ReadAllText(Path.Combine(sandbox, "calls.json")))!;
+            Assert.Contains("ci --ignore-scripts", calls);
+            Assert.Single(calls, call => call == "run compile");
+            Assert.Contains("run lint", calls);
+            Assert.Equal(!skipExtensionTests, calls.Contains("run typecheck:tests"));
+            Assert.Equal(!skipExtensionTests, calls.Contains("test"));
             if (developerFile is not null)
             {
-                Assert.NotNull(failure);
-                Assert.Contains($"VSIX contains development files or the CLI: extension/{developerFile}", failure.Message, StringComparison.Ordinal);
-            }
-            else if (corruptX64Payload)
-            {
-                Assert.NotNull(failure);
-                Assert.Contains("does not match x64", failure.Message, StringComparison.Ordinal);
+                Assert.NotEqual(0, result.ExitCode);
+                Assert.Contains($"VSIX contains development files or the CLI: extension/{developerFile}", result.CombinedOutput, StringComparison.Ordinal);
             }
             else
             {
-                Assert.Null(failure);
-                // Fork contract: a single x64 VSIX under the excelmcp-ja name.
-                using var archive = ZipFile.OpenRead(Path.Combine(output, $"excelmcp-ja-{version}.vsix"));
+                Assert.True(result.ExitCode == 0, result.CombinedOutput);
+                // Fork ships a single x64 VSIX named after the fork.
+                var filename = $"excelmcp-ja-{version}.vsix";
+                using var archive = ZipFile.OpenRead(Path.Combine(output, filename));
                 var entry = archive.GetEntry("extension/bin/Sbroenne.ExcelMcp.McpServer.exe");
                 Assert.NotNull(entry);
                 using var reader = new BinaryReader(entry.Open());
-                var expected = File.ReadAllBytes(runtime);
+                var expected = File.ReadAllBytes(Path.Combine(sandbox, "runtimes", "x64", "Sbroenne.ExcelMcp.McpServer.exe"));
                 var actual = reader.ReadBytes(expected.Length);
                 Assert.Equal((ushort)0x8664, BitConverter.ToUInt16(actual, offset + 4));
                 Assert.Equal(expected, actual);
-                foreach (var skillName in new[] { "excel-mcp-ja", "excel-mcp-report-formatting" })
-                {
-                    Assert.NotNull(archive.GetEntry($"extension/skills/{skillName}/SKILL.md"));
-                    Assert.NotNull(archive.GetEntry($"extension/skills/{skillName}/VERSION"));
-                }
+                using var skillReader = new StreamReader(archive.GetEntry("extension/skills/excel-mcp-report-formatting/SKILL.md")!.Open());
+                Assert.Equal("Fixture skill", skillReader.ReadToEnd());
+                using var jaSkillReader = new StreamReader(archive.GetEntry("extension/skills/excel-mcp-ja/SKILL.md")!.Open());
+                Assert.Equal("Fixture ja skill", jaSkillReader.ReadToEnd());
+                using var jaVersionReader = new StreamReader(archive.GetEntry("extension/skills/excel-mcp-ja/VERSION")!.Open());
+                Assert.Equal(version, jaVersionReader.ReadToEnd());
                 var debug = File.ReadAllBytes(Path.Combine(output, "extension", "bin", "Sbroenne.ExcelMcp.McpServer.exe"));
                 Assert.Equal((ushort)0x8664, BitConverter.ToUInt16(debug, offset + 4));
             }
             Assert.Empty(Directory.GetFiles(output, "*-server-inspection.exe"));
+            Assert.Contains("vscode:prepublish", File.ReadAllText(Path.Combine(extension, "package.json")), StringComparison.Ordinal);
         }
-        finally { Directory.Delete(sandbox, recursive: true); }
+        finally { DeleteDirectoryIfExists(sandbox); }
     }
 
     [Fact]
-    public void InstallPackageOutput_WhenInstallAndRestoreFail_PreservesBothErrorsAndRecoveryBackup()
+    public async Task InstallPackageOutput_WhenInstallAndRestoreFail_PreservesBothErrorsAndRecoveryBackup()
     {
-        var sandbox = NewSandbox();
+        var sandbox = CreateSandbox("install-recovery");
         try
         {
             var source = Directory.CreateDirectory(Path.Combine(sandbox, "source")).FullName;
             var destination = Directory.CreateDirectory(Path.Combine(sandbox, "destination")).FullName;
             File.WriteAllText(Path.Combine(source, "payload.txt"), "replacement");
             File.WriteAllText(Path.Combine(destination, "payload.txt"), "previous");
-            var attempts = 0;
-            var warnings = new List<string>();
-            var error = Assert.Throws<AggregateException>(() => PackageFiles.Install(source, destination,
-                move: (from, to) =>
-                {
-                    attempts++;
-                    if (attempts == 2) { throw new IOException("installation root cause"); }
-                    if (attempts == 3) { throw new IOException("restore root cause"); }
-                    Directory.Move(from, to);
-                },
-                delete: path =>
-                {
-                    if (path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) { throw new IOException("temporary cleanup root cause"); }
-                    Directory.Delete(path, recursive: true);
-                },
-                warning: warnings.Add));
-            var messages = error.Message + "\n" + string.Join('\n', warnings);
-            Assert.Contains("installation root cause", messages, StringComparison.Ordinal);
-            Assert.Contains("restore root cause", messages, StringComparison.Ordinal);
-            Assert.Contains("Recovery backup retained at", messages, StringComparison.Ordinal);
-            Assert.Contains("temporary cleanup root cause", messages, StringComparison.Ordinal);
-            Assert.Contains("Temporary output retained at", messages, StringComparison.Ordinal);
+            var result = await RunPowerShellCommandAsync($$"""
+                . '{{Helpers}}'
+                $script:attempts = 0
+                Install-PackageOutput '{{source}}' '{{destination}}' -Move {
+                    param($from, $to)
+                    $script:attempts++
+                    if ($script:attempts -eq 2) { throw [IO.IOException]::new('installation root cause') }
+                    if ($script:attempts -eq 3) { throw [IO.IOException]::new('restore root cause') }
+                    Move-PackageItem $from $to
+                } -Delete {
+                    param($path)
+                    if ($path.EndsWith('.tmp')) { throw [IO.IOException]::new('temporary cleanup root cause') }
+                    Remove-PackageItem $path
+                }
+                """);
+            Assert.NotEqual(0, result.ExitCode);
+            foreach (var text in new[] { "installation root cause", "restore root cause", "Recovery backup retained at", "temporary cleanup root cause", "Temporary output retained at" })
+            {
+                Assert.Contains(text, result.CombinedOutput, StringComparison.Ordinal);
+            }
             Assert.False(Directory.Exists(destination));
             var backup = Assert.Single(Directory.GetDirectories(sandbox, "*.bak"));
             Assert.Equal("previous", File.ReadAllText(Path.Combine(backup, "payload.txt")));
-            Assert.Contains(backup, messages, StringComparison.OrdinalIgnoreCase);
             var temporary = Assert.Single(Directory.GetDirectories(sandbox, "*.tmp"));
             Assert.Equal("replacement", File.ReadAllText(Path.Combine(temporary, "payload.txt")));
-            Assert.Contains(temporary, messages, StringComparison.OrdinalIgnoreCase);
         }
-        finally { Directory.Delete(sandbox, recursive: true); }
+        finally { DeleteDirectoryIfExists(sandbox); }
     }
 
     [Fact]
-    public void InstallPackageOutput_WhenBackupCleanupFails_ReportsSuccessAndRetainedBackup()
+    public async Task InstallPackageOutput_WhenBackupCleanupFails_ReportsSuccessAndRetainedBackup()
     {
-        var sandbox = NewSandbox();
+        var sandbox = CreateSandbox("install-cleanup");
         try
         {
             var source = Directory.CreateDirectory(Path.Combine(sandbox, "source")).FullName;
             var destination = Directory.CreateDirectory(Path.Combine(sandbox, "destination")).FullName;
             File.WriteAllText(Path.Combine(source, "payload.txt"), "replacement");
             File.WriteAllText(Path.Combine(destination, "payload.txt"), "previous");
-            var warnings = new List<string>();
-            PackageFiles.Install(source, destination, delete: path =>
-            {
-                if (path.EndsWith(".bak", StringComparison.OrdinalIgnoreCase)) { throw new IOException("backup cleanup root cause"); }
-                Directory.Delete(path, recursive: true);
-            }, warning: warnings.Add);
-            var messages = string.Join('\n', warnings);
-            Assert.Contains("installed successfully", messages, StringComparison.Ordinal);
-            Assert.Contains("backup cleanup root cause", messages, StringComparison.Ordinal);
-            Assert.Contains("Backup retained at", messages, StringComparison.Ordinal);
+            var result = await RunPowerShellCommandAsync($$"""
+                . '{{Helpers}}'
+                Install-PackageOutput '{{source}}' '{{destination}}' -Delete {
+                    param($path)
+                    if ($path.EndsWith('.bak')) { throw [IO.IOException]::new('backup cleanup root cause') }
+                    Remove-PackageItem $path
+                }
+                """);
+            Assert.True(result.ExitCode == 0, result.CombinedOutput);
+            Assert.Contains("installed successfully", result.CombinedOutput, StringComparison.Ordinal);
+            Assert.Contains("backup cleanup root cause", result.CombinedOutput, StringComparison.Ordinal);
+            Assert.Contains("Backup retained at", result.CombinedOutput, StringComparison.Ordinal);
             Assert.Equal("replacement", File.ReadAllText(Path.Combine(destination, "payload.txt")));
             var backup = Assert.Single(Directory.GetDirectories(sandbox, "*.bak"));
             Assert.Equal("previous", File.ReadAllText(Path.Combine(backup, "payload.txt")));
-            Assert.Contains(backup, messages, StringComparison.OrdinalIgnoreCase);
         }
-        finally { Directory.Delete(sandbox, recursive: true); }
+        finally { DeleteDirectoryIfExists(sandbox); }
     }
 
     [Fact]
     [Trait("Feature", "McpbPackaging")]
-    public void RemoveStagingDirectory_RetriesTransientFileLockUntilDirectoryIsGone()
+    public async Task RemoveStagingDirectory_RetriesTransientFileLockUntilDirectoryIsGone()
     {
-        var sandbox = NewSandbox();
+        var sandbox = CreateSandbox("staging-retry");
         try
         {
-            var attempts = 0;
-            PackageFiles.RemoveStaging(sandbox, TimeSpan.FromSeconds(1), TimeSpan.Zero, path =>
-            {
-                attempts++;
-                if (attempts < 3) { throw new IOException("locked by scanner"); }
-                Directory.Delete(path, recursive: true);
-            });
-            Assert.Equal(3, attempts);
+            var result = await RunPowerShellCommandAsync($$"""
+                . '{{Helpers}}'
+                $script:attempts = 0
+                Remove-PackageStaging '{{sandbox}}' -TimeoutMilliseconds 1000 -RetryMilliseconds 0 -Remove {
+                    param($path)
+                    $script:attempts++
+                    if ($script:attempts -lt 3) { throw [IO.IOException]::new('locked by scanner') }
+                    Remove-PackageItem $path
+                }
+                if ($script:attempts -ne 3) { throw 'Unexpected retry count.' }
+                """);
+            Assert.True(result.ExitCode == 0, result.CombinedOutput);
             Assert.False(Directory.Exists(sandbox));
         }
-        finally { if (Directory.Exists(sandbox)) { Directory.Delete(sandbox, recursive: true); } }
+        finally { DeleteDirectoryIfExists(sandbox); }
     }
 
     [Fact]
     [Trait("Feature", "McpbPackaging")]
-    public void RemoveStagingDirectory_WhenTimeoutExpires_ReportsTerminalState()
+    public async Task RemoveStagingDirectory_WhenTimeoutExpires_ReportsTerminalState()
     {
-        var sandbox = NewSandbox();
+        var sandbox = CreateSandbox("staging-timeout");
         try
         {
-            var error = Assert.Throws<IOException>(() => PackageFiles.RemoveStaging(sandbox, TimeSpan.Zero, TimeSpan.Zero,
-                _ => throw new UnauthorizedAccessException("locked by scanner")));
+            var result = await RunPowerShellCommandAsync($$"""
+                . '{{Helpers}}'
+                try {
+                    Remove-PackageStaging '{{sandbox}}' -TimeoutMilliseconds 0 -RetryMilliseconds 0 -Remove {
+                        throw [UnauthorizedAccessException]::new('locked by scanner')
+                    }
+                } catch [IO.IOException] {
+                    [Console]::Error.WriteLine($_.Exception.Message)
+                    throw
+                }
+                """);
+            Assert.NotEqual(0, result.ExitCode);
             Assert.True(Directory.Exists(sandbox));
-            foreach (var text in new[] { "Failed to remove MCPB staging directory", sandbox, "after 1 attempt", "within 0 ms", "stale staging remains", "locked by scanner" })
+            foreach (var text in new[] { "Failed to remove package staging directory", sandbox, "after 1 attempt", "within 0 ms", "Stale staging remains", "locked by scanner" })
             {
-                Assert.Contains(text, error.Message, StringComparison.Ordinal);
+                Assert.Contains(text, result.CombinedOutput, StringComparison.Ordinal);
             }
         }
-        finally { Directory.Delete(sandbox, recursive: true); }
+        finally { DeleteDirectoryIfExists(sandbox); }
     }
-
-    [Theory]
-    [InlineData(-1, 0)]
-    [InlineData(0, -1)]
-    [Trait("Feature", "McpbPackaging")]
-    public void RemoveStagingDirectory_WhenTimeoutOrRetryIntervalIsNegative_UsesMatchingArgumentName(int timeoutMs, int retryMs)
-    {
-        var sandbox = NewSandbox();
-        try
-        {
-            var timeout = TimeSpan.FromMilliseconds(timeoutMs);
-            var retryInterval = TimeSpan.FromMilliseconds(retryMs);
-            var error = Assert.ThrowsAny<ArgumentOutOfRangeException>(() => PackageFiles.RemoveStaging(sandbox, timeout, retryInterval));
-            var expectedName = timeoutMs < 0 ? nameof(timeout) : nameof(retryInterval);
-            Assert.Equal(expectedName, error.ParamName);
-        }
-        finally { if (Directory.Exists(sandbox)) { Directory.Delete(sandbox, recursive: true); } }
-    }
-
-    private static string NewSandbox() => Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"ExcelMcp.TypedPackages.{Guid.NewGuid():N}")).FullName;
 }

@@ -10,10 +10,16 @@ namespace Sbroenne.ExcelMcp.Core.Models;
 /// </summary>
 public abstract class ResultBase
 {
+    private bool _success;
+
     /// <summary>
     /// Indicates whether the operation was successful
     /// </summary>
-    public bool Success { get; set; }
+    public bool Success
+    {
+        get => _success && string.IsNullOrEmpty(ErrorMessage);
+        set => _success = value;
+    }
 
     /// <summary>
     /// Error message if operation failed
@@ -568,6 +574,25 @@ public class PowerQueryLoadConfigResult : ResultBase
 }
 
 /// <summary>
+/// Configured workbook-level Power Query FastCombine setting.
+/// Excel's global privacy option may override whether the setting is applied.
+/// </summary>
+public class PowerQueryPrivacySettingsResult : ResultBase
+{
+    /// <summary>
+    /// Configured workbook FastCombine value; this may not match effective behavior
+    /// when Excel's global privacy option overrides whether the setting is applied.
+    /// </summary>
+    public bool IgnorePrivacyLevels { get; set; }
+
+    /// <summary>
+    /// Description of the configured setting and its possible data-sharing effect.
+    /// Effective behavior may differ when Excel's global privacy option overrides it.
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Result for Power Query load-to-data-model operations with verification
 /// Extends OperationResult to provide detailed verification of atomic operation
 /// </summary>
@@ -697,13 +722,8 @@ public class PowerQueryLoadToBothResult : OperationResult
 /// Result for Power Query create operations
 /// Atomic operation: Import M code + Load data to destination in ONE call
 /// </summary>
-public class PowerQueryCreateResult : OperationResult
+public class PowerQueryCreateResult : PowerQueryOperationResult
 {
-    /// <summary>
-    /// Name of the created query
-    /// </summary>
-    public string QueryName { get; set; } = string.Empty;
-
     /// <summary>
     /// Load destination applied
     /// </summary>
@@ -731,23 +751,14 @@ public class PowerQueryCreateResult : OperationResult
     /// </summary>
     public bool DataLoaded { get; set; }
 
-    /// <summary>
-    /// Number of rows loaded (0 if ConnectionOnly)
-    /// </summary>
-    public int RowsLoaded { get; set; }
 }
 
 /// <summary>
 /// Result for Power Query load operations
 /// Atomic operation: Set destination + Refresh data in ONE call
 /// </summary>
-public class PowerQueryLoadResult : OperationResult
+public class PowerQueryLoadResult : PowerQueryOperationResult
 {
-    /// <summary>
-    /// Name of the query
-    /// </summary>
-    public string QueryName { get; set; } = string.Empty;
-
     /// <summary>
     /// Load destination applied
     /// </summary>
@@ -775,10 +786,6 @@ public class PowerQueryLoadResult : OperationResult
     /// </summary>
     public bool DataRefreshed { get; set; }
 
-    /// <summary>
-    /// Number of rows loaded
-    /// </summary>
-    public int RowsLoaded { get; set; }
 }
 
 /// <summary>
@@ -1736,11 +1743,11 @@ public class VbaTrustResult : ResultBase
 }
 
 /// <summary>
-/// Power Query privacy level options for data combining
-/// OBSOLETE: Privacy levels cannot be set programmatically.
-/// Configure manually in Excel: File → Options → Privacy
+/// Per-source Power Query privacy levels for data combining.
+/// Individual source privacy levels cannot be set programmatically; the workbook-level
+/// FastCombine setting controls whether Excel applies those levels when combining sources.
 /// </summary>
-[Obsolete("Privacy levels not supported. Configure manually in Excel UI: File → Options → Privacy")]
+[Obsolete("Individual source privacy levels cannot be set programmatically.")]
 public enum PowerQueryPrivacyLevel
 {
     /// <summary>
@@ -1767,13 +1774,8 @@ public enum PowerQueryPrivacyLevel
 /// <summary>
 /// Result for Power Query refresh operations with error detection
 /// </summary>
-public class PowerQueryRefreshResult : ResultBase
+public class PowerQueryRefreshResult : PowerQueryOperationResult
 {
-    /// <summary>
-    /// Name of the query that was refreshed
-    /// </summary>
-    public string QueryName { get; set; } = string.Empty;
-
     /// <summary>
     /// Whether query has errors after refresh attempt
     /// </summary>
@@ -1799,6 +1801,14 @@ public class PowerQueryRefreshResult : ResultBase
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LoadedToSheet { get; set; }
+
+    /// <summary>Compact Power Query trace summary when requested.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PowerQueryTraceSummaryResult? TraceSummary { get; set; }
+
+    /// <summary>Guidance about trace availability or a slow refresh.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TraceNote { get; set; }
 }
 
 /// <summary>
@@ -1808,6 +1818,9 @@ public class PowerQueryRefreshResult : ResultBase
 /// </summary>
 public class PowerQueryRefreshAllResult : OperationResult
 {
+    /// <summary>Verified metrics for successfully refreshed queries, excluding skipped or failed queries.</summary>
+    public List<PowerQueryOperationResult> QueryMetrics { get; set; } = [];
+
     /// <summary>
     /// Queries whose worksheet, Data Model, or workbook connection loads were refreshed.
     /// </summary>
@@ -1834,6 +1847,14 @@ public class PowerQueryRefreshAllResult : OperationResult
     /// PivotTables whose refresh failed. The operation continued with other caches.
     /// </summary>
     public List<PowerQueryPivotRefreshFailure> FailedPivotTables { get; set; } = [];
+
+    /// <summary>Compact Power Query trace summary when requested.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PowerQueryTraceSummaryResult? TraceSummary { get; set; }
+
+    /// <summary>Guidance about trace availability or a slow or failed refresh.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TraceNote { get; set; }
 
     /// <summary>
     /// Failure category shared by every failed query; omitted when no query failed or
@@ -1968,7 +1989,7 @@ public class PowerQueryRefreshFailure
     public string QueryName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Classified failure category (for example Expression, Privacy, Connectivity), when known
+    /// Classified failure category (for example Expression, Privacy, PrivacyFirewall, Connectivity), when known
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ErrorCategory { get; set; }
@@ -2012,7 +2033,7 @@ public class PowerQueryErrorCheckResult : ResultBase
     public List<string> ErrorMessages { get; set; } = [];
 
     /// <summary>
-    /// Category of error (Authentication, Connectivity, Privacy, Syntax, Permissions, Unknown)
+    /// Category of error (Authentication, Connectivity, Privacy, PrivacyFirewall, Syntax, Permissions, Unknown)
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ErrorCategory { get; set; }
@@ -2274,6 +2295,12 @@ public class DataModelMeasureListResult : ResultBase
     /// List of DAX measures in the model
     /// </summary>
     public List<DataModelMeasureInfo> Measures { get; set; } = [];
+
+    /// <summary>
+    /// Informational hint when a table filter returns no measures.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Message { get; set; }
 }
 
 /// <summary>

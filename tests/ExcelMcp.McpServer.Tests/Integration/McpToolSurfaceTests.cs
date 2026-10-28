@@ -48,13 +48,14 @@ public class McpToolSurfaceTests(ITestOutputHelper output)
             .Where(type => type.GetCustomAttribute<McpReadOnlyActionsAttribute>() is not null &&
                 type.GetCustomAttribute<McpToolAttribute>() is not null)
             .Select(type => $"{type.GetCustomAttribute<McpToolAttribute>()!.ToolName}_read")
-            .Concat(new[] { typeof(ExcelFileTool), typeof(ExcelWorksheetTool) }
+            .Concat(new[] { typeof(ExcelFileTool) }
                 .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static))
                 .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
                 .Where(attribute => attribute?.Name?.EndsWith("_read", StringComparison.Ordinal) == true)
                 .Select(attribute => attribute!.Name!))
             .ToHashSet(StringComparer.Ordinal);
-        Assert.Equal(expected.Count + expectedReadTools.Count, McpToolSurface.ToolCount);
+        // Power Query trace inspection has no mutating actions, so it contributes only its _read endpoint.
+        Assert.Equal(expected.Count + expectedReadTools.Count - 1, McpToolSurface.ToolCount);
         Assert.True(expectedReadTools.SetEquals(McpToolSurface.Tools
             .Where(tool => tool.Name.EndsWith("_read", StringComparison.Ordinal))
             .Select(tool => tool.Name)));

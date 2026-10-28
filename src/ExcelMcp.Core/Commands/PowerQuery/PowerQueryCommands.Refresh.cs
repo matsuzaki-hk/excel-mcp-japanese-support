@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Sbroenne.ExcelMcp.ComInterop;
 using Sbroenne.ExcelMcp.ComInterop.Session;
+using Sbroenne.ExcelMcp.Core.Commands.PowerQueryTrace;
 using Sbroenne.ExcelMcp.Core.Models;
 using Sbroenne.ExcelMcp.Core.Utilities;
 using Excel = Microsoft.Office.Interop.Excel;
@@ -13,7 +14,12 @@ namespace Sbroenne.ExcelMcp.Core.Commands;
 public partial class PowerQueryCommands
 {
     /// <inheritdoc />
-    public PowerQueryRefreshResult Refresh(IExcelBatch batch, string queryName, TimeSpan timeout, IProgress<ProgressInfo>? progress = null)
+    public PowerQueryRefreshResult Refresh(
+        IExcelBatch batch,
+        string queryName,
+        TimeSpan timeout,
+        bool trace = false,
+        IProgress<ProgressInfo>? progress = null)
     {
         var result = new PowerQueryRefreshResult
         {
@@ -29,13 +35,14 @@ public partial class PowerQueryCommands
         }
 
         timeout = NormalizeRefreshTimeout(timeout);
+        DateTime traceStartUtc = DateTime.UtcNow;
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        using var timeoutCts = new CancellationTokenSource(timeout);
         string? queryFormula = null;
 
         try
         {
-            return batch.Execute((ctx, ct) =>
+            var refreshResult = ExcelBatchWait.Execute(batch, timeout, (ctx, ct) =>
             {
                 Excel.WorkbookQuery? query = null;
                 try
@@ -57,7 +64,7 @@ public partial class PowerQueryCommands
                     bool refreshed;
                     try
                     {
-                        refreshed = RefreshConnectionByQueryName(ctx.Book, queryName, timeoutCts.Token);
+                        refreshed = RefreshConnectionByQueryName(ctx.Book, queryName, ct);
                     }
                     catch (Exception ex) when (TryWrapPowerQueryException(ex, out var pqEx))
                     {
@@ -76,6 +83,8 @@ public partial class PowerQueryCommands
                     var loadState = DetectLoadState(ctx.Book, queryName, ct);
                     result.LoadedToSheet = loadState.TargetSheet;
                     result.IsConnectionOnly = loadState.IsConnectionOnly;
+                    ReadLoadMetrics(ctx.Book, queryName, result, ct);
+                    result.DurationMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
                     progress?.Report(new ProgressInfo { Current = 1, Total = 1, Message = $"Refreshed '{queryName}'" });
                     return result;
@@ -84,13 +93,23 @@ public partial class PowerQueryCommands
                 {
                     ComUtilities.Release(ref query);
                 }
-            }, timeoutCts.Token);
+            });
+            if (trace)
+            {
+                AddRefreshTrace(refreshResult, batch.ExcelProcessId, traceStartUtc, DateTime.UtcNow, failed: false);
+            }
+
+            return refreshResult;
         }
-        catch (TimeoutException ex) when (IsLikelyPrivacyFirewallRisk(queryFormula))
+        catch (TimeoutException ex) when (
+            ex.InnerException is not OperationCanceledException && IsLikelyPrivacyFirewallRisk(queryFormula))
         {
+            const string category = "PrivacyFirewall";
             throw new PowerQueryCommandException(
-                $"Likely Formula.Firewall/privacy-blocked refresh for query '{queryName}'. The query combines Excel.CurrentWorkbook with an external data source and Excel may have shown a privacy/modal prompt instead of returning a normal refresh error.",
-                "Privacy",
+                AddPowerQueryRemediation(
+                    $"Likely Formula.Firewall/privacy-blocked refresh for query '{queryName}'. The query combines Excel.CurrentWorkbook with an external data source and Excel may have shown a privacy/modal prompt instead of returning a normal refresh error.",
+                    category),
+                category,
                 ex);
         }
     }
@@ -108,36 +127,133 @@ public partial class PowerQueryCommands
         IExcelBatch batch,
         TimeSpan timeout = default,
         bool refreshPivotTables = true,
+        bool trace = false,
         IProgress<ProgressInfo>? progress = null)
     {
         timeout = NormalizeRefreshTimeout(timeout);
+        DateTime traceStartUtc = DateTime.UtcNow;
 
-        using var timeoutCts = new CancellationTokenSource(timeout);
-
-        return batch.Execute((ctx, ct) =>
+        var result = ExcelBatchWait.Execute(batch, timeout, (ctx, ct) =>
         {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-            var queryNames = ReadQueryNames(ctx.Book, linkedCts.Token);
+            var queryNames = ReadQueryNames(ctx.Book, ct);
+            var queryMetrics = new List<PowerQueryOperationResult>();
 
             // Use the same robust strategy as single-query Refresh:
             // 1) QueryTable.Refresh(false) for worksheet-loaded queries
             // 2) Connection.Refresh() for Data Model queries
             var result = RefreshQueries(
                 queryNames,
-                queryName => RefreshConnectionByQueryName(ctx.Book, queryName, linkedCts.Token),
-                linkedCts.Token,
+                queryName =>
+                {
+                    var started = System.Diagnostics.Stopwatch.GetTimestamp();
+                    if (!RefreshConnectionByQueryName(ctx.Book, queryName, ct))
+                        return false;
+                    var metrics = new PowerQueryOperationResult { Success = true, QueryName = queryName };
+                    ReadLoadMetrics(ctx.Book, queryName, metrics, ct);
+                    metrics.DurationMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                    queryMetrics.Add(metrics);
+                    return true;
+                },
+                ct,
                 progress);
             if (refreshPivotTables && result.RefreshedQueries.Count > 0)
             {
-                RefreshDependentPivotTables(ctx.Book, result, linkedCts.Token, progress);
+                RefreshDependentPivotTables(ctx.Book, result, ct, progress);
             }
 
             FinalizeRefreshAllResult(result);
+            result.QueryMetrics = queryMetrics;
             result.FilePath = batch.WorkbookPath;
             return result;
-        }, timeoutCts.Token);
+        });
+        if (trace)
+        {
+            AddRefreshTrace(result, batch.ExcelProcessId, traceStartUtc, DateTime.UtcNow, failed: !result.Success);
+        }
+
+        return result;
     }
 
+    internal void AddRefreshTrace(
+        PowerQueryRefreshResult result,
+        int? processId,
+        DateTime startUtc,
+        DateTime endUtc,
+        bool failed)
+    {
+        var summary = ReadRefreshTrace(processId, startUtc, endUtc);
+        result.TraceSummary = summary;
+        result.TraceNote = CreateRefreshTraceNote(summary, endUtc - startUtc, failed);
+    }
+
+    internal void AddRefreshTrace(
+        PowerQueryRefreshAllResult result,
+        int? processId,
+        DateTime startUtc,
+        DateTime endUtc,
+        bool failed)
+    {
+        var summary = ReadRefreshTrace(processId, startUtc, endUtc);
+        result.TraceSummary = summary;
+        result.TraceNote = CreateRefreshTraceNote(summary, endUtc - startUtc, failed);
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Optional trace-file I/O failures are reported in traceSummary with Success=false and the original error message plus a traceNote; the completed refresh outcome is unchanged. Cancellation and unexpected failures propagate.")]
+    private PowerQueryTraceSummaryResult ReadRefreshTrace(int? processId, DateTime startUtc, DateTime endUtc)
+    {
+        try
+        {
+            return _traceReader.Summarize(new PowerQueryTraceFilter(
+                ProcessId: processId,
+                SinceUtc: startUtc,
+                UntilUtc: endUtc));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return new PowerQueryTraceSummaryResult
+            {
+                Success = false,
+                ErrorMessage = ex.Message,
+                ProcessId = processId,
+                WindowStartUtc = startUtc,
+                WindowEndUtc = endUtc
+            };
+        }
+    }
+
+    private static string? CreateRefreshTraceNote(
+        PowerQueryTraceSummaryResult summary,
+        TimeSpan elapsed,
+        bool failed)
+    {
+        if (!summary.Success)
+        {
+            return "The refresh result above is unchanged, but the trace files could not be read. See traceSummary.errorMessage; do not repeat the refresh just to collect traces.";
+        }
+
+        var notes = new List<string>();
+        if (summary.EntriesMatched == 0)
+        {
+            notes.Add(
+                "No trace entries were found. Power Query reads tracing when Excel starts. Enable it with `excelcli settings set-pq-tracing --enabled true` (MCP: `settings`, action `set-pq-tracing` with `enabled=true`), restart Excel, then refresh again. This setting applies to the current Windows user and is not changed when a workbook or session closes. The refresh did not restart Excel.");
+        }
+
+        if (elapsed >= TimeSpan.FromSeconds(60))
+        {
+            notes.Add("This refresh took at least 60 seconds; use the trace summary to inspect data-source time and quiet gaps.");
+        }
+
+        if (failed)
+        {
+            notes.Add("One or more refresh operations failed; review the failed query list together with the trace summary.");
+        }
+
+        return notes.Count == 0 ? null : string.Join(" ", notes);
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Transports recordable refresh failures in FailedQueries with native diagnostics; overall success is false, and cancellation/disconnection are excluded.")]
     internal static PowerQueryRefreshAllResult RefreshQueries(
         IReadOnlyList<string> queryNames,
         Func<string, bool> refreshQuery,
@@ -292,7 +408,7 @@ public partial class PowerQueryCommands
         {
             QueryName = queryName,
             ErrorCategory = category,
-            ErrorMessage = exception.Message,
+            ErrorMessage = AddPowerQueryRemediation(exception.Message, category),
             ExceptionType = exception.GetType().Name,
             HResult = origin != null ? $"0x{origin.HResult:X8}" : null
         };
@@ -345,6 +461,8 @@ public partial class PowerQueryCommands
             " Inspect failedQueries and failedPivotTables for details.";
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ErrorHandling", "EXL002",
+        Justification = "Transports cache-classification and refresh errors as FailedPivotTables with original diagnostics; cancellation and session disconnection propagate.")]
     private static void RefreshDependentPivotTables(
         Excel.Workbook workbook,
         PowerQueryRefreshAllResult result,
@@ -505,16 +623,12 @@ public partial class PowerQueryCommands
                         try
                         {
                             table = tables.Item[j];
-                            try
-                            {
-                                queryTable = table.QueryTable;
-                            }
-                            catch (COMException ex) when (IsRecordableQueryFailure(ex, cancellationToken))
-                            {
+                            if (table.SourceType is not (Excel.XlListObjectSourceType.xlSrcExternal or Excel.XlListObjectSourceType.xlSrcQuery))
                                 continue;
-                            }
+                            queryTable = table.QueryTable;
 
-                            string? connectionString = queryTable.Connection?.ToString();
+                            object? connectionValue = queryTable.Connection;
+                            string? connectionString = connectionValue?.ToString();
                             if (queryNames.Any(queryName =>
                                 PowerQuery.PowerQueryHelpers.MatchesMashupLocation(
                                     connectionString,

@@ -24,12 +24,12 @@ directory and a new workbook path. Check each command's success response before
 continuing; a failed write does not promise rollback.
 
 ```powershell
-$session = (excelcli -q session create C:\data\dashboard.xlsx | ConvertFrom-Json).sessionId
-excelcli -q sheet create --session $session --sheet Data
-excelcli -q sheet create --session $session --sheet Analysis
-excelcli -q range set-values --session $session --sheet Data --range A1:C4 `
+$session = (excelcli -q session create C:\data\dashboard.xlsx | ConvertFrom-Json).data.sessionId
+excelcli -q sheet create --session $session --sheet-name Data
+excelcli -q sheet create --session $session --sheet-name Analysis
+excelcli -q range set-values --session $session --sheet-name Data --range-address A1:C4 `
   --values '[["Region","Product","Amount"],["North","Widget",100],["South","Widget",200],["North","Gadget",50]]'
-excelcli -q table create --session $session --sheet Data --table-name SalesTable --range A1:C4
+excelcli -q table create --session $session --sheet-name Data --table-name SalesTable --range-address A1:C4
 
 excelcli -q pivottable create-from-table --session $session `
   --table-name SalesTable --pivot-table-name ByRegion `
@@ -70,12 +70,13 @@ Creation options do not move existing reports onto another cache. See the
 for matching MCP examples, validation and shared-cache consequences.
 
 For an already-built `ByProduct` report with an independent cache, use
-`excelcli -q pivottable share-cache --session $session --sheet Analysis --pivot-table-name ByProduct --share-cache-with ByRegion --share-cache-with-sheet Analysis`
-instead of recreating it. The reports must have matching worksheet sources and
-compatible settings. Disconnect controls from the moved report first, then
-connect a shared slicer explicitly afterward. See
+`excelcli -q pivottable share-cache --session $session --sheet-name Analysis --pivot-table-name ByProduct --share-cache-with ByRegion --share-cache-with-sheet Analysis`
+instead of recreating it. Excel decides whether the cache assignment can be
+performed. The moved report adopts the chosen cache's data, and Excel may change
+its output, settings, or connected controls. Inspect the reports and controls
+afterward; the action does not refresh or save the workbook. See
 [existing report sharing](../reference/pivottable.md#move-an-existing-report-onto-a-shared-cache)
-for preservation limits and failure recovery.
+for details and failure recovery.
 
 ## Calculations, refresh and presentation
 

@@ -48,8 +48,7 @@ internal sealed class SessionSecurityCommand : AsyncCommand<SessionSecurityComma
         var response = await CliTelemetry.TrackCommandAsync(request, () => client.SendAsync(request, cancellationToken));
         if (!response.Success)
             return CliErrorOutput.WriteServiceError(response);
-        CliCommandRuntime.Current.Output.WriteLine(response.Result);
-        return 0;
+        return CliResultOutput.Write(response, request.Command);
     }
 
     internal sealed class Settings : CommandSettings
@@ -59,7 +58,7 @@ internal sealed class SessionSecurityCommand : AsyncCommand<SessionSecurityComma
         public string SessionId { get; init; } = string.Empty;
 
         [CommandOption("--approved")]
-        [Description("Explicit approval of this action on this workbook")]
+        [Description("Explicit approval of this action on this workbook. Approval flags are not confirmation prompts and do not bypass company policy.")]
         public bool Approved { get; init; }
 
         [CommandOption("--allow-remembered-trust")]

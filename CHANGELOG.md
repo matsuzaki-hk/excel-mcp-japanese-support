@@ -11,6 +11,96 @@ This changelog covers all components:
 
 Entries are short and end-user-facing. Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses [Semantic Versioning](https://semver.org/). Starting with this file, entries are compiled automatically from [changesets](.changeset/README.md) at release time — see [Release Strategy](docs/RELEASE-STRATEGY.md#changelog-generation) for how to add one.
 
+## [2.6.7] - 2026-11-01
+
+### Minor Changes
+
+- [#1284](https://github.com/sbroenne/mcp-server-excel/pull/1284) [`b7fa17a`](https://github.com/sbroenne/mcp-server-excel/commit/b7fa17ac38e5c1918338cac69654f524097eb576) Thanks [@sbroenne](https://github.com/sbroenne)! - Position and align chart titles, set axis line colours and thickness, and show or hide chart and plot-area borders. These options work through both the CLI and MCP Server, including on PivotCharts.
+
+### Patch Changes
+
+- [#1280](https://github.com/sbroenne/mcp-server-excel/pull/1280) [`3b055cb`](https://github.com/sbroenne/mcp-server-excel/commit/3b055cb5e173f5e298969da2a56d2be93c06469d) Thanks [@Antrakt92](https://github.com/Antrakt92)! - Keep caller cancellation distinct from service timeouts and connection failures, including when the pipe disconnects at the same time. Preserve unlimited connection waits while respecting any finite total request deadline.
+
+  If opening or creating a workbook finishes just as the caller cancels, reveal the completed workbook before reporting cancellation. Do not save, close, or undo its changes.
+
+## [2.6.6] - 2026-10-31
+
+### Minor Changes
+
+- [#1283](https://github.com/sbroenne/mcp-server-excel/pull/1283) [`18aae84`](https://github.com/sbroenne/mcp-server-excel/commit/18aae84d46f5b42b0662b8e8cc683d1869d2d404) Thanks [@sbroenne](https://github.com/sbroenne)! - Set a sheet's scroll position and optional selection with `window set-view` before saving. `window get-view` now reports the actual top-left cell, selection, and active cell, so dashboards can open at the intended position. Available through both excelcli and MCP.
+
+## [2.6.5] - 2026-10-31
+
+### Patch Changes
+
+- [#1278](https://github.com/sbroenne/mcp-server-excel/pull/1278) [`35dda84`](https://github.com/sbroenne/mcp-server-excel/commit/35dda847f4ad6b3bafbebd892c81e2205937cbf4) Thanks [@Antrakt92](https://github.com/Antrakt92)! - Reduce repeated JSON processing when converting Service responses into MCP replies. Keep errors, warnings, partial state and telemetry unchanged.
+
+## [2.6.4] - 2026-10-30
+
+### Patch Changes
+
+- [#1277](https://github.com/sbroenne/mcp-server-excel/pull/1277) [`c036473`](https://github.com/sbroenne/mcp-server-excel/commit/c036473dd727c38636acb5aa24653de1f420a970) Thanks [@sbroenne](https://github.com/sbroenne)! - **PivotTable cache sharing** ([#1276](https://github.com/sbroenne/mcp-server-excel/issues/1276)): `share-cache` now lets Excel decide whether
+  two reports can share a cache instead of rejecting them through custom
+  compatibility checks.
+
+## [2.6.3] - 2026-10-30
+
+### Minor Changes
+
+- [#1275](https://github.com/sbroenne/mcp-server-excel/pull/1275) [`cd029fe`](https://github.com/sbroenne/mcp-server-excel/commit/cd029fef20a3495e6aa65ebe323dc1a9d1063895) Thanks [@sbroenne](https://github.com/sbroenne)! - Set and inspect chart text fonts, sizes, colours, bold and italic through the CLI and MCP server. Supports existing titles, axis labels and titles, data labels, legends and whole-chart text settings on ordinary charts and PivotCharts, including Data Model PivotCharts.
+
+## [2.6.2] - 2026-10-30
+
+### Patch Changes
+
+- [#1274](https://github.com/sbroenne/mcp-server-excel/pull/1274) [`a180012`](https://github.com/sbroenne/mcp-server-excel/commit/a1800122bade23523a813090b772f1203f3230ff) Thanks [@sbroenne](https://github.com/sbroenne)! - CLI and MCP workbook close responses automatically return a compact `closeTimingsMs` breakdown to the calling agent, without environment settings or timing files.
+
+  Closing no longer forces general memory cleanup or waits for the Excel process to disappear after any requested save, confirmed workbook close, any appropriate Quit, and release of the Excel objects we used. An empty background copy of ExcelMcp finishes through the same internal reply without extra status or stop requests, while saving rules, protection of other workbooks, and recovery after failures remain unchanged.
+
+- [#1268](https://github.com/sbroenne/mcp-server-excel/pull/1268) [`efd3374`](https://github.com/sbroenne/mcp-server-excel/commit/efd337402b3934387ffa536aca6930e913913840) Thanks [@sbroenne](https://github.com/sbroenne)! - Removing all chart data labels no longer fails after Excel removes the labels or when a selected series has none. This works for one series or all series through both CLI and MCP.
+
+## [2.6.1] - 2026-10-29
+
+### Patch Changes
+
+- [#1267](https://github.com/sbroenne/mcp-server-excel/pull/1267) [`da38017`](https://github.com/sbroenne/mcp-server-excel/commit/da38017809ffb30514a55665470b09d3df289298) Thanks [@sbroenne](https://github.com/sbroenne)! - Stop the Excel MCP server from steadily adding threads and handles while idle. The server still shuts down when its client disconnects or exits unexpectedly.
+
+## [2.6.0] - 2026-10-29
+
+### Minor Changes
+
+- [#1260](https://github.com/sbroenne/mcp-server-excel/pull/1260) [`b39d1a0`](https://github.com/sbroenne/mcp-server-excel/commit/b39d1a06af48f5d024dea6d37dd9c303893a0838) Thanks [@sbroenne](https://github.com/sbroenne)! - Removed the CLI's leftover `--sheet` and `--range` option names. Use `--sheet-name` and `--range-address` instead; the old names are now rejected instead of quietly accepted.
+
+- [#1256](https://github.com/sbroenne/mcp-server-excel/pull/1256) [`c2b30c7`](https://github.com/sbroenne/mcp-server-excel/commit/c2b30c73b42211201fcf8491f5db7eeabd146045) Thanks [@sbroenne](https://github.com/sbroenne)! - CLI commands and batch items now share one JSON layout, with returned values under `data`, failure details under `error`, and an operation time in `durationMs`. Scripts must update their field lookups; batch items keep their `index` but no longer repeat a result wrapper or command summary.
+
+  Important warnings, failures, partial state, and inspection limits remain visible. Power Query lists omit formula previews; full query reads remain unchanged.
+
+### Patch Changes
+
+- [#1257](https://github.com/sbroenne/mcp-server-excel/pull/1257) [`2797e73`](https://github.com/sbroenne/mcp-server-excel/commit/2797e73e5443bd473902abe2027a3617e8d93602) Thanks [@sbroenne](https://github.com/sbroenne)! - Make CLI batch jobs easier to discover and use from the executable alone, with runnable help examples and exact per-action argument names. Invalid input errors now point to the relevant help and suggest verified command spellings without changing or executing rejected requests.
+
+- [#1260](https://github.com/sbroenne/mcp-server-excel/pull/1260) [`b39d1a0`](https://github.com/sbroenne/mcp-server-excel/commit/b39d1a06af48f5d024dea6d37dd9c303893a0838) Thanks [@sbroenne](https://github.com/sbroenne)! - The CLI starts its background service about 4 seconds faster, and `service stop` returns about 1.5 seconds faster when the service is not running. Neither waits for a connection timeout when the service is not there.
+
+- [#1260](https://github.com/sbroenne/mcp-server-excel/pull/1260) [`b39d1a0`](https://github.com/sbroenne/mcp-server-excel/commit/b39d1a06af48f5d024dea6d37dd9c303893a0838) Thanks [@sbroenne](https://github.com/sbroenne)! - **Clear error for a CLI option with no value**: when a value such as `--session <id>` or `--sheet-name <name>` is left out, `excelcli` now reports "Option '--session' requires a value." It no longer sends the command with the placeholder `__default_command` as the value, which produced confusing "Session '__default_command' not found" errors.
+
+- [#1259](https://github.com/sbroenne/mcp-server-excel/pull/1259) [`53bad9b`](https://github.com/sbroenne/mcp-server-excel/commit/53bad9b94327c4fdf5ccd6662aced58aaf398fd8) Thanks [@sbroenne](https://github.com/sbroenne)! - CLI help now explains pending Excel operations, notice inspection limits, and approval flags. Action-specific help includes the action's description as well as its options, with explicit CLI command and flag names where they differ from MCP. The `excel-cli` agent skill guides safe command selection, dialog recovery, and authorized writes.
+
+- [#1257](https://github.com/sbroenne/mcp-server-excel/pull/1257) [`2797e73`](https://github.com/sbroenne/mcp-server-excel/commit/2797e73e5443bd473902abe2027a3617e8d93602) Thanks [@sbroenne](https://github.com/sbroenne)! - Let Excel determine which files and web addresses it can open, with URL parameters passed unchanged. Remove custom host, file-format, exclusive-access, and visibility checks from both CLI and MCP opening. Excel can open readable files without requiring write access first. Fix finding and reconnecting to personal OneDrive workbooks when Excel reports their web address instead of their synced Windows path.
+
+  Keep files selected by different values after `?` separate without showing credentials or those values in reported addresses. Use consistent Windows paths after a failed copy or move between files, so Save As no longer leaves the old path marked as in use.
+
+- [#1265](https://github.com/sbroenne/mcp-server-excel/pull/1265) [`bda664c`](https://github.com/sbroenne/mcp-server-excel/commit/bda664cd7da89eae7857d99bcff3b130400f177f) Thanks [@sbroenne](https://github.com/sbroenne)! - Named formulas now accept invariant formulas, including decimal constants and table references, regardless of Windows regional settings.
+
+- [#1258](https://github.com/sbroenne/mcp-server-excel/pull/1258) [`1d5dbeb`](https://github.com/sbroenne/mcp-server-excel/commit/1d5dbebbe8ff9519ff9ee10fd29d21dd440e26a0) Thanks [@sbroenne](https://github.com/sbroenne)! - Remove optional result-field selection from CLI, MCP, and batch requests. Compact results, complete warnings and failure details, and Power Query lists without formula previews remain unchanged; full query reads are still available.
+
+- [#1252](https://github.com/sbroenne/mcp-server-excel/pull/1252) [`9210fac`](https://github.com/sbroenne/mcp-server-excel/commit/9210facb21787adbd1cd826f4b46275d143a91b9) Thanks [@sbroenne](https://github.com/sbroenne)! - Move Excel work out of the CLI background service and MCP controller so status and tray controls do not wait behind workbook operations. Bound service stopping and connection cleanup without saving, discarding, or ending Excel work to escape an expired wait. Keep sequential batch commands and JSON results, with live progress written separately.
+
+  Keep failed or unfinished cross-file worksheet transfers in a reported recovery session owning both workbooks. Preserve their exact partial state and original error without repeating the transfer or discarding edits. An explicit recovery save writes remaining changes in both workbooks without saving unchanged files again.
+
+- [#1261](https://github.com/sbroenne/mcp-server-excel/pull/1261) [`6c0de58`](https://github.com/sbroenne/mcp-server-excel/commit/6c0de58c064c46d6db068525e6b91e232bd842a5) Thanks [@sbroenne](https://github.com/sbroenne)! - Shrink the MCP tool list by about 40% so it takes less of the AI's context. Tools no longer advertise result schemas; replies still include the same JSON as text and structured content. Parameter descriptions in MCP and CLI help keep "required for" action lists but drop "valid for" lists, because both entry points already reject parameters an action does not use and name the valid ones. The longest tool descriptions are shorter and no longer repeat parameter details, and action summaries in MCP and CLI help no longer include implementation notes or extra spacing.
+
+- [#1265](https://github.com/sbroenne/mcp-server-excel/pull/1265) [`bda664c`](https://github.com/sbroenne/mcp-server-excel/commit/bda664cd7da89eae7857d99bcff3b130400f177f) Thanks [@sbroenne](https://github.com/sbroenne)! - PivotTable data results now include the displayed column headers, row labels, and grand totals for reports with row fields, including reports with filters or hidden totals.
+
 ## [2.5.7] - 2026-10-27
 
 ### Minor Changes

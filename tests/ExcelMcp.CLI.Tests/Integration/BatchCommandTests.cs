@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Sbroenne.ExcelMcp.CLI.Infrastructure;
 using Sbroenne.ExcelMcp.CLI.Tests.Helpers;
 using Sbroenne.ExcelMcp.Service;
 using Xunit;
@@ -67,16 +68,19 @@ public sealed class BatchCommandTests : IDisposable
             $$$"""{"command":"powerquery.{{{action}}}","args":{"queryName":"Query","mCode":"error \"Formula.Firewall\""}}""");
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Empty(result.Stderr);
+        Assert.Equal(
+            $"Batch 1/1: powerquery.{action} started.{Environment.NewLine}" +
+            $"Batch 1/1: powerquery.{action} failed.{Environment.NewLine}",
+            result.Stderr);
         using var json = JsonDocument.Parse(result.Stdout);
         var root = json.RootElement;
         Assert.False(root.GetProperty("success").GetBoolean());
         Assert.Equal(partialState.GetRawText(), root.GetProperty("partialState").GetRawText());
-        Assert.Equal("Privacy", root.GetProperty("errorCategory").GetString());
-        Assert.Equal("PowerQueryCommandException", root.GetProperty("exceptionType").GetString());
-        Assert.Equal("0x800A03EC", root.GetProperty("hresult").GetString());
-        Assert.Equal("Original privacy error", root.GetProperty("innerError").GetString());
-        Assert.Equal("Query remains after privacy failure", root.GetProperty("errorMessage").GetString());
+        Assert.Equal("Privacy", root.GetProperty("error").GetProperty("category").GetString());
+        Assert.Equal("PowerQueryCommandException", root.GetProperty("error").GetProperty("exceptionType").GetString());
+        Assert.Equal("0x800A03EC", root.GetProperty("error").GetProperty("hresult").GetString());
+        Assert.Equal("Original privacy error", root.GetProperty("error").GetProperty("innerError").GetString());
+        Assert.Equal("Query remains after privacy failure", root.GetProperty("error").GetProperty("message").GetString());
     }
 
     // ============================================
@@ -86,6 +90,74 @@ public sealed class BatchCommandTests : IDisposable
     // ============================================
     // MULTIPLE COMMANDS - Sequential execution
     // ============================================
+
+    [Fact]
+    public async Task Batch_BlockedLaterCommand_AlreadyFlushedEarlierResultAndCurrentProgress()
+    {
+        using var output = new FlushRecordingWriter();
+        using var error = new FlushRecordingWriter();
+        var client = new DeferredBatchClient();
+        var runtime = new CliCommandRuntime(client,
+            new StringReader("""[{"command":"diag.ping"},{"command":"diag.echo","args":{"message":"later"}}]"""),
+            output, error, isOutputRedirected: true);
+        var execution = Program.RunAsync(["--quiet", "batch"], runtime);
+        try
+        {
+            await client.SecondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(execution.IsCompleted);
+            Assert.Equal(1, output.Flushes);
+            Assert.Equal(2, error.Flushes);
+            using var first = JsonDocument.Parse(output.ToString());
+            Assert.True(first.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal(0, first.RootElement.GetProperty("index").GetInt32());
+            Assert.Equal(
+                $"Batch 1/2: diag.ping started.{Environment.NewLine}" +
+                $"Batch 1/2: diag.ping completed.{Environment.NewLine}" +
+                $"Batch 2/2: diag.echo started.{Environment.NewLine}", error.ToString());
+        }
+        finally
+        {
+            client.Finish.TrySetResult(new ServiceResponse { Success = true, Result = """{"message":"later"}""" });
+            Assert.Equal(0, await execution.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        Assert.Equal(2, output.Flushes);
+        var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(2, lines.Length);
+        using var last = JsonDocument.Parse(lines[1]);
+        Assert.Equal(1, last.RootElement.GetProperty("index").GetInt32());
+        Assert.Equal("later", last.RootElement.GetProperty("data").GetProperty("message").GetString());
+    }
+
+    private sealed class FlushRecordingWriter : StringWriter
+    {
+        internal int Flushes { get; private set; }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            Flushes++;
+            return base.FlushAsync(cancellationToken);
+        }
+    }
+
+    private sealed class DeferredBatchClient : ICliRequestClientFactory, ICliRequestClient
+    {
+        internal TaskCompletionSource SecondStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource<ServiceResponse> Finish { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _calls;
+
+        public Task<ICliRequestClient> ConnectAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<ICliRequestClient>(this);
+
+        public Task<ServiceResponse> SendAsync(ServiceRequest request, CancellationToken cancellationToken)
+        {
+            if (++_calls == 1)
+                return Task.FromResult(new ServiceResponse { Success = true, Result = """{"message":"pong"}""" });
+            SecondStarted.SetResult();
+            return Finish.Task;
+        }
+
+        public void Dispose() { }
+    }
 
     [Fact]
     public async Task Batch_MultipleCommands_ExecutesAllSequentially()
@@ -111,8 +183,8 @@ public sealed class BatchCommandTests : IDisposable
         Assert.Equal(2, results[2].GetProperty("index").GetInt32());
 
         // Verify echo results
-        Assert.Equal("hello", results[1].GetProperty("result").GetProperty("message").GetString());
-        Assert.Equal("world", results[2].GetProperty("result").GetProperty("message").GetString());
+        Assert.Equal("hello", results[1].GetProperty("data").GetProperty("message").GetString());
+        Assert.Equal("world", results[2].GetProperty("data").GetProperty("message").GetString());
     }
 
     // ============================================
@@ -252,7 +324,7 @@ public sealed class BatchCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Batch_ErrorResult_HasOnlyErrorMessageField()
+    public async Task Batch_ErrorResult_HasStructuredErrorWithoutOldMessageField()
     {
         var inputFile = WriteBatchFile("""
             [
@@ -264,9 +336,9 @@ public sealed class BatchCommandTests : IDisposable
 
         Assert.Single(results);
         Assert.False(results[0].GetProperty("success").GetBoolean());
-        Assert.True(results[0].TryGetProperty("errorMessage", out var errorMessage));
+        Assert.True(results[0].GetProperty("error").TryGetProperty("message", out var errorMessage));
         Assert.False(string.IsNullOrWhiteSpace(errorMessage.GetString()));
-        Assert.False(results[0].TryGetProperty("error", out _));
+        Assert.False(results[0].TryGetProperty("errorMessage", out _));
         Assert.False(results[0].TryGetProperty("partialState", out _));
     }
 
@@ -286,7 +358,7 @@ public sealed class BatchCommandTests : IDisposable
 
         Assert.Equal(2, results.Count);
         Assert.True(results[0].GetProperty("success").GetBoolean());
-        Assert.Equal("ndjson", results[1].GetProperty("result").GetProperty("message").GetString());
+        Assert.Equal("ndjson", results[1].GetProperty("data").GetProperty("message").GetString());
     }
 
     // ============================================

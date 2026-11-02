@@ -74,7 +74,7 @@ chart_read(action: 'read', workbook_session_id: sessionId, chart_name: 'MonthlyS
 ```
 
 ```cli
-excelcli -q chart create-from-range --session $sessionId --sheet Sheet1 --source-range-address A1:C6 --chart-type ColumnClustered --chart-name MonthlySales --target-range A8:H22
+excelcli -q chart create-from-range --session $sessionId --sheet-name Sheet1 --source-range-address A1:C6 --chart-type ColumnClustered --chart-name MonthlySales --target-range A8:H22
 excelcli -q chartconfig set-title --session $sessionId --chart-name MonthlySales --title 'Monthly sales'
 excelcli -q chart read --session $sessionId --chart-name MonthlySales
 ```
@@ -89,11 +89,108 @@ Creation, move, and fit operations warn about overlapping data/charts. An
 Use a [screenshot](screenshot.md) when appearance matters and an interactive
 desktop is available; otherwise inspect bounds and state the visual limitation.
 
+## Chart text formatting
+
+Use `chartconfig set-text-format` or MCP `chart_config` with action
+`set-text-format` to change only the supplied font settings. This works on
+ordinary charts and regular or Data Model PivotCharts. Read the actual settings
+with `chartconfig get-text-format` or `chart_config_read` action
+`get-text-format`.
+
+Select `ChartArea`, `Title`, `CategoryAxis`, `ValueAxis`, `DataLabels`, `Legend`,
+or `AxisTitle`. `ChartArea` uses Excel's whole-chart text setting; individually
+formatted text can still differ. The other choices affect only that element.
+Missing titles, axes, legends, or data labels cause an error; formatting does
+not create or show them.
+
+For example, set an existing title's font and check it:
+
+```mcp
+chart_config(action: 'set-text-format', workbook_session_id: sessionId, chart_name: 'MonthlySales', element: 'Title', font_name: 'Arial', font_size: 16, bold: true, color: '#243746')
+chart_config_read(action: 'get-text-format', workbook_session_id: sessionId, chart_name: 'MonthlySales', element: 'Title')
+```
+
+```cli
+excelcli -q chartconfig set-text-format --session $sessionId --chart-name MonthlySales --element Title --font-name Arial --font-size 16 --bold true --color '#243746'
+excelcli -q chartconfig get-text-format --session $sessionId --chart-name MonthlySales --element Title
+```
+
+Omitted font settings are preserved. Explicit `bold: false` / `--bold false`
+and `italic: false` / `--italic false` turn those settings off. Sizes are in
+points from 1 through 409; colours use `#RRGGBB`. Excel's returned font name is
+the actual native value and may be a theme-font token.
+
+For `AxisTitle`, supply `axis` / `--axis`. Category/value tick labels default
+to primary axes; use the matching `CategorySecondary` or `ValueSecondary`
+selector for secondary axes. For `DataLabels`, use `series_index` /
+`--series-index` to select one series. Omitted or zero selects all series, and
+every selected series must already have labels. Batch JSON uses `fontName`,
+`fontSize`, and `seriesIndex`; nested result fields remain camelCase.
+
+The result's `formats` list contains one entry per target, including one per
+series for all-series data labels. Mixed properties are null and listed in
+`mixedFields`, not reported as zero, false, or a guessed font. A failed write
+can leave earlier settings applied: inspect the reported target and read the
+current state before deciding what to change next. Formatting does not change
+source data or promise that future PivotTable refreshes retain every override.
+
+## Title placement and chart lines
+
+`set-title` accepts `left` / `--left` and `top` / `--top` in points from the
+chart's own edges, not the worksheet. Supplying either selects custom title
+placement. `alignment` / `--alignment` aligns text within the title; it does
+not move the title box. Omitted layout settings are preserved. An empty title
+hides it and cannot be combined with position or alignment settings.
+
+Use `set-axis-format` to change an existing axis line's colour, weight, or
+visibility without changing its tick labels or gridlines. Select `Category`
+or `Value` for primary axes and `CategorySecondary` or `ValueSecondary` for
+secondary axes, matching the other axis commands. The axis must already exist.
+Omitted settings are preserved, including visibility when only colour or
+weight is supplied.
+
+For example, place a title at the top left, lighten the value axis, and hide
+the chart border:
+
+```mcp
+chart_config(action: 'set-title', workbook_session_id: sessionId, chart_name: 'MonthlySales', title: 'Monthly sales', left: 16, top: 12, alignment: 'Left')
+chart_config(action: 'set-axis-format', workbook_session_id: sessionId, chart_name: 'MonthlySales', axis: 'Value', line_color: '#D0D0D0', line_weight: 1, line_visible: true)
+chart_config(action: 'set-area-format', workbook_session_id: sessionId, chart_name: 'MonthlySales', area: 'Chart', line_visible: false)
+```
+
+```cli
+excelcli -q chartconfig set-title --session $sessionId --chart-name MonthlySales --title 'Monthly sales' --left 16 --top 12 --alignment Left
+excelcli -q chartconfig set-axis-format --session $sessionId --chart-name MonthlySales --axis Value --line-color '#D0D0D0' --line-weight 1 --line-visible true
+excelcli -q chartconfig set-area-format --session $sessionId --chart-name MonthlySales --area Chart --line-visible false
+```
+
+Line weights must be finite and positive. Hide a line with `line_visible: false`
+/ `--line-visible false`, not a zero weight. On `set-area-format`, this also
+works for `area: 'Plot'` / `--area Plot`; explicit false takes precedence over
+supplied border colour or weight. Without an explicit visibility setting,
+supplying area border colour or weight continues to show the border.
+Batch JSON uses `lineColor`, `lineWeight`, and `lineVisible`.
+
+These settings also work on PivotCharts. Excel errors remain failures and can
+leave earlier changes applied; no automatic undo is performed.
+
 ## Percentage data labels
+
+To remove all data labels from the selected series, explicitly set all five
+show options to false: `show_value`, `show_percentage`, `show_series_name`,
+`show_category_name`, and `show_bubble_size` in MCP; `--show-value`,
+`--show-percentage`, `--show-series-name`, `--show-category-name`, and
+`--show-bubble-size` in CLI. Batch JSON uses `showValue`, `showPercentage`,
+`showSeriesName`, `showCategoryName`, and `showBubbleSize`.
+This also succeeds when labels are already absent. Omit `series_index` /
+`--series-index` (batch `seriesIndex`), or use 0, to select all series.
+A positive index changes only that series. Omitted show options preserve their
+settings; disabling one component does not remove other enabled components.
 
 Percentage data labels are meaningful for pie and doughnut charts. Excel can reject
 the setting on other chart types; this is reported as an error, not a successful
-no-op. Label settings are applied in sequence, so earlier settings can already
+no-op. Removing all labels does not set percentage-label properties.
+Other label settings are applied in sequence, so earlier settings can already
 have changed when Excel rejects a later setting.
 
 ## Selected series, error bars and points
@@ -144,12 +241,12 @@ chart(action: 'create-from-range', workbook_session_id: sessionId, sheet_name: '
 ```
 
 ```cli
-excelcli -q range set-values --session $sessionId --sheet Details --range F1:G1 --values '[["Product","Revenue"]]'
-excelcli -q range set-formulas --session $sessionId --sheet Details --range F2:G4 --formulas '[["=A2&\" - \"&LEFT(B2,18)","=C2"],["=A3&\" - \"&LEFT(B3,18)","=C3"],["=A4&\" - \"&LEFT(B4,18)","=C4"]]'
-excelcli -q calculationmode calculate --session $sessionId --scope Sheet --sheet Details
-excelcli -q range get-formulas --session $sessionId --sheet Details --range F2:G4
-excelcli -q range get-values --session $sessionId --sheet Details --range F1:G4
-excelcli -q chart create-from-range --session $sessionId --sheet Details --source-range-address F1:G4 --chart-type BarClustered --chart-name ProductRevenue
+excelcli -q range set-values --session $sessionId --sheet-name Details --range-address F1:G1 --values '[["Product","Revenue"]]'
+excelcli -q range set-formulas --session $sessionId --sheet-name Details --range-address F2:G4 --formulas '[["=A2&\" - \"&LEFT(B2,18)","=C2"],["=A3&\" - \"&LEFT(B3,18)","=C3"],["=A4&\" - \"&LEFT(B4,18)","=C4"]]'
+excelcli -q calculationmode calculate --session $sessionId --scope Sheet --sheet-name Details
+excelcli -q range get-formulas --session $sessionId --sheet-name Details --range-address F2:G4
+excelcli -q range get-values --session $sessionId --sheet-name Details --range-address F1:G4
+excelcli -q chart create-from-range --session $sessionId --sheet-name Details --source-range-address F1:G4 --chart-type BarClustered --chart-name ProductRevenue
 ```
 
 Check each result before continuing, including label uniqueness and unchanged
@@ -181,12 +278,12 @@ chart(action: 'create-from-range', workbook_session_id: sessionId, sheet_name: '
 ```
 
 ```cli
-excelcli -q range set-values --session $sessionId --sheet Summary --range A1:B3 --values '[["Month","Revenue"],["2025-12-01",null],["2026-01-01",null]]'
-excelcli -q range set-formulas --session $sessionId --sheet Summary --range B2:B3 --formulas '[["=SUMIFS(Transactions[Revenue],Transactions[Date],\">=\"&A2,Transactions[Date],\"<\"&EDATE(A2,1))"],["=SUMIFS(Transactions[Revenue],Transactions[Date],\">=\"&A3,Transactions[Date],\"<\"&EDATE(A3,1))"]]'
-excelcli -q range set-number-format --session $sessionId --sheet Summary --range A2:A3 --format-code 'mmm yyyy'
-excelcli -q calculationmode calculate --session $sessionId --scope Sheet --sheet Summary
-excelcli -q range get-values --session $sessionId --sheet Summary --range A1:B3
-excelcli -q chart create-from-range --session $sessionId --sheet Summary --source-range-address A1:B3 --chart-type Line --chart-name MonthlyRevenue
+excelcli -q range set-values --session $sessionId --sheet-name Summary --range-address A1:B3 --values '[["Month","Revenue"],["2025-12-01",null],["2026-01-01",null]]'
+excelcli -q range set-formulas --session $sessionId --sheet-name Summary --range-address B2:B3 --formulas '[["=SUMIFS(Transactions[Revenue],Transactions[Date],\">=\"&A2,Transactions[Date],\"<\"&EDATE(A2,1))"],["=SUMIFS(Transactions[Revenue],Transactions[Date],\">=\"&A3,Transactions[Date],\"<\"&EDATE(A3,1))"]]'
+excelcli -q range set-number-format --session $sessionId --sheet-name Summary --range-address A2:A3 --format-code 'mmm yyyy'
+excelcli -q calculationmode calculate --session $sessionId --scope Sheet --sheet-name Summary
+excelcli -q range get-values --session $sessionId --sheet-name Summary --range-address A1:B3
+excelcli -q chart create-from-range --session $sessionId --sheet-name Summary --source-range-address A1:B3 --chart-type Line --chart-name MonthlyRevenue
 ```
 
 Reconcile representative monthly totals with the underlying transactions. For
@@ -213,7 +310,7 @@ excelcli -q pivottablefield group-by-date --session $sessionId --pivot-table-nam
 excelcli -q pivottablefield list-fields --session $sessionId --pivot-table-name RevenuePivot
 excelcli -q pivottable refresh --session $sessionId --pivot-table-name RevenuePivot
 excelcli -q pivottablecalc get-data --session $sessionId --pivot-table-name RevenuePivot
-excelcli -q chart create-from-pivottable --session $sessionId --sheet Summary --pivot-table-name RevenuePivot --chart-type Line --chart-name InteractiveRevenue
+excelcli -q chart create-from-pivottable --session $sessionId --sheet-name Summary --pivot-table-name RevenuePivot --chart-type Line --chart-name InteractiveRevenue
 ```
 
 Inspect the generated fields rather than assuming their localized names. Check

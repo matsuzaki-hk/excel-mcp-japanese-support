@@ -1,5 +1,4 @@
 using System.IO.Pipelines;
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -27,6 +26,8 @@ public class Program
         CancellationToken runToken = default,
         Func<ServiceBridge.IServiceBridgeBackend>? serviceFactory = null)
     {
+        if (Service.ExcelController.IsWorkerMode(args))
+            return await Service.ExcelController.RunWorkerAsync(args);
         // Handle --help and --version flags for easy verification
         if (args.Length > 0)
         {
@@ -76,7 +77,7 @@ public class Program
         ConfigureStdioLogging(builder.Logging);
 
         builder.Services.AddSingleton(services => new ServiceBridge.ServiceBridge(
-            serviceFactory ?? (() => new ServiceBridge.ExcelMcpServiceBackend(new Service.ExcelMcpService())),
+            serviceFactory ?? (() => new ServiceBridge.ExcelControllerBackend(new Service.ExcelController())),
             services.GetRequiredService<ILogger<ServiceBridge.ServiceBridge>>()));
 
         // Configure MCP Server - use test transport if configured, otherwise stdio
@@ -148,10 +149,6 @@ public class Program
         // Note: Update checks are handled by ExcelMCP Service (shown via Windows notification)
         // to avoid duplicate notifications when running in unified package mode
 
-        var stdinMonitor = testInputPipe == null
-            ? StdinPipeMonitor.Start(host.Services.GetRequiredService<IHostApplicationLifetime>())
-            : null;
-
         try
         {
             await host.StartAsync(runToken);
@@ -177,7 +174,6 @@ public class Program
 #pragma warning restore CA1031
         finally
         {
-            stdinMonitor?.Dispose();
             ExcelMcpTelemetry.SignalExit();
         }
     }
@@ -286,73 +282,5 @@ public class Program
             Console.WriteLine($"Update available: {currentVersion} -> {latestVersion}");
             Console.WriteLine("Download: https://github.com/sbroenne/mcp-server-excel/releases/latest");
         }
-    }
-}
-
-/// <summary>
-/// Monitors the stdin pipe to detect when the parent MCP client process exits.
-///
-/// Lifecycle: MCP stdio transport keeps this server alive via stdin/stdout pipes.
-/// When the parent process exits cleanly, the MCP SDK detects the closed pipe and
-/// shuts down the host. However, if the parent crashes or is killed (e.g., Task
-/// Manager, SIGKILL), the SDK may not notice. This monitor polls the stdin handle
-/// to detect the broken pipe and trigger graceful shutdown, ensuring COM handles
-/// are released and the Excel process is not orphaned.
-///
-/// Only activates when stdin is a named pipe (the normal stdio MCP transport case).
-/// Terminal, debugger, test harness, and file-redirection launches are left alone --
-/// they shut down through their own normal mechanisms.
-/// </summary>
-internal static class StdinPipeMonitor
-{
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool PeekNamedPipe(
-        IntPtr hNamedPipe, IntPtr lpBuffer, uint nBufferSize,
-        IntPtr lpBytesRead, out uint lpTotalBytesAvail,
-        out uint lpBytesLeftThisMessage);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GetStdHandle(int nStdHandle);
-
-    [DllImport("kernel32.dll")]
-    private static extern uint GetFileType(IntPtr hFile);
-
-    private const int StdInputHandle = -10;
-    private const uint FileTypePipe = 0x0003;
-    internal const int ErrorBrokenPipe = 109;   // ERROR_BROKEN_PIPE
-    internal const int ErrorNoData = 232;       // ERROR_NO_DATA (write end closed)
-
-    /// <summary>
-    /// Starts the stdin pipe monitor. Returns null if stdin is not a pipe
-    /// (terminal, debugger, file redirection) since those cases don't need
-    /// broken-pipe detection.
-    /// </summary>
-    public static Timer? Start(IHostApplicationLifetime lifetime) =>
-        Start(lifetime, GetStdHandle(StdInputHandle));
-
-    internal static Timer? Start(IHostApplicationLifetime lifetime, IntPtr handle)
-    {
-        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
-            return null;
-
-        if (GetFileType(handle) != FileTypePipe)
-            return null;
-
-        return StartCore(lifetime, handle);
-    }
-
-    internal static Timer StartCore(IHostApplicationLifetime lifetime, IntPtr pipeHandle,
-        TimeSpan? pollInterval = null)
-    {
-        var interval = pollInterval ?? TimeSpan.FromSeconds(5);
-        return new Timer(_ =>
-        {
-            if (!PeekNamedPipe(pipeHandle, IntPtr.Zero, 0, IntPtr.Zero, out uint _, out uint _))
-            {
-                var error = Marshal.GetLastWin32Error();
-                if (error is ErrorBrokenPipe or ErrorNoData)
-                    lifetime.StopApplication();
-            }
-        }, null, interval, interval);
     }
 }

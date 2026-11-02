@@ -140,15 +140,15 @@ public sealed class GeneratedActionContractCliTests : IDisposable
         "timeout",
         "2147483")]
     [InlineData(
-        "chart create-from-range --session missing-session --sheet Model --source-range-address A1:B2 --chart-type 999",
+        "chart create-from-range --session missing-session --sheet-name Model --source-range-address A1:B2 --chart-type 999",
         "chartType",
         "999")]
     [InlineData(
-        "chart create-from-range --session missing-session --sheet Model --source-range-address A1:B2 --chart-type 51",
+        "chart create-from-range --session missing-session --sheet-name Model --source-range-address A1:B2 --chart-type 51",
         "chartType",
         "51")]
     [InlineData(
-        "chart create-from-range --session missing-session --sheet Model --source-range-address A1:B2",
+        "chart create-from-range --session missing-session --sheet-name Model --source-range-address A1:B2",
         "chartType",
         "required")]
     public async Task DirectCommand_RejectsInvalidGeneratedContractBeforeDaemonDispatch(
@@ -222,7 +222,7 @@ public sealed class GeneratedActionContractCliTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         using var output = JsonDocument.Parse(result.Stdout.Trim());
-        var error = output.RootElement.GetProperty("errorMessage").GetString();
+        var error = output.RootElement.GetProperty("error").GetProperty("message").GetString();
         Assert.Contains(expectedParameter, error, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(expectedDetail, error, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("session", error, StringComparison.OrdinalIgnoreCase);
@@ -301,7 +301,7 @@ public sealed class GeneratedActionContractCliTests : IDisposable
             Assert.Equal(index, output.RootElement.GetProperty("index").GetInt32());
             Assert.Equal("powerquery.evaluate", output.RootElement.GetProperty("command").GetString());
             Assert.False(output.RootElement.GetProperty("success").GetBoolean());
-            Assert.Contains("not found", output.RootElement.GetProperty("errorMessage").GetString(), StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("not found", output.RootElement.GetProperty("error").GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -340,7 +340,7 @@ public sealed class GeneratedActionContractCliTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         using var output = JsonDocument.Parse(result.Stdout.Trim());
-        var error = output.RootElement.GetProperty("errorMessage").GetString();
+        var error = output.RootElement.GetProperty("error").GetProperty("message").GetString();
         Assert.Contains("session", error, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Invalid value", error, StringComparison.OrdinalIgnoreCase);
     }
@@ -350,6 +350,9 @@ public sealed class GeneratedActionContractCliTests : IDisposable
     [InlineData("""{"command":"worksheetstyle.get-tab-color","sessionId":"missing-session","args":{"sheetName":"Sheet1"}}""")]
     [InlineData("""{"command":"datamodelrelationship.list-relationships","sessionId":"missing-session","args":{}}""")]
     [InlineData("""{"command":"vba.run","sessionId":"missing-session","args":{"procedureName":"Main","timeoutSeconds":60}}""")]
+    [InlineData("""{"command":"chartconfig.set-title","sessionId":"missing-session","args":{"chartName":"Sales","title":"Revenue","left":16,"top":12,"alignment":"Left"}}""")]
+    [InlineData("""{"command":"chartconfig.set-axis-format","sessionId":"missing-session","args":{"chartName":"Sales","axis":"ValueSecondary","lineColor":"#D0D0D0","lineWeight":1.5,"lineVisible":false}}""")]
+    [InlineData("""{"command":"chartconfig.set-area-format","sessionId":"missing-session","args":{"chartName":"Sales","area":"Plot","lineVisible":false}}""")]
     public async Task RawBatch_AcceptsCliGroupAndParameterNames(string entryJson)
     {
         var inputPath = Path.Join(_tempDirectory, $"{Guid.NewGuid():N}.json");
@@ -360,7 +363,7 @@ public sealed class GeneratedActionContractCliTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         using var output = JsonDocument.Parse(result.Stdout.Trim());
-        var error = output.RootElement.GetProperty("errorMessage").GetString();
+        var error = output.RootElement.GetProperty("error").GetProperty("message").GetString();
         Assert.Contains("missing-session", error, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Unknown", error, StringComparison.OrdinalIgnoreCase);
     }
@@ -381,7 +384,7 @@ public sealed class GeneratedActionContractCliTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         using var output = JsonDocument.Parse(result.Stdout.Trim());
-        var error = output.RootElement.GetProperty("errorMessage").GetString();
+        var error = output.RootElement.GetProperty("error").GetProperty("message").GetString();
         Assert.Contains(command.Split('.')[0], error, StringComparison.Ordinal);
         Assert.Contains(expectedValidGroup, error, StringComparison.Ordinal);
     }

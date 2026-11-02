@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ModelContextProtocol.Protocol;
+using Sbroenne.ExcelMcp.Core.Models;
 using Sbroenne.ExcelMcp.Core.Utilities;
 using Sbroenne.ExcelMcp.McpServer.Telemetry;
 using Sbroenne.ExcelMcp.Service;
@@ -28,32 +29,38 @@ public static class ExcelToolsBase
         object? args,
         CancellationToken cancellationToken)
     {
-        var response = await bridge.SendAsync(command, sessionId, args, cancellationToken: cancellationToken);
-        return SerializeServiceResponse(response);
+        var result = await ForwardResultToServiceAsync(bridge, command, sessionId, args, cancellationToken);
+        return result.ToToolJson();
+    }
+
+    internal static async Task<ResultJson> ForwardResultToServiceAsync(
+        ServiceBridge.ServiceBridge bridge,
+        string command,
+        string? sessionId,
+        object? args,
+        CancellationToken cancellationToken)
+    {
+        var response = await bridge.SendAsync(command, sessionId,
+            args, cancellationToken: cancellationToken);
+        return ReadServiceResponse(response, command);
+    }
+
+    internal static ResultJson ReadServiceResponse(ServiceResponse response, string command)
+    {
+        var contract = ServiceRegistry.GetResultContract(command);
+        if (response.Success && response.Result is null && contract is { ReadOnly: true })
+            throw new InvalidOperationException($"Read operation '{command}' returned no result.");
+        return ResultJson.Read(response.Result, command, response.Success, response.ErrorMessage,
+            response.ErrorCategory, response.SessionId, response.ExceptionType, response.HResult,
+            response.InnerError, response.PartialState, contract);
     }
 
     internal static string SerializeServiceResponse(ServiceResponse response, string? filePath = null)
     {
-        if (response.Success)
-            return response.Result ?? throw new InvalidOperationException("Service operation returned no result.");
-
-        var errorMessage = response.ErrorMessage ?? $"Command '{response.Command}' failed.";
-        return JsonSerializer.Serialize(new
-        {
-            success = false,
-            errorMessage,
-            errorCategory = response.ErrorCategory,
-            command = response.Command,
-            workbook_session_id = response.SessionId,
-            exceptionType = response.ExceptionType,
-            hresult = response.HResult,
-            innerError = response.InnerError,
-            partialState = response.PartialState is null
-                ? (JsonElement?)null
-                : JsonSerializer.Deserialize<JsonElement>(response.PartialState),
-            filePath,
-            isError = true
-        }, JsonOptions);
+        var result = ReadServiceResponse(response, response.Command ?? "file");
+        if (filePath is not null && result.Error is not null)
+            result.Error["filePath"] = filePath;
+        return result.ToToolJson();
     }
 
     public static Task<CallToolResult> ExecuteToolActionAsync(
@@ -65,10 +72,41 @@ public static class ExcelToolsBase
         ExecuteToolActionAsync(toolName, actionName, operation, cancellationToken,
             ExcelMcpTelemetry.TrackToolInvocation, resultFactory);
 
-    internal static async Task<CallToolResult> ExecuteToolActionAsync(
+    internal static Task<CallToolResult> ExecuteToolActionAsync(
         string toolName,
         string actionName,
         Func<Task<string>> operation,
+        CancellationToken cancellationToken,
+        Action<string, string, long, ToolInvocationResult> trackInvocation,
+        Func<string, CallToolResult>? resultFactory = null) =>
+        ExecuteToolActionCoreAsync(toolName, actionName, operation, json =>
+        {
+            var command = ServiceRegistry.GetMcpCommand(toolName, actionName);
+            return ResultJson.Read(json, command, contract: ServiceRegistry.GetResultContract(command));
+        }, cancellationToken, trackInvocation, resultFactory);
+
+    internal static Task<CallToolResult> ExecuteToolActionAsync(
+        string toolName,
+        string actionName,
+        Func<Task<ResultJson>> operation,
+        CancellationToken cancellationToken) =>
+        ExecuteToolActionAsync(toolName, actionName, operation, cancellationToken,
+            ExcelMcpTelemetry.TrackToolInvocation);
+
+    internal static Task<CallToolResult> ExecuteToolActionAsync(
+        string toolName,
+        string actionName,
+        Func<Task<ResultJson>> operation,
+        CancellationToken cancellationToken,
+        Action<string, string, long, ToolInvocationResult> trackInvocation) =>
+        ExecuteToolActionCoreAsync(toolName, actionName, operation, outcome => outcome,
+            cancellationToken, trackInvocation);
+
+    private static async Task<CallToolResult> ExecuteToolActionCoreAsync<T>(
+        string toolName,
+        string actionName,
+        Func<Task<T>> operation,
+        Func<T, ResultJson> readOutcome,
         CancellationToken cancellationToken,
         Action<string, string, long, ToolInvocationResult> trackInvocation,
         Func<string, CallToolResult>? resultFactory = null)
@@ -78,12 +116,14 @@ public static class ExcelToolsBase
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var json = await operation();
+            var response = await operation();
             cancellationToken.ThrowIfCancellationRequested();
+            var outcome = readOutcome(response);
+            var json = outcome.ToToolJson();
             invocation = ClassifyToolResponse(toolName, actionName, json);
             var result = resultFactory?.Invoke(json)
-                ?? CreateToolResult(json, invocation.Outcome == ToolInvocationOutcome.Failed);
-            if (result.IsError is true && invocation.Outcome != ToolInvocationOutcome.Failed)
+                ?? CreateToolResult(json, !outcome.Success);
+            if (result.IsError is true && invocation.Outcome == ToolInvocationOutcome.Succeeded)
                 invocation = new(ToolInvocationOutcome.Failed, ToolFailureClass.Unclassified);
             return result;
         }
@@ -114,9 +154,7 @@ public static class ExcelToolsBase
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        var failed = root.ValueKind == JsonValueKind.Object &&
-            ((root.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.False) ||
-             (root.TryGetProperty("isError", out var error) && error.ValueKind == JsonValueKind.True));
+        var failed = !ResultJson.Read(json, "tool").Success;
         return new CallToolResult
         {
             IsError = isError ?? failed,
@@ -201,15 +239,8 @@ public static class ExcelToolsBase
         var errorMessage = path is null
             ? $"{actionName} failed: {ex.Message}"
             : $"{actionName} failed for '{path}': {ex.Message}";
-        return JsonSerializer.Serialize(new
-        {
-            success = false,
-            errorMessage,
-            errorCategory = OperationFailureClassifier.Classify(ex),
-            isError = true,
-            exceptionType = ex.GetType().Name,
-            hresult = OperationFailureClassifier.GetComHResult(ex),
-            innerError = ex.InnerException?.Message
-        }, JsonOptions);
+        return ResultJson.Read(null, actionName, delivered: false, message: errorMessage,
+            category: OperationFailureClassifier.Classify(ex), exceptionType: ex.GetType().Name,
+            hresult: OperationFailureClassifier.GetComHResult(ex), innerError: ex.InnerException?.Message).ToToolJson();
     }
 }

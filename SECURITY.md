@@ -31,14 +31,20 @@ ExcelMcp includes several security measures:
 ### COM Security
 
 - **Controlled Excel Automation**: Excel.Application runs with `Visible=false` and `DisplayAlerts=false`
-- **Resource Cleanup**: Comprehensive COM object disposal and garbage collection
+- **Resource Cleanup**: Explicit release of the Excel objects we use, without forced memory cleanup
 - **No Remote Connections**: Only local Excel automation supported
 
 ### ExcelMcp Service Security
 
 The ExcelMcp Service manages Excel COM automation sessions:
 
-**MCP Server**: The service runs fully **in-process** — no inter-process communication. There is no attack surface beyond the MCP Server process itself.
+**MCP Server and CLI**: Both run Excel commands in separate local worker
+processes, connected through Windows named pipes restricted to the current
+user. Workers check the connecting process against their recorded owner,
+including its process number and start time. Their ownership records are
+stored in a folder restricted to that user. All processes remain in the
+current user's Windows session without elevated permissions. These checks do
+not protect Excel from other software already running under the same account.
 
 **CLI**: The CLI daemon uses a **Windows named pipe** (`excelmcp-cli-{USER_SID}`) for communication between CLI commands and the daemon process:
 

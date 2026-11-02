@@ -40,7 +40,7 @@ manage VBA modules need it too.
 ## Inspect before you run
 
 ```powershell
-$session = (excelcli -q session open C:\books\report.xlsm | ConvertFrom-Json).sessionId
+$session = (excelcli -q session open C:\books\report.xlsm | ConvertFrom-Json).data.sessionId
 
 excelcli -q vba list --session $session
 excelcli -q vba status --session $session
@@ -177,7 +177,7 @@ discards it. If you are adding VBA to an `.xlsx`, save-as `.xlsm` first.
 After running a macro, check the effect rather than trusting a success flag:
 
 ```powershell
-excelcli -q range get-values --session $session --sheet Summary --range A1:D20
+excelcli -q range get-values --session $session --sheet-name Summary --range-address A1:D20
 ```
 
 ## Known gotchas

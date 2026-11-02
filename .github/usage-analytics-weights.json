@@ -118,9 +118,11 @@
         "get-plot-options": "light",
         "get-point-format": "light",
         "get-series-settings": "light",
+        "get-text-format": "light",
         "list-trendlines": "light",
         "remove-series": "medium",
         "set-area-format": "medium",
+        "set-axis-format": "medium",
         "set-axis-number-format": "medium",
         "set-axis-scale": "medium",
         "set-axis-title": "medium",
@@ -136,6 +138,7 @@
         "set-series-format": "medium",
         "set-source-range": "medium",
         "set-style": "medium",
+        "set-text-format": "medium",
         "set-title": "medium",
         "set-trendline": "medium",
         "show-legend": "medium"
@@ -592,6 +595,7 @@
         "set-split": "light",
         "set-state": "light",
         "set-status-bar": "light",
+        "set-view": "light",
         "set-zoom": "light",
         "show": "light",
         "unfreeze-panes": "light"

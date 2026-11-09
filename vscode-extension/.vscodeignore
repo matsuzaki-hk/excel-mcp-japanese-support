@@ -22,7 +22,6 @@ tsconfig.json
 tsconfig.test.json
 .vitest/**
 coverage/**
-skills/**
 node_modules/**
 *.vsix
 .gitignore

@@ -10,15 +10,17 @@ const { Minimatch } = vsceRequire('minimatch') as typeof import('minimatch');
 
 const included = [
 	'package.json', 'README.md', 'LICENSE', 'icon.png',
-	'bin/Sbroenne.ExcelMcp.McpServer.exe', 'out/extension.js', 'out/prerequisites.js'
+	'bin/Sbroenne.ExcelMcp.McpServer.exe', 'out/extension.js', 'out/prerequisites.js',
+	// Fork: bundled chat skills ship inside the VSIX.
+	'skills/excel-mcp-ja/SKILL.md',
+	'skills/excel-mcp-report-formatting/SKILL.md',
+	'skills/excel-mcp-report-formatting/VERSION',
+	'skills/excel-mcp-report-formatting/references/formatting.md'
 ];
 const excluded = [
 	'src/extension.ts', 'out/extension.js.map', 'out/tests/fixture.js',
 	'tests/extension.test.ts', 'node_modules/minimatch/index.js',
-	'.vscode/settings.json', 'tsconfig.json', 'vitest.config.mts', 'old.vsix',
-	'skills/excel-mcp-report-formatting/SKILL.md',
-	'skills/excel-mcp-report-formatting/VERSION',
-	'skills/excel-mcp-report-formatting/references/formatting.md'
+	'.vscode/settings.json', 'tsconfig.json', 'vitest.config.mts', 'old.vsix'
 ];
 
 async function inspectFixture(extraIgnore = '', extraFiles: string[] = []) {
@@ -45,14 +47,12 @@ describe('VSCE packaging file filters', () => {
 		const files = await inspectFixture();
 		expect(files).toHaveLength(included.length);
 		expect(files).toEqual(expect.arrayContaining(included));
-		expect(files.some(file => file.startsWith('skills/'))).toBe(false);
 	});
 
 	it('preserves an explicit negation without including other source maps', async () => {
 		const files = await inspectFixture('\n!out/retained.js.map\n', ['out/retained.js.map']);
 		expect(files).toHaveLength(included.length + 1);
 		expect(files).toEqual(expect.arrayContaining([...included, 'out/retained.js.map']));
-		expect(files.some(file => file.startsWith('skills/'))).toBe(false);
 	});
 });
 

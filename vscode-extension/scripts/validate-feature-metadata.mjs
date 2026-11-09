@@ -54,6 +54,19 @@ for (const provider of providers) {
   );
 }
 
-assert.equal(manifest.contributes?.chatSkills, undefined, 'The extension must not bundle chat skills.');
+const chatSkills = manifest.contributes?.chatSkills ?? [];
+assert.ok(chatSkills.length > 0, 'The fork extension must contribute bundled chat skills.');
+for (const skill of chatSkills) {
+  assertText(skill.name, 'Every chat skill must have a name.');
+  assertText(skill.description, `Chat skill '${skill.name}' must have a description.`);
+  assertText(skill.path, `Chat skill '${skill.name}' path must be declared.`);
+  assert.ok(skill.path.endsWith('SKILL.md'), `Chat skill '${skill.name}' must point at a SKILL.md file.`);
+  // Fork: skills are staged next to the extension during packaging and live in
+  // the repository skills/ tree in the source checkout.
+  const staged = resolve(extensionRoot, skill.path);
+  const source = resolve(extensionRoot, '..', skill.path.replace(/^\.\//, ''));
+  assert.ok(existsSync(staged) || existsSync(source),
+    `Chat skill '${skill.name}' file does not exist: ${skill.path}`);
+}
 
 console.log('VS Code extension Marketplace and feature metadata is complete.');

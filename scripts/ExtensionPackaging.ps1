@@ -1,7 +1,7 @@
 #Requires -Version 7.4
 
 function Initialize-ExtensionPackage {
-    param([string]$RepoRoot, [string]$Version, [string]$SkillsDirectory, [switch]$SkipExtensionTests)
+    param([string]$RepoRoot, [string]$Version, [switch]$SkipExtensionTests)
     $stage = Join-Path ([IO.Path]::GetTempPath()) "ExcelMcpextension-$([Guid]::NewGuid().ToString('N'))"
     [IO.Directory]::CreateDirectory($stage) | Out-Null
     try {
@@ -10,14 +10,13 @@ function Initialize-ExtensionPackage {
             if ($name -in @('node_modules', 'bin', 'out', 'skills') -or [IO.Path]::GetExtension($entry) -eq '.vsix') { continue }
             Copy-PackageItem $entry (Join-Path $stage $name)
         }
-        $skill = Join-Path $stage 'skills\excel-mcp-report-formatting'
-        Copy-PackageItem (Join-Path $SkillsDirectory 'excel-mcp-report-formatting') $skill
-        [IO.File]::WriteAllText((Join-Path $skill 'VERSION'), $Version)
-        # Fork: the Japanese skill is source-managed and is bundled alongside the
-        # generated report-formatting skill.
-        $jaSkill = Join-Path $stage 'skills\excel-mcp-ja'
-        Copy-PackageItem (Join-Path $RepoRoot 'skills\excel-mcp-ja') $jaSkill
-        [IO.File]::WriteAllText((Join-Path $jaSkill 'VERSION'), $Version)
+        # Fork: bundle the vendored report-formatting skill and the
+        # source-managed Japanese skill from skills\.
+        foreach ($skillName in 'excel-mcp-report-formatting', 'excel-mcp-ja') {
+            $skill = Join-Path $stage "skills\$skillName"
+            Copy-PackageItem (Join-Path $RepoRoot "skills\$skillName") $skill
+            [IO.File]::WriteAllText((Join-Path $skill 'VERSION'), $Version)
+        }
         Copy-PackageItem (Join-Path $RepoRoot 'CHANGELOG.md') (Join-Path $stage 'CHANGELOG.md')
         $path = Join-Path $stage 'package.json'
         $manifest = Read-PackageJson $path

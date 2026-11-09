@@ -602,6 +602,75 @@ public sealed class InProcessCliCommandTests
     }
 
     [Theory]
+    [InlineData("range")]
+    [InlineData("chart")]
+    [InlineData("calculationmode")]
+    public async Task ListActions_EntryPointListsExactGeneratedActionsWithoutConnecting(string command)
+    {
+        var factory = new RecordingClientFactory();
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var exitCode = await Program.RunAsync(
+            ["list-actions", command], CreateRuntime(factory, output, error));
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(factory.Requests);
+        Assert.Equal(0, factory.ConnectionCount);
+        Assert.Empty(error.ToString());
+        using var result = JsonDocument.Parse(output.ToString());
+        Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal("list-actions", result.RootElement.GetProperty("command").GetString());
+        var data = result.RootElement.GetProperty("data");
+        Assert.Equal(command, data.GetProperty("command").GetString());
+        Assert.Equal(
+            _CliCategoryMetadata.ValidActionsByCommand[command].Order(StringComparer.OrdinalIgnoreCase),
+            data.GetProperty("actions").EnumerateArray().Select(value => value.GetString()));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ListActions_EntryPointIncludesEverySessionAction(bool allCommands)
+    {
+        var factory = new RecordingClientFactory();
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var exitCode = await Program.RunAsync(
+            allCommands ? ["list-actions"] : ["list-actions", "session"],
+            CreateRuntime(factory, output, error));
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(factory.Requests);
+        Assert.Equal(0, factory.ConnectionCount);
+        Assert.Empty(error.ToString());
+        using var result = JsonDocument.Parse(output.ToString());
+        Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+        var data = result.RootElement.GetProperty("data");
+        var actions = allCommands ? data.GetProperty("commands").GetProperty("session") : data.GetProperty("actions");
+        Assert.Equal(
+            ["attach", "close", "create", "discover", "enable-connections", "enable-editing",
+                "enable-macros", "list", "notices", "open", "save", "test"],
+            actions.EnumerateArray().Select(value => value.GetString()));
+    }
+
+    [Fact]
+    public async Task ListActions_EntryPointRejectsUnknownCategoryWithoutConnecting()
+    {
+        var factory = new RecordingClientFactory();
+        var output = new StringWriter();
+        var exitCode = await Program.RunAsync(
+            ["list-actions", "unknown"], CreateRuntime(factory, output, new StringWriter()));
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(factory.Requests);
+        Assert.Equal(0, factory.ConnectionCount);
+        using var result = JsonDocument.Parse(output.ToString());
+        Assert.False(result.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal("Unknown command 'unknown'.",
+            result.RootElement.GetProperty("error").GetProperty("message").GetString());
+    }
+
+    [Theory]
     [InlineData(null, 0)]
     [InlineData("range", 0)]
     [InlineData("session", 0)]
@@ -751,12 +820,14 @@ public sealed class InProcessCliCommandTests
                      "group.action", "command", "args", "sessionId", "sheetName", "rangeAddress",
                      "case-sensitive", "JSON array", "one command per line", "--input -",
                      "session.open/create/attach", "--stop-on-error", "default: continue",
-                     "earlier changes", "index", "$LASTEXITCODE", "stderr", "expected",
+                     "Individual commands can save or discard edits", "index", "$LASTEXITCODE", "stderr", "expected",
+                     "reported unknown completion always stop",
                      "excelcli.exe batch", "range.set-values"
                  })
         {
             Assert.Contains(expected, text, StringComparison.Ordinal);
         }
+        Assert.DoesNotContain("earlier changes remain", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1436,6 +1507,7 @@ public sealed class InProcessCliCommandTests
         Assert.Equal(0, exitCode);
         Assert.Contains("USAGE:", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("session", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("list-actions", output.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, error.ToString());
     }
 
@@ -1647,6 +1719,61 @@ public sealed class InProcessCliCommandTests
         {
             Assert.True(second.RootElement.GetProperty("success").GetBoolean());
         }
+    }
+
+    [Theory]
+    [InlineData("Timeout", null)]
+    [InlineData("ServiceUnavailable", """{"outcome":"unknown","message":"Work may still be running."}""")]
+    public async Task Batch_UnconfirmedCompletion_StopsBeforeAnotherWorkbook(
+        string category, string? partialState)
+    {
+        var factory = new RecordingClientFactory(
+            new ServiceResponse
+            {
+                Success = false,
+                ErrorCategory = category,
+                ErrorMessage = "Original operation did not confirm completion.",
+                PartialState = partialState
+            },
+            new ServiceResponse { Success = true, Result = """{"success":true,"sheets":[]}""" });
+        var output = new StringWriter();
+        var runtime = CreateRuntime(factory, output, new StringWriter(),
+            """
+            {"command":"sheet.list","sessionId":"first-workbook"}
+            {"command":"sheet.list","sessionId":"second-workbook"}
+            """);
+
+        Assert.Equal(1, await Program.RunAsync(["--quiet", "batch"], runtime));
+        Assert.Equal("first-workbook", Assert.Single(factory.Requests).SessionId);
+        using var line = JsonDocument.Parse(Assert.Single(
+            output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)));
+        Assert.False(line.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(category, line.RootElement.GetProperty("error").GetProperty("category").GetString());
+        if (partialState is not null)
+            Assert.Equal("unknown", line.RootElement.GetProperty("partialState").GetProperty("outcome").GetString());
+    }
+
+    [Fact]
+    public async Task Batch_LostResponse_ReportsUnknownCompletionAndDoesNotDispatchAnotherWorkbook()
+    {
+        var factory = new RecordingClientFactory
+        {
+            Responder = _ => Task.FromException<ServiceResponse>(new IOException("Response connection was lost."))
+        };
+        var output = new StringWriter();
+        var runtime = CreateRuntime(factory, output, new StringWriter(),
+            """
+            {"command":"sheet.list","sessionId":"first-workbook"}
+            {"command":"sheet.list","sessionId":"second-workbook"}
+            """);
+
+        Assert.Equal(1, await Program.RunAsync(["--quiet", "batch"], runtime));
+        Assert.Equal("first-workbook", Assert.Single(factory.Requests).SessionId);
+        using var line = JsonDocument.Parse(Assert.Single(
+            output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)));
+        Assert.Equal("unknown", line.RootElement.GetProperty("partialState").GetProperty("outcome").GetString());
+        Assert.Equal(nameof(IOException), line.RootElement.GetProperty("error").GetProperty("exceptionType").GetString());
+        Assert.Contains("Response connection was lost.", line.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     [Fact]

@@ -93,17 +93,17 @@ public sealed class PackageOrderingTests
             var extension = Directory.CreateDirectory(Path.Combine(sandbox, "vscode-extension")).FullName;
             File.WriteAllText(Path.Combine(extension, "package.json"), """{"version":"1.2.3","scripts":{"vscode:prepublish":"npm run compile"}}""");
             File.WriteAllText(Path.Combine(sandbox, "CHANGELOG.md"), "fixture");
-            var skills = Path.Combine(sandbox, "prepared");
-            var skill = Directory.CreateDirectory(Path.Combine(skills, "excel-mcp-report-formatting")).FullName;
-            File.WriteAllText(Path.Combine(skill, "VERSION"), "1.2.3");
-            File.WriteAllText(Path.Combine(skill, "SKILL.md"), "fixture");
-            // The fork bundles the source-managed Japanese skill from skills\excel-mcp-ja.
-            var jaSkill = Directory.CreateDirectory(Path.Combine(sandbox, "skills", "excel-mcp-ja")).FullName;
-            File.WriteAllText(Path.Combine(jaSkill, "VERSION"), "1.2.3");
-            File.WriteAllText(Path.Combine(jaSkill, "SKILL.md"), "fixture");
+            // The fork bundles the vendored report-formatting skill and the
+            // source-managed Japanese skill, both copied from skills\.
+            var skills = Directory.CreateDirectory(Path.Combine(sandbox, "skills")).FullName;
+            foreach (var skillName in new[] { "excel-mcp-report-formatting", "excel-mcp-ja" })
+            {
+                var skill = Directory.CreateDirectory(Path.Combine(skills, skillName)).FullName;
+                File.WriteAllText(Path.Combine(skill, "SKILL.md"), "fixture");
+            }
             var output = Path.Combine(sandbox, "artifacts", "packages");
             var result = await RunPowerShellFileAsync(Path.Combine(scripts, "Build-ReleasePackages.ps1"),
-                ["-Components", "Extension", "-Version", "1.2.3", "-SkillsDirectory", skills, "-OutputDirectory", output]);
+                ["-Components", "Extension", "-Version", "1.2.3", "-OutputDirectory", output]);
             Assert.NotEqual(0, result.ExitCode);
             Assert.Contains("source-check-failed", result.CombinedOutput, StringComparison.Ordinal);
             var commands = File.ReadAllLines(calls);

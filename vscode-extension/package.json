@@ -2,7 +2,7 @@
   "name": "excel-mcp-ja",
   "displayName": "ExcelMcp 日本語対応フォーク",
   "description": "ExcelMcp の日本語対応フォーク。日本語テーブル名・シート名・ファイルパスをサポートし、日本語 skill を同梱します。Excel デスクトップ版が必要です。",
-  "version": "2.6.7",
+  "version": "2.6.11",
   "publisher": "matsuzaki-hk",
   "icon": "icon.png",
   "repository": {
@@ -95,5 +95,10 @@
     "oxlint": "^1.89.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "minimatch": "11.0.3"
+    }
   }
 }

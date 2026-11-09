@@ -68,12 +68,12 @@ public sealed class TypedPackageOperationsTests
                 {"version":"{{{version}}}","extensionKind":["ui"],"os":["win32"],"scripts":{"vscode:prepublish":"npm run compile"}}
                 """);
             File.WriteAllText(Path.Combine(sandbox, "CHANGELOG.md"), "Fixture changelog");
-            var skills = Path.Combine(sandbox, "prepared");
+            // Fork bundles the vendored report-formatting skill and the
+            // source-managed Japanese skill, both copied from skills\.
+            var skills = Path.Combine(sandbox, "skills");
             var skill = Directory.CreateDirectory(Path.Combine(skills, "excel-mcp-report-formatting")).FullName;
-            File.WriteAllText(Path.Combine(skill, "VERSION"), version);
             File.WriteAllText(Path.Combine(skill, "SKILL.md"), "Fixture skill");
-            // Fork bundles the source-managed Japanese skill from the repo.
-            var jaSkill = Directory.CreateDirectory(Path.Combine(sandbox, "skills", "excel-mcp-ja")).FullName;
+            var jaSkill = Directory.CreateDirectory(Path.Combine(skills, "excel-mcp-ja")).FullName;
             File.WriteAllText(Path.Combine(jaSkill, "SKILL.md"), "Fixture ja skill");
             foreach (var (architecture, machine) in new[] { ("x64", (ushort)0x8664) })
             {
@@ -113,7 +113,7 @@ public sealed class TypedPackageOperationsTests
                         } finally { $zip.Dispose() }
                     }
                 }
-                $stage = Initialize-ExtensionPackage $root '{{{version}}}' '{{{skills}}}' -SkipExtensionTests:${{{skipExtensionTests}}}
+                $stage = Initialize-ExtensionPackage $root '{{{version}}}' -SkipExtensionTests:${{{skipExtensionTests}}}
                 try {
                     Complete-ExtensionPackages $stage '{{{version}}}' '{{{output}}}' @{
                         Mcp = "$root\runtimes\x64\Sbroenne.ExcelMcp.McpServer.exe"

@@ -147,6 +147,14 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine("        (\"file\" or \"file_read\", _) => \"session.\" + action,");
         sb.AppendLine("        _ => tool + \".\" + action");
         sb.AppendLine("    };");
+        sb.AppendLine("    /// <summary>Source-derived MCP identity and session requirement for a Service command.</summary>");
+        sb.AppendLine("    public static (string Tool, string Action, bool RequiresSession)? GetMcpOperation(string command) => command.ToLowerInvariant() switch");
+        sb.AppendLine("    {");
+        foreach (var category in categories.Where(category => category.HasMcpToolAttribute))
+            foreach (var method in category.Methods)
+                sb.AppendLine($"        \"{category.Category}.{method.ActionName}\" => (\"{method.McpTool}\", \"{method.ActionName}\", {(!category.NoSession && method.HasBatchParameter).ToString().ToLowerInvariant()}),");
+        sb.AppendLine("        _ => null");
+        sb.AppendLine("    };");
         sb.AppendLine("}");
         return sb.ToString();
 
@@ -1791,6 +1799,12 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine();
+        sb.AppendLine("    private static readonly System.Text.Json.JsonSerializerOptions CliListJsonOptions = new(DispatchJsonOptions)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        // Accept Service camelCase while retaining the CLI's existing PascalCase list inputs.");
+        sb.AppendLine("        PropertyNameCaseInsensitive = true");
+        sb.AppendLine("    };");
+        sb.AppendLine();
         sb.AppendLine("    /// <summary>");
         sb.AppendLine("    /// Deserializes a simple list (e.g., List&lt;string&gt;) from a JSON array string.");
         sb.AppendLine("    /// Used for CLI parameters where LLMs pass JSON arrays instead of repeated flags.");
@@ -1798,7 +1812,7 @@ public class ServiceRegistryGenerator : IIncrementalGenerator
         sb.AppendLine("    internal static T? DeserializeList<T>(string? json) where T : class");
         sb.AppendLine("    {");
         sb.AppendLine("        if (string.IsNullOrWhiteSpace(json)) return null;");
-        sb.AppendLine("        return System.Text.Json.JsonSerializer.Deserialize<T>(json)");
+        sb.AppendLine("        return System.Text.Json.JsonSerializer.Deserialize<T>(json, CliListJsonOptions)");
         sb.AppendLine("            ?? throw new System.Text.Json.JsonException($\"Failed to deserialize list from JSON: {json}\");");
         sb.AppendLine("    }");
         sb.AppendLine();

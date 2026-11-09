@@ -11,6 +11,40 @@ This changelog covers all components:
 
 Entries are short and end-user-facing. Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses [Semantic Versioning](https://semver.org/). Starting with this file, entries are compiled automatically from [changesets](.changeset/README.md) at release time — see [Release Strategy](docs/RELEASE-STRATEGY.md#changelog-generation) for how to add one.
 
+## [2.6.11] - 2026-11-03
+
+### Patch Changes
+
+- [#1299](https://github.com/sbroenne/mcp-server-excel/pull/1299) [`4a6c58d`](https://github.com/sbroenne/mcp-server-excel/commit/4a6c58d838bbad74a26f4d9d4802ff46088a5092) Thanks [@sbroenne](https://github.com/sbroenne)! - Cancelling CLI startup or `service stop` now promptly stops waiting for another startup or stop request. Existing wait limits and protection against duplicate services are unchanged.
+
+## [2.6.10] - 2026-11-02
+
+### Minor Changes
+
+- [#1298](https://github.com/sbroenne/mcp-server-excel/pull/1298) [`4a4885b`](https://github.com/sbroenne/mcp-server-excel/commit/4a4885b7a32fcd13708c99d0f63307261de3c614) Thanks [@sbroenne](https://github.com/sbroenne)! - Create custom slicer styles by copying an existing style and choosing colours, borders, and bold text for each button state. List available styles and apply one to a PivotTable, Data Model, or Table slicer without changing its layout or filters, through either excelcli or MCP.
+
+## [2.6.9] - 2026-11-02
+
+### Minor Changes
+
+- [#1294](https://github.com/sbroenne/mcp-server-excel/pull/1294) [`33ab051`](https://github.com/sbroenne/mcp-server-excel/commit/33ab05197b55eb8c434df960afcb5a3c3220e19a) Thanks [@sbroenne](https://github.com/sbroenne)! - Add an MCP `batch` tool to run a list of commands in order using the same input format as CLI batch jobs. It continues after errors by default, supports stopping at the first failure, and returns numbered results. It does not roll back after failure; individual commands can save or discard edits.
+
+  MCP discovery shows the exact batch command and argument names, and file results use `workbook_session_id` consistently. Both entry points stop after timeouts or reported unknown completion, even when continuing after ordinary errors.
+
+### Patch Changes
+
+- [#1295](https://github.com/sbroenne/mcp-server-excel/pull/1295) [`34ce994`](https://github.com/sbroenne/mcp-server-excel/commit/34ce9942b94048a1cbfb978df3adbf9d5ad35c87) Thanks [@Antrakt92](https://github.com/Antrakt92)! - CLI range and table sorting now preserve column selections and descending order in camelCase JSON options. Existing PascalCase fields remain supported.
+
+- [#1279](https://github.com/sbroenne/mcp-server-excel/pull/1279) [`d8091d2`](https://github.com/sbroenne/mcp-server-excel/commit/d8091d29f90ffe5ac1b94a2837c413e4bf6a6036) Thanks [@Antrakt92](https://github.com/Antrakt92)! - Creating a named range now rejects invalid names without leaving a temporary name, and accepts English formula syntax with non-US regional settings. Equivalent spellings of existing names and unqualified names that resolve to an active-sheet local name are rejected before changing their reference, visibility, or other metadata. Names in different explicit scopes remain distinct. If assigning the formula fails after a new name is created, the error reports that name and its reference when readable, without automatically deleting it.
+
+- [#1285](https://github.com/sbroenne/mcp-server-excel/pull/1285) [`edb5ead`](https://github.com/sbroenne/mcp-server-excel/commit/edb5eada99b5e8243e601be3c790b677cf7caa68) Thanks [@Antrakt92](https://github.com/Antrakt92)! - Keep numbers that happen to match Excel error codes as numbers in range reads and formula traces. Formulas returning these numbers are also no longer reported as blocked spills; actual cell errors still include their error names and diagnostics.
+
+## [2.6.8] - 2026-11-02
+
+### Patch Changes
+
+- [#1287](https://github.com/sbroenne/mcp-server-excel/pull/1287) [`442b480`](https://github.com/sbroenne/mcp-server-excel/commit/442b480940e4b040768491ef3dc853a1d146c358) Thanks [@sbroenne](https://github.com/sbroenne)! - Restore `excelcli list-actions` so agents can discover exact workbook actions as compact JSON without connecting to Excel. Include all session actions and document action-specific help. Remove the CLI discovery and both report-formatting skills from product packages; keep native help, plugin launchers, MCP configuration, and the optional report-formatting reference.
+
 ## [2.6.7] - 2026-11-01
 
 ### Minor Changes

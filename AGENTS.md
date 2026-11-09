@@ -78,7 +78,7 @@ Paths are relative to the repository root.
 | `tests/**/*.cs` | [Testing strategy](tests/AGENTS.md) |
 | Workflows, project files, SDK/build configuration, PowerShell scripts, `.changeset/**` | [Build and release](scripts/AGENTS.md) |
 | README/index files, FEATURES, CHANGELOG, SECURITY, PRIVACY, docs, specs, skills, or website | [Documentation](docs/AGENTS.md) |
-| Skill sources, Core command metadata, generators, MCP, or Build-AgentSkills.ps1 | [Product agent guidance](skills/AGENTS.md) |
+| Core command metadata, generators, MCP, or native help | [Product agent guidance](docs/agents/product-guidance.md) |
 | MCP Server or MCP generator | [MCP boundaries](src/ExcelMcp.McpServer/AGENTS.md) |
 | `llm-tests/**` | [LLM evaluations](llm-tests/AGENTS.md) |
 | Repository/agent instructions, CONTEXT, or `docs/agents/**` | [Instruction maintenance](docs/AGENTS.md#instruction-maintenance) |
@@ -109,9 +109,9 @@ assumption that passing compilation proves runtime correctness.
 - Core `[ServiceCategory]` interfaces drive generated Service, CLI, and MCP
   routing. Change contracts/generators, not emitted code. Follow a changed
   contract through both entry points, tests, and shared guidance.
-- Keep agent-facing metadata, server instructions, skills, and recovery messages
+- Keep agent-facing metadata, server instructions, native help, and recovery messages
   consistent with implemented behavior. Follow the product agent guidance above;
-  do not edit generated or installed skill copies.
+  do not edit generated or installed product copies.
 - Preserve exact tool, action, parameter, and flag names in agent guidance.
   When MCP and CLI spellings differ, show both explicitly or use native examples;
   do not replace identifiers with vague descriptions.
@@ -191,6 +191,16 @@ Expand coverage when the change affects a shared contract or lifetime,
 focused tests reveal wider failures, or a specific risk is not covered.
 Run the full suite only when that wider scope is justified or explicitly requested.
 
+Changes that may depend on language or regional settings, including formula
+parsing, numbers, dates, formatting, and localized text, must be tested with
+`en-US` and at least one contrasting setting, normally `de-DE`. Where behavior
+depends on Excel or Windows settings, verify it on desktop Excel configured for
+those settings; changing only the test's `CultureInfo` is insufficient. Verify
+the relevant Excel/Windows settings rather than inferring them from the test's
+culture. Record the settings tested, results, and any missing coverage in the PR;
+an unavailable configuration is missing coverage, not a passing check. Do not
+change the host's language or regional settings without explicit user approval.
+
 Use `scripts\Get-ValidationPlan.ps1` to identify candidate checks, then review
 the selection against the actual change. If it selects unrelated features,
 run narrower existing test filters or runner groups and record the commands,
@@ -269,7 +279,9 @@ PRs record the root cause, affected contracts, and validation.
 - `vscode-extension/package.json` / `package-lock.json`: `name: excel-mcp-ja`、
   `publisher: matsuzaki-hk`、fork の `repository` / `bugs` / `homepage`。
   `chatSkills` は `excel-mcp-ja` (ソース管理の日本語 skill) に加えて
-  upstream の `excel-mcp-report-formatting` を同梱する。
+  `excel-mcp-report-formatting` を同梱する (v2.6.8 で upstream が skill
+  同梱を廃止したため、以降は `skills/excel-mcp-report-formatting` の
+  vendored コピーを使う)。
 - `vscode-extension/src/extension.ts`: provider ID は `excel-mcp-ja`、
   `userGuideUrl` は fork の GitHub Pages。
 - `src/ExcelMcp.McpServer/.mcp/server.json`: fork の `name`
@@ -285,12 +297,31 @@ PRs record the root cause, affected contracts, and validation.
   upstream では削除されているが、こちらでは維持する。
 - バージョン番号は upstream に合わせる (例: `2.2.1`)。`-ja.N` サフィックスは
   `.github/workflows/release-fork.yml` が付与するのでソースには書かない。
-- `scripts/Build-AgentSkills.ps1`: upstream 版をベースに `-Language ja` を
-  維持。ja では `skills/excel-mcp-ja` / `skills/excel-cli-ja` をソースから
-  `excel-skills-ja-v*.zip` にパッケージする。
-- `scripts/Build-ReleasePackages.ps1`: VSIX に `excel-mcp-ja` skill を追加同梱し
+- `skills/`: upstream は v2.6.8 (PR #1287) で skill 同梱と `skills/` ディレクトリを
+  廃止したが、フォークは配布物のため維持する。ソース管理の `excel-mcp-ja` /
+  `excel-cli-ja` / `README-ja.md` / `CLAUDE.md` / `.cursorrules` に加え、
+  upstream 削除済みの `excel-cli` / `excel-cli-report-formatting` /
+  `excel-mcp-report-formatting` を vendored コピーとして保持する
+  (更新されない frozen 版)。`skills/AGENTS.md` は upstream のリネーム先
+  `docs/agents/product-guidance.md` に従う。
+- `scripts/Build-AgentSkills.ps1`: upstream では削除済みだが、ja リリースの
+  `excel-skills-ja-v*.zip` 生成に必須なのでフォーク版を維持。
+  `-Language ja` で `skills/excel-mcp-ja` / `skills/excel-cli-ja` /
+  `skills/README-ja.md` をパッケージする。
+- `scripts/ExtensionPackaging.ps1`: VSIX に `excel-mcp-ja` と
+  `excel-mcp-report-formatting` を `skills\` から同梱し
   `excelmcp-ja-{version}.vsix` (x64 のみ) を生成するフォーク修正を維持。
+  upstream が追加した chatSkills 禁止チェックと `extension/skills/` の
+  dev-files 拒否はフォークでは適用しない (どちらも除去済み)。
+  upstream の `-SkillsDirectory` 配管は v2.6.8 で廃止されたため、
+  スキルは `skills\` から直接コピーする。
+- `scripts/Build-ReleasePackages.ps1`: x64 のみ VSIX と
+  `-McpRuntimeExecutable` 受け渡しのフォーク修正を維持
+  (スキル関連の `-SkillsDirectory` 配管は upstream に合わせ廃止済み)。
 - `mcpb/Build-McpBundle.ps1`: exe 同梱版を維持 (upstream の npx 型にしない)。
+- `docs/AGENT-SKILLS.md`: upstream 版のまま維持する。「skill を同梱しない」
+  という記述は upstream 製品向けであり、フォークの VSIX chatSkills と
+  `excel-skills-ja` zip とは一致しない点に注意 (フォーク仕様は本節が正)。
 
 ### upstream の設計変更で不要になったもの (v2.1+)
 
@@ -301,8 +332,8 @@ PRs record the root cause, affected contracts, and validation.
 
 ### カウントと監査
 
-- 公開サーフェスは upstream の `doc-counts.json` が正準 (v2.5.7 時点で
-  33 tools / 429 operations)。カウント検証は upstream v2.5.x で
+- 公開サーフェスは upstream の `doc-counts.json` が正準 (v2.6.11 時点で
+  33 feature areas / 437 operations)。カウント検証は upstream v2.5.x で
   `scripts/check-doc-counts.ps1` から `src/ExcelMcp.Analyzers` の
   EXL030 (DocumentationAnalyzer) へ移り、Release ビルド時にコンパイラ
   診断として強制される。カウント変更時は EXL030 の期待値どおりに

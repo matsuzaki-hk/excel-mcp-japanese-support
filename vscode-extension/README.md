@@ -55,7 +55,7 @@ exclusive access while automating it.
 
 ## Key Features
 
-Excel MCP Server (excel-mcp) provides **63 MCP tools across 33 feature areas, with 433 operations**:
+Excel MCP Server (excel-mcp) provides **64 MCP tools across 33 feature areas, with 437 operations**:
 
 - **Power Query & M code** - Import data, create and edit queries, refresh results, and choose load destinations.
 - **Power Pivot & DAX** - Build Data Models, create measures, and manage relationships.
@@ -65,19 +65,16 @@ Excel MCP Server (excel-mcp) provides **63 MCP tools across 33 feature areas, wi
 - **Python in Excel** - Write and run `=PY()` formulas using Excel's cloud Python engine.
 - **Watch Copilot work** - See Excel side by side with live status feedback.
 
-[See all 63 MCP tools and 433 operations](https://excelmcpserver.dev/features/).
+[See all 64 MCP tools and 437 operations](https://excelmcpserver.dev/features/).
 Tool workflows are tested with real AI assistants using
 [pytest-skill-engineering](https://github.com/sbroenne/pytest-skill-engineering).
 
-### Optional Report Formatting Included
+### Native tool guidance
 
-Copilot can load the bundled
-[`excel-mcp-report-formatting` skill](https://excelmcpserver.dev/skills/)
-for requested report presentation. Ordinary workbook work uses native MCP
-guidance rather than a broad automatically loaded skill.
-No separate skill installation or preview setting is required.
-Use ordinary natural-language requests; `/skills` opens VS Code's Configure
-Skills menu if you want to inspect available skills.
+Copilot discovers supported operations from the MCP tool descriptions and input
+schemas. No agent skills are bundled. Optional
+[report-formatting advice](https://excelmcpserver.dev/reference/report-formatting/)
+is available as documentation.
 
 ## Requirements
 

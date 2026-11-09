@@ -15,34 +15,43 @@
 [**Installation**](https://excelmcpserver.dev/installation/) ·
 [**Features**](https://excelmcpserver.dev/features/) ·
 [**Troubleshooting**](https://excelmcpserver.dev/troubleshooting/) ·
-[**1-minute demo**](https://youtu.be/B6eIQ5BIbNc)
+[**2-minute demo**](https://youtu.be/wbw3-hPcE2o)
 
 **Automate real Microsoft Excel with AI.** Excel MCP Server lets GitHub Copilot,
 Claude, ChatGPT, and other agents control Excel through natural-language
-requests using either MCP or a token-efficient CLI.
+requests—using either MCP or a token-efficient CLI.
 
 Unlike file-parser tools, ExcelMcp drives the **actual Excel application** through
 its official COM API. It can refresh Power Query, recalculate formulas, evaluate
 DAX, run VBA and Python `=PY()`, and preserve PivotTables, charts, macros, the
 Data Model, and workbook formatting.
 
-**31 tools with 325 operations** cover end-to-end Excel automation.
+**64 MCP tools across 33 feature areas, with 437 operations**, cover end-to-end Excel automation.
 
 > [!IMPORTANT]
 > Requires **Windows**, **Microsoft Excel 2016 or later**, and an interactive
 > desktop. It is not intended for Linux, macOS, or server-side batch processing.
 
-## Get Started
+## 🚀 Get Started
 
 | Use case | Recommended path |
-|---|---|---|
+|---|---|
 | **VS Code** | [Install the extension](https://marketplace.visualstudio.com/items?itemName=sbroenne.excel-mcp) |
 | **Claude Desktop or another MCP client** | [Install the MCP Server](https://excelmcpserver.dev/installation-mcp-server/) |
-| **Coding agents and scripts** | [Install the CLI](https://excelmcpserver.dev/installation-cli/) |
+| **Coding agents (fewer AI tokens)** | [Install the CLI](https://excelmcpserver.dev/installation-cli/) |
 | **Not sure which to choose?** | [Read the installation overview](https://excelmcpserver.dev/installation/) |
 
-Close open Excel workbooks before starting; ExcelMcp requires exclusive access
-while automating them.
+For **GitHub Copilot CLI**, install either plugin from the
+[Awesome Copilot Excel listings](https://github.com/github/awesome-copilot/blob/main/plugins/external.json):
+
+```powershell
+copilot plugin install excel-mcp@awesome-copilot
+# Or, for command-line Excel automation:
+copilot plugin install excel-cli@awesome-copilot
+```
+
+For a workbook already open in Excel, use discovery and attachment to keep
+working in that workbook. Excel determines whether newly opened files are read-only.
 
 ## What You Can Automate
 
@@ -55,7 +64,8 @@ while automating them.
 - **[Automation & advanced](https://excelmcpserver.dev/features/automation-advanced/):**
   VBA, Python in Excel, Goal Seek, scenarios, data tables, windows, and XML Maps.
 
-Explore the [complete reference for all 325 operations](https://excelmcpserver.dev/features/).
+Explore the [capabilities behind all 437 operations](https://excelmcpserver.dev/features/).
+Current command details come from CLI help or the MCP tool descriptions.
 
 ## See It in Action
 
@@ -75,32 +85,37 @@ the workbook normally.
 
 ## MCP Server or CLI?
 
-Both entry points expose the same Core commands and behavior.
+Both entry points expose the same Excel commands and behavior, so the choice is
+technical. Coding agents can use either one.
 
-| Interface | Best for | Why |
+| Interface | Works with | Why |
 |---|---|---|
-| **MCP Server** | Conversational assistants and exploratory work | Rich schemas, tool discovery, and persistent sessions |
-| **CLI (`excelcli`)** | Coding agents, automation, and scripts | One compact tool surface and substantially lower token usage |
+| **MCP Server** | Any MCP-compatible client | Tool discovery and persistent sessions |
+| **CLI (`excelcli`)** | Agents that can run terminal commands | Built-in help without loading MCP tool definitions, usually with fewer AI tokens |
 
-The MCP Server calls the ExcelMcp service in-process. The CLI uses a background
-daemon so workbook sessions persist across commands.
+Both entry points run Excel commands in separate worker processes, so a blocked
+Excel operation does not block their basic controls. The CLI also keeps a
+background service running so workbook sessions persist across commands.
 
 ```text
 AI assistant or script
-        ↳   MCP Server / CLI
-        ↳   ExcelMcp Core commands
-        ↳   Real Excel COM API
+        │
+   MCP Server / CLI
+        │
+ Shared Excel commands
+        │
+ Real Excel COM API
 ```
 
 [Read the architecture](docs/ARCHITECTURE.md) or browse the
 [MCP Server](https://excelmcpserver.dev/mcp-server/) and
 [CLI](https://excelmcpserver.dev/cli/) guides.
 
-## GitHub Star History
+## ⭐ GitHub Star History
 
 [![GitHub stars over time for ExcelMcp](https://excelmcpserver.dev/assets/images/star-history.svg)](https://github.com/sbroenne/mcp-server-excel/stargazers)
 
-## Additional Information
+## 📋 Additional Information
 
 [Documentation](https://excelmcpserver.dev/) ·
 [Changelog](https://excelmcpserver.dev/changelog/) ·
@@ -117,4 +132,4 @@ Other projects by the author:
 - [PowerPoint MCP Server](https://powerpointmcpserver.dev/) — AI-powered PowerPoint automation via MCP, the sister project to this one
 - [pytest-skill-engineering](https://github.com/sbroenne/pytest-skill-engineering) — LLM-powered testing framework for AI agents
 - [Windows MCP Server](https://windowsmcpserver.dev/) — AI-powered Windows automation via MCP
-- [OBS Studio MCP Server](https://github.com/sbroenne/mcp-server-obs) — AI-powered OBS Studio automation via MCP
+- [OBS Studio MCP Server](https://github.com/sbroenne/mcp-server-obs) — AI-powered OBS Studio automation

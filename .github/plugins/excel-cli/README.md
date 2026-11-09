@@ -28,7 +28,7 @@ ExcelMcp runs in an interactive desktop session.
 
 ## Features
 
-The CLI provides 33 feature command categories with 433 operations.
+The CLI provides 33 feature command categories with 437 operations.
 
 - **Workbooks and data:** create, open, save, and close workbooks; edit ranges, tables, and formulas.
 - **Analysis:** refresh Power Query, query the Data Model with DAX, and build PivotTables and slicers.
@@ -77,6 +77,9 @@ claude plugin marketplace add sbroenne/mcp-server-excel-plugins
 claude plugin install excel-cli@mcp-server-excel-plugins
 ```
 
-The plugin launches `excelcli` automatically; no separate installation or PATH
-change is needed. To use the CLI without this plugin, follow the
+The plugin includes `bin\start-cli.ps1`, an argument-safe launcher for
+`npx -y @sbroenne/excelcli@latest`. Use its full installed path; the plugin does
+not add `excelcli` to PATH or bundle an agent skill. Discover actions with
+`list-actions <command>`, then read `<command> <action> --help`.
+To use the CLI without this plugin, follow the
 [CLI installation guide](https://excelmcpserver.dev/installation-cli/).

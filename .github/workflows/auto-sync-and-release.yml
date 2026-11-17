@@ -1,7 +1,13 @@
 name: Auto Sync and Release
 
-# 本家との競合を評価し、競合がなければ自動的にリベースしてリリース
-# 競合がある場合はIssueを作成して通知
+# 本家 upstream の更新を日次検出し、決定論的に解決できる範囲は自動マージする。
+# - merged:        push → release-fork 起動 → Issue 自動クローズ
+# - needs_agent:   upstream-sync Issue を作成（Devin Automation がワーカーへ転送）
+# - already_synced: 何もしない
+#
+# 解決ルールは scripts/Resolve-UpstreamSync.ps1 + scripts/Apply-ForkIdentity.ps1。
+# .github/workflows/ の upstream 変更は GITHUB_TOKEN では push できないため
+# 常に needs_agent (Devin ワーカーが push) になる点に注意。
 
 on:
   schedule:
@@ -10,25 +16,31 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Dry run mode (check conflicts only, no actual changes)'
+        description: 'Dry run mode (detect and classify only, no push/issue)'
         type: boolean
         default: false
   repository_dispatch:
     types: [upstream-sync-completed]
 
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
 env:
   DOTNET_VERSION: '10.0.x'
 
 jobs:
-  # ステップ1: 本家との競合検出
-  check-conflicts:
-    name: Check for Conflicts with Upstream
+  sync:
+    name: Detect Upstream and Resolve Merge
     runs-on: ubuntu-latest
     outputs:
-      has_conflicts: ${{ steps.conflict_check.outputs.has_conflicts }}
-      conflict_files: ${{ steps.conflict_check.outputs.conflict_files }}
+      result: ${{ steps.sync_result.outputs.result }}
+      conflict_files: ${{ steps.sync_result.outputs.conflict_files }}
+      review_files: ${{ steps.sync_result.outputs.review_files }}
+      readme_changed: ${{ steps.sync_result.outputs.readme_changed }}
+      docs_to_review: ${{ steps.sync_result.outputs.docs_to_review }}
       upstream_version: ${{ steps.version.outputs.upstream_version }}
-      can_automerge: ${{ steps.conflict_check.outputs.can_automerge }}
       has_new_version: ${{ steps.check_new_version.outputs.has_new_version }}
     steps:
       - name: Checkout repository
@@ -50,69 +62,43 @@ jobs:
       - name: Get upstream version
         id: version
         run: |
-          # Try to fetch upstream tags (may fail on tag conflicts, continue anyway)
           echo "Fetching upstream tags..."
           git fetch upstream --tags 2>/dev/null || echo "Note: Some tags skipped due to conflicts (this is OK)"
-          
-          # Get latest release tag using git ls-remote (most reliable, doesn't need local tags)
-          echo "Querying upstream remote for latest tag..."
           LATEST_TAG=$(git ls-remote --tags upstream 'v*' 2>/dev/null | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+$' | sort -V | tail -1)
           echo "Latest upstream tag (from ls-remote): $LATEST_TAG"
-          
-          # Fallback: try local tags if ls-remote failed
           if [ -z "$LATEST_TAG" ]; then
             echo "ls-remote failed, trying local tags..."
             LATEST_TAG=$(git tag --list 'v*' 2>/dev/null | grep '^v[0-9]\+\.[0-9]\+\.[0-9]\+$' | sort -V | tail -1)
             echo "Latest local tag: $LATEST_TAG"
           fi
-          
-          # Remove 'v' prefix if present
           VERSION="${LATEST_TAG#v}"
-          
-          # Additional fallback to Directory.Build.props
           if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
-            echo "Failed to get version from tags, trying Directory.Build.props..."
             BUILD_PROPS=$(git show upstream/main:Directory.Build.props 2>/dev/null)
             if [ -n "$BUILD_PROPS" ]; then
               VERSION=$(echo "$BUILD_PROPS" | grep '<Version>' | head -1 | sed 's/.*<Version>//' | sed 's/<\/Version>.*//' | tr -d '[:space:]')
               echo "Version from Directory.Build.props: $VERSION"
             fi
           fi
-          
           if [ -z "$VERSION" ] || [ "$VERSION" = "" ]; then
             VERSION="unknown"
             echo "WARNING: Could not determine version, using 'unknown'"
           fi
-          
           echo "upstream_version=$VERSION" >> $GITHUB_OUTPUT
-          echo "================================"
-          echo "FINAL VERSION: $VERSION"
-          echo "================================"
 
       - name: Check if upstream has new version
         id: check_new_version
         run: |
-          # Get the latest fork tag
-          echo "Checking fork tags..."
           git fetch origin --tags 2>/dev/null || echo "Note: Some tags skipped due to conflicts (this is OK)"
           LATEST_FORK_TAG=$(git ls-remote --tags origin 'v*' 2>/dev/null | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+-ja\.[0-9]\+$' | sort -V | tail -1)
           echo "Latest fork tag: $LATEST_FORK_TAG"
-          
-          # Extract base version from fork tag (e.g., v1.8.68-ja.1 -> 1.8.68)
+          FORK_BASE_VERSION=""
           if [ -n "$LATEST_FORK_TAG" ]; then
             FORK_BASE_VERSION=$(echo "$LATEST_FORK_TAG" | sed 's/v\([0-9]\+\.[0-9]\+\.[0-9]\+\)-ja\.[0-9]\+/\1/')
             echo "Fork base version: $FORK_BASE_VERSION"
-            echo "fork_base_version=$FORK_BASE_VERSION" >> $GITHUB_OUTPUT
           else
             echo "No fork tags found, will build"
-            echo "fork_base_version=" >> $GITHUB_OUTPUT
           fi
-          
-          # Compare versions
           UPSTREAM_VERSION="${{ steps.version.outputs.upstream_version }}"
-          echo "Upstream version: $UPSTREAM_VERSION"
-          echo "Fork base version: $FORK_BASE_VERSION"
-          
           if [ "$FORK_BASE_VERSION" = "$UPSTREAM_VERSION" ]; then
             echo "Upstream version $UPSTREAM_VERSION already built in fork"
             echo "has_new_version=false" >> $GITHUB_OUTPUT
@@ -121,225 +107,146 @@ jobs:
             echo "has_new_version=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check for merge conflicts (dry-run)
-        id: conflict_check
+      - name: Resolve upstream merge
+        id: sync_result
+        if: steps.check_new_version.outputs.has_new_version == 'true'
+        shell: pwsh
+        run: pwsh -File scripts/Resolve-UpstreamSync.ps1 -Ref upstream/main
+
+      - name: Mark already synced
+        id: already
+        if: steps.check_new_version.outputs.has_new_version != 'true'
         run: |
-          # 既に同期済みのバージョンでは、fork固有のREADMEやworkflow差分を
-          # 本家との新規競合として毎日再通知しない。
-          if [ "${{ steps.check_new_version.outputs.has_new_version }}" != "true" ]; then
-            echo "Upstream version is already synchronized; skipping conflict check."
-            echo "has_conflicts=false" >> $GITHUB_OUTPUT
-            echo "can_automerge=false" >> $GITHUB_OUTPUT
-            echo "conflict_files=" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          echo "result=already_synced" >> $GITHUB_OUTPUT
+          echo "conflict_files=" >> $GITHUB_OUTPUT
+          echo "review_files=" >> $GITHUB_OUTPUT
+          echo "readme_changed=false" >> $GITHUB_OUTPUT
+          echo "docs_to_review=" >> $GITHUB_OUTPUT
 
-          echo "Checking for conflicts between ja-localization and upstream/main..."
-          
-          # upstream/mainを一時ブランチにマージして競合を確認
-          git checkout -b temp-merge-check
-          
-          if git merge upstream/main --no-edit --no-commit; then
-            echo "✅ No conflicts detected - auto-merge is possible"
-            echo "has_conflicts=false" >> $GITHUB_OUTPUT
-            echo "can_automerge=true" >> $GITHUB_OUTPUT
-            echo "conflict_files=" >> $GITHUB_OUTPUT
-            git merge --abort || true
-          else
-            echo "⚠️ Conflicts detected - manual resolution required"
-            echo "has_conflicts=true" >> $GITHUB_OUTPUT
-            echo "can_automerge=false" >> $GITHUB_OUTPUT
-            
-            # 競合ファイルを列挙
-            CONFLICT_FILES=$(git diff --name-only --diff-filter=U | tr '\n' ', ' | sed 's/, $//')
-            echo "conflict_files=$CONFLICT_FILES" >> $GITHUB_OUTPUT
-            echo "Conflict files: $CONFLICT_FILES"
-            
-            git merge --abort || true
-          fi
-          
-          git checkout ja-localization
-          git branch -D temp-merge-check || true
+      - name: Record upstream version and push
+        if: steps.sync_result.outputs.result == 'merged' && github.event.inputs.dry_run != 'true'
+        run: |
+          echo "${{ steps.version.outputs.upstream_version }}" > .upstream-version
+          git add .upstream-version
+          git commit -m "chore: record upstream version ${{ steps.version.outputs.upstream_version }}" || echo "No changes to commit"
+          git push origin ja-localization
+          echo "✅ Pushed merged ja-localization"
 
-  # ステップ2: 競合がある場合はIssue作成
-  create-issue-on-conflict:
-    name: Create Issue for Conflicts
-    needs: check-conflicts
-    if: needs.check-conflicts.outputs.has_conflicts == 'true'
+  # needs_agent または日本語資産レビューが必要な場合は Issue を作成。
+  # sync ジョブが失敗しても通知を必ず試みる (always())。
+  create-issue:
+    name: Create upstream-sync Issue
+    needs: sync
+    if: >
+      always() && github.event.inputs.dry_run != 'true' &&
+      (needs.sync.result == 'failure' ||
+       needs.sync.outputs.result == 'needs_agent' ||
+       (needs.sync.outputs.result == 'merged' && needs.sync.outputs.docs_to_review != ''))
     runs-on: ubuntu-latest
     steps:
-      - name: Create issue
+      - name: Create or update issue
         uses: actions/github-script@v7
         with:
           script: |
-            const conflictFiles = '${{ needs.check-conflicts.outputs.conflict_files }}';
-            const upstreamVersion = '${{ needs.check-conflicts.outputs.upstream_version }}';
+            const result = '${{ needs.sync.outputs.result }}';
+            const jobFailed = '${{ needs.sync.result }}' === 'failure';
+            const conflictFiles = '${{ needs.sync.outputs.conflict_files }}';
+            const reviewFiles = '${{ needs.sync.outputs.review_files }}';
+            const docsToReview = '${{ needs.sync.outputs.docs_to_review }}';
+            const upstreamVersion = '${{ needs.sync.outputs.upstream_version }}';
+            const readmeChanged = '${{ needs.sync.outputs.readme_changed }}';
 
-            // 重複Issue防止: 既存のオープンIssue（conflict + upstream-sync ラベル）を検索
-            // 同一競合が未解決のまま連日実行されるのを防ぐ
-            const existingIssues = await github.rest.issues.listForRepo({
+            const list = s => s ? s.split(',').map(f => `- \`${f.trim()}\``).join('\n') : '（なし）';
+            const sections = [];
+            if (jobFailed) {
+              sections.push('## ⚠️ sync ジョブが失敗しました\n\nActions ログを確認し、原因に応じてワーカーへ引き継いでください。');
+            }
+            if (conflictFiles) {
+              sections.push(`### 未解決の競合 / 要エージェント作業\n${list(conflictFiles)}\n\nワーカー手順:\n1. \`git fetch upstream && git merge upstream/main --no-commit --no-ff\` の代わりに \`pwsh scripts/Resolve-UpstreamSync.ps1 -Ref upstream/main -KeepMerge\` を実行するとクラス A/B が自動解決されます。\n2. 残った競合を AGENTS.md 「日本語対応フォーク固有ルール」に従って解決。\n3. \`git add -A && git commit\` 後、検証して \`ja-localization\` へ push。\n\n※ \`.github/workflows/\` の変更は GITHUB_TOKEN で push 不可のため常にワーカー対応です。`);
+            }
+            if (docsToReview) {
+              sections.push(`### upstream 更新のあった日本語資産（翻訳・差分確認が必要）\n${list(docsToReview)}\n\nREADME.md 変更: ${readmeChanged}\n基準スナップショット: \`docs/UPSTREAM-README-EN.md\`（merge 時に更新済み）と前回コミット版の差分が翻訳対象です。`);
+            }
+            if (reviewFiles) {
+              sections.push(`### 自動解決済み（確認用）\n${list(reviewFiles)}`);
+            }
+            sections.push('cc: @matsuzaki-hk');
+            const body = `## Upstream sync (v${upstreamVersion})\n\n**検出時刻:** ${new Date().toISOString()}\n**結果:** ${jobFailed ? 'sync job failed' : result}\n\n` + sections.join('\n\n');
+
+            // 重複Issue防止: 既存オープン upstream-sync Issue に追記する
+            const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
-              labels: 'conflict,upstream-sync',
+              labels: 'upstream-sync',
               per_page: 100
             });
-            if (existingIssues.data.length > 0) {
-              const existing = existingIssues.data[0];
-              console.log(`⚠️ 既存の未解決競合Issue #${existing.number} が存在するため、新規Issue作成をスキップします`);
-              console.log(`既存Issue: ${existing.html_url}`);
-              // 既存Issueに最新の検出状況をコメントで追記（連日重複作成せず1件に集約）
+            if (existing.data.length > 0) {
+              const issue = existing.data[0];
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: existing.number,
-                body: `### 再検出 (${new Date().toISOString()})\n本家バージョン: ${upstreamVersion}\n競合ファイル: ${conflictFiles || '（検出中）'}\n\n既存Issueが未解決のため新規作成をスキップしました。競合解決後にこのIssueはクローズしてください。`
+                issue_number: issue.number,
+                body: `### 再検出 (${new Date().toISOString()})\n${body}`
               });
+              console.log(`Updated existing issue #${issue.number}`);
               return;
             }
 
-            const title = `⚠️ Upstream sync conflict detected (v${upstreamVersion})`;
-            const body = `## 本家更新との競合検出
-            
-            **検出時刻:** ${new Date().toISOString()}
-            **本家バージョン:** ${upstreamVersion}
-            
-            ### 競合ファイル
-            ${conflictFiles ? conflictFiles.split(', ').map(f => `- \`${f}\``).join('\n') : '（検出中）'}
-            
-            ### 対応手順
-            1. ローカルで競合を解決
-               \`\`\`bash
-               git checkout origin/main
-               git fetch upstream
-               git reset --hard upstream/main
-               git checkout ja-localization
-               git rebase origin/main
-               # 競合解決
-               git rebase --continue
-               git push origin ja-localization --force-with-lease
-               \`\`\`
-            2. GitHub Actionsで「Release Fork (GitHub Only)」を手動実行
-            
-            ### 自動化停止中
-            競合が解決されるまで自動同期・リリースは一時停止されます。
-            
-            cc: @matsuzaki-hk`;
-            
-            github.rest.issues.create({
+            const labels = ['upstream-sync'];
+            if (jobFailed || result === 'needs_agent') labels.push('conflict', 'help wanted');
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: title,
+              title: `⚠️ Upstream sync ${jobFailed ? 'failed' : 'needs attention'} (v${upstreamVersion})`,
               body: body,
-              labels: ['conflict', 'upstream-sync', 'help wanted']
+              labels: labels
             });
+            console.log('Created upstream-sync issue');
 
-  # ステップ3: 競合がない場合は自動マージ
-  auto-merge:
-    name: Auto Merge ja-localization
-    needs: check-conflicts
-    if: needs.check-conflicts.outputs.has_conflicts == 'false' && needs.check-conflicts.outputs.has_new_version == 'true' && github.event.inputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ja-localization
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Merge upstream/main into ja-localization
-        run: |
-          git remote add upstream https://github.com/sbroenne/mcp-server-excel.git
-          git fetch upstream main
-
-          # fork側のworkflowファイルを退避（GITHUB_TOKENではworkflowファイルを
-          # pushできないため、マージ後に元に戻す）
-          mkdir -p /tmp/fork-workflows
-          cp -a .github/workflows/. /tmp/fork-workflows/
-
-          # ja-localization に upstream/main をマージ（チェック済みの競合を解決済み）
-          git merge upstream/main --no-ff -m "merge: integrate upstream v${{ needs.check-conflicts.outputs.upstream_version }} and preserve Japanese support"
-
-          # workflowファイルをマージ前の状態に戻す
-          cp -a /tmp/fork-workflows/. .github/workflows/
-          git add .github/workflows/
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: preserve fork workflow files during upstream merge"
-          fi
-
-          git push origin ja-localization
-
-          echo "✅ Merge completed successfully"
-
-      - name: Save upstream version
-        run: |
-          echo "${{ needs.check-conflicts.outputs.upstream_version }}" > .upstream-version
-          git add .upstream-version
-          git commit -m "chore: record upstream version ${{ needs.check-conflicts.outputs.upstream_version }}" || echo "No changes to commit"
-          git push origin ja-localization || echo "Nothing to push"
-
-  # ステップ4: リリースワークフローをトリガー
   trigger-release:
     name: Trigger Release Build
-    needs: [check-conflicts, auto-merge]
-    if: needs.check-conflicts.outputs.has_conflicts == 'false' && needs.check-conflicts.outputs.has_new_version == 'true' && github.event.inputs.dry_run != 'true'
+    needs: sync
+    if: needs.sync.outputs.result == 'merged' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Release Fork workflow
         uses: actions/github-script@v7
         with:
           script: |
-            const upstreamVersion = '${{ needs.check-conflicts.outputs.upstream_version }}';
-            
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'release-fork.yml',
               ref: 'ja-localization',
-              inputs: {
-                version_bump: 'patch'
-              }
+              inputs: { version_bump: 'patch' }
             });
-            
-            console.log(`✅ Release triggered for upstream version: ${upstreamVersion}`);
+            console.log(`✅ Release triggered for upstream version: ${{ needs.sync.outputs.upstream_version }}`);
 
-  # ステップ5: 成功通知（オプション）
   notify-success:
-    name: Notify Success
-    needs: [check-conflicts, auto-merge, trigger-release]
-    if: needs.check-conflicts.outputs.has_conflicts == 'false' && github.event.inputs.dry_run != 'true'
+    name: Close Resolved Sync Issues
+    needs: [sync, trigger-release]
+    if: needs.sync.outputs.result == 'merged' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Comment on any open sync issues
+      - name: Comment on and close open sync issues
         uses: actions/github-script@v7
         with:
           script: |
-            const upstreamVersion = '${{ needs.check-conflicts.outputs.upstream_version }}';
-            
-            // Find and close open conflict issues
+            const upstreamVersion = '${{ needs.sync.outputs.upstream_version }}';
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
-              labels: 'conflict,upstream-sync'
+              labels: 'upstream-sync'
             });
-            
             for (const issue of issues.data) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issue.number,
-                body: `✅ **Resolved!** Auto-sync completed successfully for v${upstreamVersion}.\n\nRelease build triggered automatically.`
+                body: `✅ **Resolved!** Auto-sync completed for v${upstreamVersion}. Release build triggered.`
               });
-              
               await github.rest.issues.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,

@@ -1,0 +1,123 @@
+name: Post-Merge Release Chain
+
+# ja-localization への push（主に Devin ワーカーによる upstream 同期完了）を
+# トリガーに、フォークのリリースが upstream に追い付いていなければ
+# CI Gate と release-fork を起動し、オープン中の upstream-sync Issue を
+# クローズする。
+#
+# auto-sync-and-release.yml の merged 経路では GITHUB_TOKEN で push するため
+# この workflow は発火しない（GitHub Apps トークンの push は on:push を
+# 起動しない仕様）。二重リリースにはならない。
+
+on:
+  push:
+    branches: [ja-localization]
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: post-merge-release
+  cancel-in-progress: false
+
+jobs:
+  check-and-trigger:
+    name: Check versions and trigger release
+    runs-on: ubuntu-latest
+    outputs:
+      release_needed: ${{ steps.check.outputs.release_needed }}
+      upstream_version: ${{ steps.check.outputs.upstream_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ja-localization
+
+      - name: Compare upstream vs fork release versions
+        id: check
+        run: |
+          git remote add upstream https://github.com/sbroenne/mcp-server-excel.git 2>/dev/null || true
+          git fetch upstream --tags 2>/dev/null || true
+          git fetch origin --tags 2>/dev/null || true
+
+          LATEST_UPSTREAM=$(git ls-remote --tags upstream 'v*' 2>/dev/null | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+$' | sort -V | tail -1)
+          LATEST_FORK=$(git ls-remote --tags origin 'v*' 2>/dev/null | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+-ja\.[0-9]\+$' | sort -V | tail -1)
+          FORK_BASE=""
+          if [ -n "$LATEST_FORK" ]; then
+            FORK_BASE=$(echo "$LATEST_FORK" | sed -E 's/v([0-9]+\.[0-9]+\.[0-9]+)-ja\.[0-9]+/\1/')
+          fi
+          echo "Upstream latest: ${LATEST_UPSTREAM:-none} / Fork base: ${FORK_BASE:-none}"
+
+          UPSTREAM_VERSION="${LATEST_UPSTREAM#v}"
+          echo "upstream_version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
+          if [ -n "$LATEST_UPSTREAM" ] && [ "${LATEST_UPSTREAM#v}" != "$FORK_BASE" ]; then
+            echo "release_needed=true" >> $GITHUB_OUTPUT
+          else
+            echo "release_needed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger CI Gate
+        if: steps.check.outputs.release_needed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'ci.yml',
+                ref: 'ja-localization'
+              });
+              console.log('CI Gate dispatched');
+            } catch (e) {
+              console.log(`CI Gate dispatch failed (non-fatal): ${e.message}`);
+            }
+
+      - name: Trigger Release Fork
+        if: steps.check.outputs.release_needed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release-fork.yml',
+              ref: 'ja-localization',
+              inputs: { version_bump: 'patch' }
+            });
+            console.log(`release-fork dispatched for upstream v${{ steps.check.outputs.upstream_version }}`);
+
+  close-sync-issues:
+    name: Close upstream-sync issues
+    needs: check-and-trigger
+    if: needs.check-and-trigger.outputs.release_needed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment on and close open sync issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const upstreamVersion = '${{ needs.check-and-trigger.outputs.upstream_version }}';
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'upstream-sync'
+            });
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `✅ ja-localization への push を検知しました。CI Gate と release-fork (v${upstreamVersion}-ja 系) を起動しました。`
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }

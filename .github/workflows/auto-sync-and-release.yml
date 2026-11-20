@@ -27,9 +27,6 @@ permissions:
   issues: write
   actions: write
 
-env:
-  DOTNET_VERSION: '10.0.x'
-
 jobs:
   sync:
     name: Detect Upstream and Resolve Merge
